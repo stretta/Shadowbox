@@ -1,4 +1,4 @@
-Shadowbox
+**Shadowbox**
 
 Hardware UI for Cycling ’74 RNBO Runner on Raspberry Pi.
 
@@ -28,7 +28,7 @@ Features
 
 ⸻
 
-Hardware
+**Hardware**
 
 Shadowbox currently targets a Raspberry Pi 4 / 5.
 
@@ -58,7 +58,7 @@ docs/wiring.md
 
 ⸻
 
-Software Requirements
+**Software Requirements**
 
 Recommended OS:
 
@@ -81,7 +81,7 @@ sudo systemctl start pigpiod
 
 ⸻
 
-Installation
+**Installation**
 
 Clone the repository
 
@@ -103,7 +103,7 @@ python shadowbox.py
 
 ⸻
 
-Running at Boot (systemd)
+**Running at Boot (systemd)**
 
 Shadowbox can run automatically when the Raspberry Pi boots.
 
@@ -120,7 +120,7 @@ systemctl status shadowbox
 
 ⸻
 
-Usage
+**Usage**
 
 Encoder Controls
 
@@ -141,7 +141,7 @@ SYSTEM
 
 ⸻
 
-Patch Browser
+**Patch Browser**
 
 Shadowbox automatically discovers patches exported to RNBO Runner.
 
@@ -153,7 +153,7 @@ to RNBO Runner.
 
 ⸻
 
-Parameter Editing
+**Parameter Editing**
 
 Parameters are discovered through OSCQuery and displayed on the OLED.
 
@@ -165,7 +165,7 @@ Example parameter path
 
 ⸻
 
-System Menu
+**System Menu**
 
 STATUS
 AUDIO
@@ -181,7 +181,7 @@ Capabilities include:
 
 ⸻
 
-Architecture
+**Architecture**
 
 Shadowbox is built with a modular architecture separating UI, rendering, hardware input, and RNBO communication.
 
@@ -219,7 +219,7 @@ docs/architecture.md
 
 ⸻
 
-Tools
+**Tools**
 
 Utility programs are located in the tools directory.
 
@@ -231,7 +231,7 @@ This program can be used to verify encoder wiring and behavior.
 
 ⸻
 
-Development Workflow
+**Development Workflow**
 
 Typical workflow:
 	1.	Export RNBO patch from Max
@@ -244,7 +244,7 @@ No browser interaction is required.
 
 ⸻
 
-Repository Structure
+**Repository Structure**
 
 shadowbox/
 
@@ -271,7 +271,7 @@ encoder_test.py
 
 ⸻
 
-Roadmap
+**Roadmap**
 
 Planned improvements:
 	•	improved encoder acceleration
