@@ -1,81 +1,94 @@
 Shadowbox
 
-Shadowbox is a hardware user interface for Cycling ’74 RNBO Runner running on a Raspberry Pi.
+Hardware UI for Cycling ’74 RNBO Runner on Raspberry Pi.
 
-It provides a patch browser and parameter editor using a rotary encoder and OLED display, allowing patches exported from Max/RNBO to be loaded and edited directly from hardware without needing the RNBO Runner web interface.
+Shadowbox provides a patch browser and parameter editor using a rotary encoder and OLED display, allowing RNBO patches exported from Max to be loaded and edited directly from hardware without using the RNBO Runner web interface.
 
-Shadowbox communicates with RNBO Runner using OSC and OSCQuery and automatically discovers available patches, parameters, and system status.
+Shadowbox communicates with RNBO Runner via OSC and OSCQuery, automatically discovering:
+	•	available patches
+	•	parameters
+	•	system status
 
 This enables a standalone embedded workflow for RNBO-based instruments.
+
+⸻
 
 Features
 	•	Patch browsing and loading
 	•	Parameter editing via rotary encoder
-	•	OLED UI (SSD1306 I2C)
-	•	Automatic patch discovery using OSCQuery
+	•	OLED UI (SSD1306 I²C)
+	•	Automatic patch discovery via OSCQuery
 	•	RNBO parameter introspection
 	•	Audio interface selection
 	•	System status display (CPU / xruns)
 	•	Persistent state across reboots
 	•	Startup splash screen
 	•	Activity indicator during refresh/load
-	•	Systemd service for automatic boot
+	•	Runs automatically via systemd service
+
+⸻
 
 Hardware
 
-Shadowbox currently targets a Raspberry Pi 4 or Raspberry Pi 5.
+Shadowbox currently targets a Raspberry Pi 4 / 5.
 
 Typical components:
 
-Rotary encoder
+Rotary Encoder
 Example: EC11 detented encoder
 
-OLED display
-Example: SSD1306 128x32 I2C
+OLED Display
+Example: SSD1306 128×32 I²C
 
-Connection
-I2C + GPIO
+Interface
+GPIO + I²C
 
-Typical wiring
+Typical Wiring
 
-Encoder A   -> GPIO17
-Encoder B   -> GPIO27
-Encoder SW  -> GPIO22
+Encoder A → GPIO17
+Encoder B → GPIO27
+Encoder Switch → GPIO22
 
-OLED SDA    -> GPIO2
-OLED SCL    -> GPIO3
+OLED SDA → GPIO2
+OLED SCL → GPIO3
 
-See documentation in:
+More details are available in:
 
 docs/wiring.md
 
+⸻
+
 Software Requirements
 
-Raspberry Pi OS (Bookworm recommended)
+Recommended OS:
 
-Required Python libraries
+Raspberry Pi OS Bookworm
+
+Required Python libraries:
 
 pigpio
 python-osc
 smbus2
 
-Install system dependencies
+Install system dependencies:
 
 sudo apt install pigpio python3-pigpio python3-smbus python3-pip
 
-Start the pigpio daemon
+Enable the pigpio daemon:
 
 sudo systemctl enable pigpiod
 sudo systemctl start pigpiod
+
+⸻
 
 Installation
 
 Clone the repository
 
-git clone https://github.com/yourname/shadowbox.git
+git clone https://github.com/YOURNAME/shadowbox.git
 cd shadowbox
 
-Create a Python virtual environment
+Create a virtual environment
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -87,6 +100,8 @@ pip install -r requirements.txt
 Run Shadowbox
 
 python shadowbox.py
+
+⸻
 
 Running at Boot (systemd)
 
@@ -102,6 +117,8 @@ sudo systemctl start shadowbox
 Check service status
 
 systemctl status shadowbox
+
+⸻
 
 Usage
 
@@ -122,6 +139,8 @@ PATCH
 PARAM
 SYSTEM
 
+⸻
+
 Patch Browser
 
 Shadowbox automatically discovers patches exported to RNBO Runner.
@@ -132,15 +151,19 @@ Selecting a patch sends the OSC message
 
 to RNBO Runner.
 
+⸻
+
 Parameter Editing
 
 Parameters are discovered through OSCQuery and displayed on the OLED.
 
-Editing a parameter sends OSC messages directly to the parameter path.
+Editing a parameter sends OSC messages directly to the RNBO parameter path.
 
 Example parameter path
 
 /rnbo/inst/0/params/root
+
+⸻
 
 System Menu
 
@@ -150,15 +173,17 @@ NETWORK
 STARTUP
 MAINT
 
-Capabilities include
+Capabilities include:
 	•	audio interface selection
 	•	JACK restart
 	•	startup patch control
-	•	CPU/xrun monitoring
+	•	CPU / xrun monitoring
+
+⸻
 
 Architecture
 
-Shadowbox is organized into modules with clear responsibilities.
+Shadowbox is built with a modular architecture separating UI, rendering, hardware input, and RNBO communication.
 
 shadowbox.py
 Main orchestration loop
@@ -167,10 +192,10 @@ ui.py
 UI state machine
 
 renderer.py
-OLED layout and rendering logic
+OLED layout and drawing logic
 
 display.py
-SSD1306 OLED display driver
+SSD1306 display driver
 
 encoder.py
 Rotary encoder hardware input
@@ -178,46 +203,46 @@ Rotary encoder hardware input
 rnbo.py
 OSC and OSCQuery communication with RNBO Runner
 
-Dependency structure
+Dependency flow:
 
-shadowbox.py controls the system
+shadowbox → ui → renderer / rnbo / encoder / display
 
-ui.py manages state
+Design goals:
+	•	deterministic UI behavior
+	•	minimal coupling
+	•	clean hardware abstraction
+	•	separation between UI logic and rendering
 
-renderer.py draws the UI
-
-encoder.py provides input
-
-display.py handles hardware drawing
-
-rnbo.py handles network communication
-
-More details are available in
+More details are available in:
 
 docs/architecture.md
 
+⸻
+
 Tools
 
-Utility programs are located in
+Utility programs are located in the tools directory.
 
-tools/
-
-Example
+Example:
 
 encoder_test.py
 
-Used to verify encoder wiring and behavior.
+This program can be used to verify encoder wiring and behavior.
+
+⸻
 
 Development Workflow
 
-Typical development workflow
+Typical workflow:
 	1.	Export RNBO patch from Max
-	2.	Copy export to RNBO Runner directory
-	3.	Shadowbox automatically discovers patch
-	4.	Load patch from the hardware interface
+	2.	Copy export to the RNBO Runner directory
+	3.	Shadowbox automatically discovers the patch
+	4.	Load the patch from the hardware interface
 	5.	Edit parameters directly from the encoder
 
-No browser interaction required.
+No browser interaction is required.
+
+⸻
 
 Repository Structure
 
@@ -244,9 +269,11 @@ shadowbox.service
 tools/
 encoder_test.py
 
+⸻
+
 Roadmap
 
-Possible future improvements
+Planned improvements:
 	•	improved encoder acceleration
 	•	parameter scaling hints
 	•	richer parameter display
@@ -255,9 +282,13 @@ Possible future improvements
 	•	patch tagging and grouping
 	•	deeper RNBO system integration
 
+⸻
+
 License
 
 MIT License
+
+⸻
 
 Acknowledgments
 
