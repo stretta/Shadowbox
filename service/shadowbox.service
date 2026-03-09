@@ -1,0 +1,12 @@
+[Unit]
+Description=Shadowbox RNBO Hardware UI
+After=network.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/shadowbox
+ExecStart=/home/pi/shadowbox/.venv/bin/python shadowbox.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
