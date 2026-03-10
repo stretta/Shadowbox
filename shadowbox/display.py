@@ -1,11 +1,10 @@
+#!/usr/bin/env python3
 """
 Shadowbox
 Hardware UI for RNBO Runner
 
 https://github.com/stretta/shadowbox
 """
-
-#!/usr/bin/env python3
 
 from __future__ import annotations
 
@@ -61,10 +60,7 @@ class SSD1306Display:
         self.height = 32
         self.pages = self.height // 8
         self.buf = bytearray(self.width * self.pages)
-
-    # --------------------------------------------------------
-    # low-level I2C
-    # --------------------------------------------------------
+        self.is_sleeping = False
 
     def _cmd(self, *cmds: int) -> None:
         data = list(cmds)
@@ -74,10 +70,6 @@ class SSD1306Display:
     def _data(self, data_bytes: bytes | bytearray) -> None:
         for i in range(0, len(data_bytes), 32):
             self.bus.write_i2c_block_data(self.addr, 0x40, list(data_bytes[i:i + 32]))
-
-    # --------------------------------------------------------
-    # display lifecycle
-    # --------------------------------------------------------
 
     def init(self) -> None:
         self._cmd(
@@ -100,6 +92,7 @@ class SSD1306Display:
             0x8D, 0x14,       # charge pump on
             0xAF,             # display on
         )
+        self.is_sleeping = False
         self.clear()
         self.show()
 
@@ -107,12 +100,25 @@ class SSD1306Display:
         self.buf[:] = b"\x00" * len(self.buf)
 
     def show(self) -> None:
+        if self.is_sleeping:
+            return
         self._cmd(0x21, 0, self.width - 1, 0x22, 0, self.pages - 1)
         self._data(self.buf)
 
-    # --------------------------------------------------------
-    # drawing primitives
-    # --------------------------------------------------------
+    def set_contrast(self, value: int) -> None:
+        value = max(0, min(255, int(value)))
+        self._cmd(0x81, value)
+
+    def sleep(self) -> None:
+        if not self.is_sleeping:
+            self._cmd(0xAE)
+            self.is_sleeping = True
+
+    def wake(self) -> None:
+        if self.is_sleeping:
+            self._cmd(0xAF)
+            self.is_sleeping = False
+            self.show()
 
     def pixel(self, x: int, y: int, on: bool = True) -> None:
         if not (0 <= x < self.width and 0 <= y < self.height):
@@ -147,10 +153,6 @@ class SSD1306Display:
         self.hline(x, y + h - 1, w, on)
         self.vline(x, y, h, on)
         self.vline(x + w - 1, y, h, on)
-
-    # --------------------------------------------------------
-    # text
-    # --------------------------------------------------------
 
     def _draw_char(self, ch: str, x: int, y: int) -> None:
         o = ord(ch)

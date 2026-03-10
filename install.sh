@@ -1,21 +1,49 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-echo "Installing Shadowbox..."
+set -e
 
+echo "Shadowbox installer"
+echo "==================="
+
+echo "Updating system..."
 sudo apt update
-sudo apt install -y python3-venv pigpio python3-smbus
 
-cd ~
+echo "Installing system dependencies..."
+sudo apt install -y \
+    python3-venv \
+    python3-pip \
+    python3-smbus \
+    i2c-tools \
+    pigpio
 
-git clone https://github.com/YOURNAME/shadowbox.git
-cd shadowbox
+echo "Enabling I2C..."
+sudo raspi-config nonint do_i2c 0
 
-python3 -m venv .venv
-source .venv/bin/activate
-
-pip install -r requirements.txt
-
+echo "Starting pigpio daemon..."
 sudo systemctl enable pigpiod
 sudo systemctl start pigpiod
 
-echo "Installation complete"
+echo "Creating Python virtual environment..."
+python3 -m venv .venv
+
+echo "Activating venv..."
+source .venv/bin/activate
+
+echo "Installing Python dependencies..."
+pip install --upgrade pip
+pip install -r requirements.txt
+
+echo "Installing systemd service..."
+sudo cp service/shadowbox.service /etc/systemd/system/
+
+sudo systemctl daemon-reload
+sudo systemctl enable shadowbox
+
+echo "Starting Shadowbox..."
+sudo systemctl start shadowbox
+
+echo ""
+echo "Install complete."
+echo ""
+echo "Reboot recommended:"
+echo "sudo reboot"

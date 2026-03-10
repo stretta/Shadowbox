@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Shadowbox
 Hardware UI for RNBO Runner
@@ -5,11 +6,12 @@ Hardware UI for RNBO Runner
 https://github.com/stretta/shadowbox
 """
 
-#!/usr/bin/env python3
-
 from __future__ import annotations
 
+import socket
 from typing import Any
+
+from shadowbox.rnbo import RNBO_PORT
 
 
 TOP_LEVEL_ITEMS = ["PATCH", "PARAM", "SYSTEM"]
@@ -78,10 +80,6 @@ class ShadowboxRenderer:
     def __init__(self, display):
         self.display = display
 
-    # --------------------------------------------------------
-    # low-level row helpers
-    # --------------------------------------------------------
-
     def draw_header(self, title: str, busy: bool = False, ticks: int = 0) -> None:
         self.display.text(shorten(title, 19), 0, 0)
         if busy:
@@ -103,13 +101,8 @@ class ShadowboxRenderer:
         line = f"{prefix}{left:<{left_width}} {right:>{right_width}}"
         self.display.text(line[:21], 0, y)
 
-    # --------------------------------------------------------
-    # whole-screen helpers
-    # --------------------------------------------------------
-
     def draw_splash(self, title: str = "SHADOWBOX") -> None:
         self.display.clear()
-        # 10 chars * ~6 px = 60 px; centered on 128 => x ≈ 34
         self.display.text(title, 34, 12)
         self.display.show()
 
@@ -169,7 +162,11 @@ class ShadowboxRenderer:
         audio = state.system.get("audio", {})
         options = audio.get("card_options", [])
 
-        device = options[state.audio_card_index] if options and 0 <= state.audio_card_index < len(options) else audio.get("current_card", "-")
+        if options and 0 <= state.audio_card_index < len(options):
+            device = options[state.audio_card_index]
+        else:
+            device = audio.get("current_card", "-")
+
         rate = audio.get("sample_rate", None)
         buf = audio.get("period_frames", None)
 
@@ -178,10 +175,6 @@ class ShadowboxRenderer:
         self.draw_value_row(24, False, "buffer", "-" if buf is None else buf)
 
     def draw_network(self, state) -> None:
-        # imported lazily to keep renderer focused
-        from rnbo import RNBO_PORT
-        import socket
-
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("1.1.1.1", 80))
@@ -202,10 +195,6 @@ class ShadowboxRenderer:
         self.display.text("jack restart", 0, 10)
         self.display.text("short press", 0, 22)
 
-    # --------------------------------------------------------
-    # master draw
-    # --------------------------------------------------------
-
     def draw(self, state) -> None:
         self.display.clear()
 
@@ -219,16 +208,12 @@ class ShadowboxRenderer:
 
         if state.ui_mode == "TOP":
             self.draw_top(state)
-
         elif state.ui_mode == "PATCH":
             self.draw_patch_list(state)
-
         elif state.ui_mode == "PARAM":
             self.draw_param_list(state)
-
         elif state.ui_mode == "EDIT":
             self.draw_edit(state)
-
         elif state.ui_mode == "SYSTEM":
             if state.system_screen == "MENU":
                 self.draw_system_menu(state)

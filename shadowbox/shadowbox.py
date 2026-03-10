@@ -1,29 +1,30 @@
-"""
-Shadowbox
-Hardware UI for RNBO Runner
-
-https://github.com/stretta/shadowbox
-"""
-
 #!/usr/bin/env python3
+
+from __future__ import annotations
 
 from time import monotonic, sleep
 
-from display import SSD1306Display
-from encoder import EncoderInput
-from rnbo import RNBOClient
-from ui import ShadowboxUI
-from renderer import ShadowboxRenderer
+from shadowbox.display import SSD1306Display
+from shadowbox.encoder import EncoderInput
+from shadowbox.rnbo import RNBOClient
+from shadowbox.ui import ShadowboxUI
+from shadowbox.renderer import ShadowboxRenderer
 
 
 FPS = 20
 FRAME_DT = 1.0 / FPS
 REFRESH_SECONDS = 3.0
 
+DIM_TIMEOUT = 120.0
+SLEEP_TIMEOUT = 600.0
+BRIGHTNESS_NORMAL = 0x7F
+BRIGHTNESS_DIM = 0x10
+
 
 def main():
     display = SSD1306Display()
     display.init()
+    display.set_contrast(BRIGHTNESS_NORMAL)
 
     rnbo = RNBOClient()
     encoder = EncoderInput()
@@ -52,13 +53,33 @@ def main():
 
     last_frame = 0.0
     last_refresh = 0.0
+    last_activity = monotonic()
+
+    is_dimmed = False
+    is_sleeping = False
+
+    def mark_activity() -> None:
+        nonlocal last_activity, is_dimmed, is_sleeping
+        last_activity = monotonic()
+
+        if is_sleeping:
+            display.wake()
+            is_sleeping = False
+
+        if is_dimmed:
+            display.set_contrast(BRIGHTNESS_NORMAL)
+            is_dimmed = False
 
     try:
         while True:
             now = monotonic()
 
             # Pull pending hardware events
-            for event in encoder.get_events():
+            events = encoder.get_events()
+            if events:
+                mark_activity()
+
+            for event in events:
                 ui.handle_event(event)
 
             # Pull pending RNBO actions requested by UI
@@ -98,8 +119,19 @@ def main():
                 ui.apply_runner_snapshot(rnbo.discover())
                 ui.set_busy(False)
 
-            # Draw at fixed-ish frame rate
-            if (now - last_frame) >= FRAME_DT:
+            # OLED dim / sleep policy
+            idle = now - last_activity
+
+            if (not is_sleeping) and idle >= SLEEP_TIMEOUT:
+                display.sleep()
+                is_sleeping = True
+
+            elif (not is_dimmed) and idle >= DIM_TIMEOUT:
+                display.set_contrast(BRIGHTNESS_DIM)
+                is_dimmed = True
+
+            # Draw at fixed-ish frame rate, but skip while sleeping
+            if (not is_sleeping) and (now - last_frame) >= FRAME_DT:
                 last_frame = now
                 renderer.draw(ui.state)
 
@@ -109,6 +141,8 @@ def main():
         pass
     finally:
         encoder.close()
+        display.wake()
+        display.set_contrast(BRIGHTNESS_NORMAL)
         display.clear()
         display.show()
 
