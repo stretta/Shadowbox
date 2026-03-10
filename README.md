@@ -85,7 +85,7 @@ sudo systemctl start pigpiod
 
 Clone the repository
 
-git clone https://github.com/YOURNAME/shadowbox.git
+git clone https://github.com/stretta/shadowbox.git
 cd shadowbox
 
 Create a virtual environment
