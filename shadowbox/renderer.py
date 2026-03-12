@@ -22,7 +22,7 @@ def shorten(text: str, max_chars: int) -> str:
     text = str(text)
     if len(text) <= max_chars:
         return text
-    return text[: max_chars - 1] + "…"
+    return text[: max_chars - 1] + "..."
 
 
 def shorten_param_name(name: str) -> str:
@@ -263,7 +263,8 @@ class ShadowboxRenderer:
         elif state.ui_mode == "SYSTEM":
             header = state.system_screen
 
-        self.draw_header(header, busy=state.busy, ticks=state.activity_ticks)
+        if state.ui_mode != "EDIT":
+			self.draw_header(header, busy=state.busy, ticks=state.activity_ticks)
 
         if state.ui_mode == "TOP":
             self.draw_top(state)
