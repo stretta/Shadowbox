@@ -40,8 +40,10 @@ def main():
     ui.apply_runner_snapshot(rnbo.discover())
     ui.set_busy(False)
 
+    # Always start clean at TOP level
+    ui.reset_to_top()
+
     # Optional startup actions
-    ui.restore_from_saved_state()
     if ui.should_autoload_last_patch():
         ui.set_busy(True, "load")
         patch_name = ui.get_last_patch_name()
@@ -89,10 +91,17 @@ def main():
                     rnbo.load_patch(action.patch_name)
                     sleep(0.1)
                     ui.apply_runner_snapshot(rnbo.discover())
+
+                    # After loading a patch, jump directly to parameter view
+                    ui.state.ui_mode = "PARAM"
+                    ui.state.param_index = 0
+                    ui.state.edit_value = None
+
                     ui.set_busy(False)
 
                 elif action.kind == "set_param":
-                    rnbo.set_param(action.path, action.value)
+                    if action.path is not None:
+                        rnbo.set_param(action.path, action.value)
 
                 elif action.kind == "set_audio_device":
                     ui.set_busy(True, "audio")

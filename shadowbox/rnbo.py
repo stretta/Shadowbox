@@ -1,11 +1,10 @@
+#!/usr/bin/env python3
 """
 Shadowbox
 Hardware UI for RNBO Runner
 
 https://github.com/stretta/shadowbox
 """
-
-#!/usr/bin/env python3
 
 from __future__ import annotations
 
@@ -73,6 +72,58 @@ def extract_range_info(node: dict) -> dict:
     return out
 
 
+def should_keep_param(name: str, node: dict) -> bool:
+    access = node.get("ACCESS", None)
+    if access not in (2, 3):
+        return False
+
+    full_path = str(node.get("FULL_PATH", ""))
+    if not full_path:
+        return False
+
+    lowered = str(name).lower()
+    path_lowered = full_path.lower()
+
+    # Keep nested user params like plate/mix, reverb/decay, osc1/detune.
+    # Only reject clearly helper/internal variants.
+    reject_exact = {
+        "normalized",
+        "raw",
+        "meter",
+        "signal",
+    }
+
+    reject_suffixes = (
+        "/normalized",
+        "/raw",
+        "/meter",
+        "/signal",
+        "/out",
+        "/in",
+    )
+
+    reject_contains = (
+        "/meters/",
+        "/meter/",
+        "/signals/",
+        "/signal/",
+    )
+
+    if lowered in reject_exact:
+        return False
+
+    if any(lowered.endswith(suffix) for suffix in reject_suffixes):
+        return False
+
+    if any(path_lowered.endswith(suffix) for suffix in reject_suffixes):
+        return False
+
+    if any(token in path_lowered for token in reject_contains):
+        return False
+
+    return True
+
+
 # ============================================================
 # DISCOVERY PARSERS
 # ============================================================
@@ -106,35 +157,114 @@ def discover_params(tree: dict) -> list[dict]:
     )
 
     results: list[dict] = []
+    seen_paths: set[str] = set()
 
-    if not isinstance(params_root, dict):
-        return results
-
-    for name, node in params_root.items():
-        if not isinstance(node, dict):
-            continue
-
-        access = node.get("ACCESS", None)
+    def should_keep_editable_param(full_name: str, node: dict) -> bool:
+        access = node.get("ACCESS")
         if access not in (2, 3):
-            continue
+            return False
 
-        info = extract_range_info(node)
+        full_path = node.get("FULL_PATH")
+        if not isinstance(full_path, str) or not full_path:
+            return False
 
-        results.append(
-            {
-                "name": name,
-                "path": node.get("FULL_PATH"),
-                "value": node.get("VALUE"),
-                "type": node.get("TYPE", ""),
-                "min": info["min"],
-                "max": info["max"],
-                "vals": info["vals"],
-            }
+        lowered_name = str(full_name).lower()
+        lowered_path = full_path.lower()
+
+        reject_exact = {
+            "meta",
+            "normalized",
+            "raw",
+            "meter",
+            "signal",
+        }
+
+        reject_suffixes = (
+            "/meta",
+            "/normalized",
+            "/raw",
+            "/meter",
+            "/signal",
+            "/out",
+            "/in",
         )
 
+        reject_contains = (
+            "/meters/",
+            "/signals/",
+        )
+
+        if lowered_name in reject_exact:
+            return False
+
+        if any(lowered_name.endswith(s) for s in reject_suffixes):
+            return False
+
+        if any(lowered_path.endswith(s) for s in reject_suffixes):
+            return False
+
+        if any(token in lowered_path for token in reject_contains):
+            return False
+
+        value = node.get("VALUE", None)
+        ptype = node.get("TYPE", "")
+        ranges = node.get("RANGE", None)
+        contents = node.get("CONTENTS", None)
+
+        has_value = "VALUE" in node and value is not None
+        has_type = isinstance(ptype, str) and ptype != ""
+        has_range = isinstance(ranges, list) and len(ranges) > 0
+        has_children = isinstance(contents, dict) and len(contents) > 0
+
+        # Skip pure container/group nodes.
+        if has_children and not (has_value or has_type or has_range):
+            return False
+
+        # Must look like a real parameter.
+        if not (has_value or has_type or has_range):
+            return False
+
+        # Ignore obvious command-like null nodes.
+        if value is None and not has_range and not has_type:
+            return False
+
+        return True
+
+    def walk_params(nodes: dict, prefix: str = "") -> None:
+        if not isinstance(nodes, dict):
+            return
+
+        for name, node in nodes.items():
+            if not isinstance(node, dict):
+                continue
+
+            full_name = f"{prefix}/{name}" if prefix else name
+
+            if should_keep_editable_param(full_name, node):
+                full_path = node.get("FULL_PATH")
+                if full_path not in seen_paths:
+                    seen_paths.add(full_path)
+
+                    info = extract_range_info(node)
+                    results.append(
+                        {
+                            "name": full_name,
+                            "path": full_path,
+                            "value": node.get("VALUE"),
+                            "type": node.get("TYPE", ""),
+                            "min": info["min"],
+                            "max": info["max"],
+                            "vals": info["vals"],
+                        }
+                    )
+
+            child_nodes = node.get("CONTENTS")
+            if isinstance(child_nodes, dict):
+                walk_params(child_nodes, full_name)
+
+    walk_params(params_root)
     results.sort(key=lambda x: x["name"].lower())
     return results
-
 
 def discover_system(tree: dict) -> dict:
     card_node = safe_get(

@@ -4,8 +4,8 @@ This installs the Shadowbox hardware UI for RNBO Runner on a Raspberry Pi.
 
 Tested on:
 
-Raspberry Pi OS Bookworm
-Raspberry Pi 4 / 5
+• Raspberry Pi OS Bookworm
+• Raspberry Pi 4 / 5
 
 ⸻
 
@@ -27,17 +27,15 @@ sudo reboot
 
 2. Install system dependencies
 
+On the RNBO image, do not run sudo apt upgrade. The RNBO image expects specific package versions.
+
+Install only the packages Shadowbox requires.
+
 Run:
 
 sudo apt update
 
-sudo apt install -y 
-python3-venv 
-python3-pip 
-git 
-pigpio 
-python3-smbus 
-i2c-tools
+sudo apt install -y python3-venv python3-pip git pigpio python3-smbus i2c-tools
 
 Enable the pigpio daemon:
 
@@ -46,15 +44,72 @@ sudo systemctl start pigpiod
 
 ⸻
 
-3. Clone the repository
+3. RNBO sanity check
 
-cd ~
-git clone https://github.com/stretta/Shadowbox.git
-cd Shadowbox
+Before installing Shadowbox, confirm RNBO Runner is working correctly.
+
+Check installed RNBO packages:
+
+dpkg -l | grep -i rnbo
+
+You should see packages similar to:
+
+rnbooscquery
+rnbo-runner-panel
+rnbo-update-service
+
+Check OSCQuery directly:
+
+curl http://127.0.0.1:5678
+
+If RNBO Runner is healthy this should return a JSON tree describing the RNBO system.
+
+Check service status:
+
+systemctl status rnbooscquery.service –no-pager
+systemctl status rnbo-runner-panel.service –no-pager
 
 ⸻
 
-4. Create the Python environment
+4. RNBO package compatibility note
+
+A common failure occurs when rnbo-runner-panel requires a newer version of rnbooscquery.
+
+Check available versions:
+
+apt-cache policy rnbooscquery
+
+If necessary upgrade the runner first:
+
+sudo apt install rnbooscquery=1.4.3
+
+Then install the panel:
+
+sudo apt install rnbo-runner-panel
+
+If the panel service is masked, unmask it:
+
+sudo systemctl unmask rnbo-runner-panel.service
+sudo systemctl enable rnbo-runner-panel.service
+sudo systemctl start rnbo-runner-panel.service
+
+The RNBO web interface should then be available at:
+
+http://:3000
+
+⸻
+
+5. Clone the Shadowbox repository
+
+cd ~
+git clone https://github.com/stretta/shadowbox.git
+cd shadowbox
+
+⸻
+
+6. Create Python virtual environment
+
+Create the environment:
 
 python3 -m venv .venv
 
@@ -62,174 +117,133 @@ Activate it:
 
 source .venv/bin/activate
 
-Upgrade pip:
-
-pip install –upgrade pip
-
 Install Python dependencies:
 
 pip install -r requirements.txt
 
 ⸻
 
-5. Test the OLED
-
-Before running Shadowbox, verify the display works.
-
-Stop the Shadowbox service if running:
-
-sudo systemctl stop shadowbox
+7. Test I2C display
 
 Run the display test:
 
 python -m tools.display_test
 
-You should see:
+You should see a test pattern on the OLED display.
 
-SHADOWBOX
-display OK
-
-on the OLED.
-
-⸻
-
-6. Test the encoder + display
-
-Run:
-
-python -m tools.encoder_display_test
-
-This displays encoder movement and button state on the OLED.
-
-Rotate the encoder and press the button to confirm operation.
-
-⸻
-
-7. Install the system service
-
-Install the service file:
-
-sudo cp service/shadowbox.service /etc/systemd/system/
-
-Reload systemd:
-
-sudo systemctl daemon-reload
-
-Enable the service:
-
-sudo systemctl enable shadowbox
-
-Start it:
-
-sudo systemctl start shadowbox
-
-⸻
-
-8. Verify operation
-
-Check service status:
-
-systemctl status shadowbox
-
-Expected output includes:
-
-active (running)
-
-Example:
-
-Active: active (running)
-
-⸻
-
-9. Test automatic startup
-
-Reboot the Pi:
-
-sudo reboot
-
-Shadowbox should start automatically and load the last patch.
-
-⸻
-
-Development / debugging
-
-To run Shadowbox manually:
-
-sudo systemctl stop shadowbox
-
-cd ~/Shadowbox
-source .venv/bin/activate
-python -m shadowbox.shadowbox
-
-Restart the service when finished:
-
-sudo systemctl start shadowbox
-
-⸻
-
-Hardware diagnostics
-
-Display test
-
-python -m tools.display_test
-
-Encoder test
-
-python -m tools.encoder_display_test
-
-⸻
-
-Common issues
-
-Display appears corrupted
-
-This usually means two processes are writing to the OLED.
-
-Stop the service before running tests:
-
-sudo systemctl stop shadowbox
-
-⸻
-
-pigpio connection error
-
-Start the pigpio daemon:
-
-sudo systemctl start pigpiod
-
-⸻
-
-OLED not detected
-
-Verify I2C:
+If nothing appears, confirm the I2C device address:
 
 i2cdetect -y 1
 
-The display should appear at address:
+Typical OLED address is:
 
-3c
+0x3C
+
+⸻
+
+8. Test encoder
+
+Run the encoder test:
+
+python -m tools.encoder_test
+
+Rotating the encoder should print movement values in the terminal.
+
+⸻
+
+9. Encoder + display test
+
+Run the combined test:
+
+python -m tools.encoder_display_test
+
+Turning the encoder should update values on the OLED display.
+
+⸻
+
+10. Install the Shadowbox service
+
+From the repository root run:
+
+sudo ./install.sh
+
+This installs a systemd service named:
+
+shadowbox.service
+
+⸻
+
+11. Start the service
+
+sudo systemctl start shadowbox
+
+Check status:
+
+systemctl status shadowbox
+
+⸻
+
+12. Enable auto-start
+
+Enable Shadowbox to start on boot:
+
+sudo systemctl enable shadowbox
+
+Shadowbox will now launch automatically when the Raspberry Pi starts.
 
 ⸻
 
 Repository layout
 
-Shadowbox/
-
 shadowbox/
- shadowbox.py
- display.py
- renderer.py
- encoder.py
- rnbo.py
- ui.py
+├── install.sh
+├── requirements.txt
+├── README.md
+├── service/
+│   └── shadowbox.service
+├── shadowbox/
+│   ├── shadowbox.py
+│   ├── ui.py
+│   ├── renderer.py
+│   ├── rnbo.py
+│   ├── encoder.py
+│   └── display.py
+└── tools/
+├── display_test.py
+├── encoder_test.py
+└── encoder_display_test.py
 
-tools/
- display_test.py
- encoder_display_test.py
+⸻
 
-service/
- shadowbox.service
+Troubleshooting
 
-install.sh
-requirements.txt
-README.md
+RNBO Runner not responding
+
+Check OSCQuery:
+
+curl http://127.0.0.1:5678
+
+Restart services if necessary:
+
+sudo systemctl restart rnbooscquery
+sudo systemctl restart rnbo-runner-panel
+
+⸻
+
+Display not detected
+
+Check I2C bus:
+
+i2cdetect -y 1
+
+Expected address is usually:
+
+0x3C
+
+⸻
+
+Shadowbox service logs
+
+To view runtime logs:
+
+journalctl -u shadowbox -f

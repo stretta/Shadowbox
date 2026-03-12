@@ -25,6 +25,24 @@ def shorten(text: str, max_chars: int) -> str:
     return text[: max_chars - 1] + "…"
 
 
+def shorten_param_name(name: str) -> str:
+    name = str(name)
+    if "/" not in name:
+        return name
+
+    parts = [p for p in name.split("/") if p]
+    if len(parts) < 2:
+        return name
+
+    parents = parts[:-1]
+    leaf = parts[-1]
+    short_parents = "/".join(p[0] for p in parents if p)
+
+    if short_parents:
+        return f"{short_parents}/{leaf}"
+    return leaf
+
+
 def format_display_value(value: Any) -> str:
     if isinstance(value, bool):
         return "ON" if value else "OFF"
@@ -95,7 +113,7 @@ class ShadowboxRenderer:
         left_width = 9
         right_width = 9
 
-        left = shorten(name, left_width)
+        left = shorten(shorten_param_name(name), left_width)
         right = shorten(format_display_value(value), right_width)
 
         line = f"{prefix}{left:<{left_width}} {right:>{right_width}}"
@@ -138,11 +156,52 @@ class ShadowboxRenderer:
             param = state.params[state.param_index]
 
         if param is None:
-            self.display.text("  no param", 0, 16)
+            self.display.text("no param", 0, 16)
             return
 
-        self.display.text(shorten(param.get("name", ""), 21), 0, 10)
-        self.display.text(shorten(format_display_value(state.edit_value), 21), 0, 22)
+        name = shorten_param_name(param.get("name", ""))
+        value = state.edit_value
+
+        self.display.text(shorten(name, 21), 0, 0)
+
+        minv = param.get("min")
+        maxv = param.get("max")
+        vals = param.get("vals")
+
+        norm = 0.0
+
+        if vals:
+            try:
+                idx = vals.index(value)
+                if len(vals) > 1:
+                    norm = idx / (len(vals) - 1)
+                else:
+                    norm = 1.0
+            except ValueError:
+                norm = 0.0
+
+        elif isinstance(value, bool):
+            norm = 1.0 if value else 0.0
+
+        elif isinstance(value, (int, float)) and minv is not None and maxv is not None:
+            span = maxv - minv
+            if span > 0:
+                norm = (value - minv) / span
+                norm = max(0.0, min(1.0, norm))
+
+        bar_x = 4
+        bar_y = 12
+        bar_w = 120
+        bar_h = 8
+
+        fill_w = int(norm * (bar_w - 2))
+
+        self.display.rect(bar_x, bar_y, bar_w, bar_h, True, False)
+
+        if fill_w > 0:
+            self.display.rect(bar_x + 1, bar_y + 1, fill_w, bar_h - 2, True, True)
+
+        self.display.text(shorten(format_display_value(value), 21), 0, 24)
 
     def draw_system_menu(self, state) -> None:
         indices, selected_row, rows = list_window(state.system_index, len(SYSTEM_ITEMS))

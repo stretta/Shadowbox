@@ -1,11 +1,10 @@
+#!/usr/bin/env python3
 """
 Shadowbox
 Hardware UI for RNBO Runner
 
 https://github.com/stretta/shadowbox
 """
-
-#!/usr/bin/env python3
 
 from __future__ import annotations
 
@@ -21,10 +20,6 @@ TOP_LEVEL_ITEMS = ["PATCH", "PARAM", "SYSTEM"]
 SYSTEM_ITEMS = ["STATUS", "AUDIO", "NETWORK", "STARTUP", "MAINT"]
 
 
-# ============================================================
-# ACTIONS
-# ============================================================
-
 @dataclass
 class UIAction:
     kind: str
@@ -33,10 +28,6 @@ class UIAction:
     patch_name: Optional[str] = None
     device_name: Optional[str] = None
 
-
-# ============================================================
-# STATE
-# ============================================================
 
 @dataclass
 class UIState:
@@ -64,10 +55,6 @@ class UIState:
     auto_load_last_patch: bool = True
     saved_audio_card: str = ""
 
-
-# ============================================================
-# HELPERS
-# ============================================================
 
 def load_state_file() -> dict:
     if STATE_PATH.exists():
@@ -144,7 +131,7 @@ def numeric_step(param: dict) -> float:
         return 1
 
     if pmin is not None and pmax is not None:
-        span = pmax - pmin
+        span = abs(pmax - pmin)
         if span <= 0:
             return 0.01
         if span <= 1:
@@ -153,7 +140,9 @@ def numeric_step(param: dict) -> float:
             return 0.05
         if span <= 100:
             return 0.5
-        return max(span / 128.0, 0.5)
+        if span <= 1000:
+            return 1.0
+        return max(span / 128.0, 1.0)
 
     return 0.01
 
@@ -207,19 +196,11 @@ def apply_edit_delta(param: dict, current_value: Any, delta: int) -> Any:
     return current_value
 
 
-# ============================================================
-# EVENTS
-# ============================================================
-
 @dataclass
 class UIEvent:
     kind: str
     delta: int = 0
 
-
-# ============================================================
-# UI
-# ============================================================
 
 class ShadowboxUI:
     def __init__(self, rnbo=None):
@@ -227,6 +208,7 @@ class ShadowboxUI:
         self.state = UIState()
         self._actions: list[UIAction] = []
         self._saved_state_cache = load_state_file()
+        self._edit_original_value: Any = None
 
     # ----------------------------
     # persistence
@@ -258,6 +240,16 @@ class ShadowboxUI:
         )
         self.state.param_index = restore_param_index(self.state.params, saved)
         self._sync_audio_index()
+
+    def reset_to_top(self) -> None:
+        self.state.ui_mode = "TOP"
+        self.state.top_index = 0
+        self.state.patch_index = 0
+        self.state.param_index = 0
+        self.state.system_index = 0
+        self.state.system_screen = "MENU"
+        self.state.edit_value = None
+        self._edit_original_value = None
 
     def save_state(self) -> None:
         save_state_file(
@@ -449,11 +441,14 @@ class ShadowboxUI:
         elif self.state.ui_mode == "PARAM":
             param = self.selected_param
             if param is not None:
+                self._edit_original_value = param.get("value")
                 self.state.edit_value = normalize_current_value_for_edit(param)
                 self.state.ui_mode = "EDIT"
 
         elif self.state.ui_mode == "EDIT":
-            pass
+            # Accept edit and return to PARAM page
+            self.state.ui_mode = "PARAM"
+            self._edit_original_value = None
 
         elif self.state.ui_mode == "SYSTEM":
             if self.state.system_screen == "MENU":
@@ -476,9 +471,23 @@ class ShadowboxUI:
     def _handle_long_press(self) -> None:
         # Long press always means ESC / back
         if self.state.ui_mode == "EDIT":
+            param = self.selected_param
+            if param is not None and self._edit_original_value is not None:
+                param["value"] = self._edit_original_value
+                self.queue_action(
+                    UIAction(
+                        kind="set_param",
+                        path=param.get("path"),
+                        value=self._edit_original_value,
+                    )
+                )
+            self.state.edit_value = None
+            self._edit_original_value = None
             self.state.ui_mode = "PARAM"
+
         elif self.state.ui_mode == "SYSTEM" and self.state.system_screen != "MENU":
             self.state.system_screen = "MENU"
+
         elif self.state.ui_mode != "TOP":
             self.state.ui_mode = "TOP"
 

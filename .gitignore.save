@@ -1,0 +1,12 @@
+ls
+__pycache__/
+*.pyc
+*.pyo
+
+.DS_Store
+__MACOSX
+
+.venv/
+env/
+
+shadowbox_state.json
