@@ -5,7 +5,7 @@ After=network.target
 [Service]
 User=pi
 WorkingDirectory=/home/pi/shadowbox
-ExecStart=/home/pi/shadowbox/.venv/bin/python shadowbox.py
+ExecStart=/home/pi/shadowbox/.venv/bin/python -m shadowbox.shadowbox
 Restart=always
 
 [Install]
