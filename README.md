@@ -180,30 +180,39 @@ cd shadowbox
 
 ---
 
-# 6. Create Python virtual environment
+# 6. Install Shadowbox
 
-Create environment:
-
+From the repository root:
 ```
-python3 -m venv .venv
+cd ~/shadowbox
+chmod +x install.sh
+./install.sh
 ```
-
-Activate it:
-
-```
-source .venv/bin/activate
-```
-
-Install Python dependencies:
-
-```
-pip install -r requirements.txt
-```
+Do not run the installer with `sudo`.
+The script uses `sudo` internally only where required.
 
 ---
 
-# 7. Test I2C display
+# 7. Verify installation
 
+
+```
+systemctl status shadowbox
+```
+
+```
+journalctl -u shadowbox -n 100 --no-pager
+```
+---
+
+# 8. Test I2C display
+
+Activate the virtual environment:
+
+```
+source .venv/bin/activate
+
+```
 Run:
 
 ```
@@ -226,7 +235,7 @@ Typical OLED address:
 
 ---
 
-# 8. Test encoder
+# 9. Test encoder
 
 Run:
 
@@ -238,7 +247,7 @@ Rotating the encoder should print movement values.
 
 ---
 
-# 9. Encoder + display test
+# 10. Encoder + display test
 
 Run:
 
@@ -247,46 +256,6 @@ python -m tools.encoder_display_test
 ```
 
 Turning the encoder should update the OLED display.
-
----
-
-# 10. Install the Shadowbox service
-
-From the repository root:
-
-```
-sudo ./install.sh
-```
-
-This installs the service:
-
-```
-shadowbox.service
-```
-
----
-
-# 11. Start the service
-
-```
-sudo systemctl start shadowbox
-```
-
-Check status:
-
-```
-systemctl status shadowbox
-```
-
----
-
-# 12. Enable auto-start
-
-```
-sudo systemctl enable shadowbox
-```
-
-Shadowbox will now start automatically on boot.
 
 ---
 
@@ -300,11 +269,14 @@ shadowbox/
 ├── service/
 │   └── shadowbox.service
 ├── shadowbox/
+│   ├── __init__.py
 │   ├── shadowbox.py
 │   ├── ui.py
 │   ├── renderer.py
 │   ├── rnbo.py
 │   ├── encoder.py
+│   ├── core.py
+│   ├── ttid.py
 │   └── display.py
 └── tools/
     ├── display_test.py
