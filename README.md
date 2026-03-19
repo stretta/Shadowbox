@@ -19,7 +19,9 @@ Shadowbox complements the RNBO Runner web interface by providing a minimal physi
 Typical configuration:
 
 - Raspberry Pi 4 / 5
-- 128×32 I2C OLED display (SSD1306)
+- A display:
+    - 128×32 I2C OLED display (SSD1306) or
+-     128×64 I2C OLED display (SSD1309)
 - Rotary encoder with push button
 
 Example OLED module:
