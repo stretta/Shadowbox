@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from time import monotonic, sleep
 
-from shadowbox.display import SSD1306Display
+from shadowbox.display import create_display
 from shadowbox.encoder import EncoderInput
 from shadowbox.rnbo import RNBOClient
 from shadowbox.ui import ShadowboxUI
@@ -22,7 +22,7 @@ BRIGHTNESS_DIM = 0x10
 
 
 def main():
-    display = SSD1306Display()
+    display = create_display("ssd1309")
     display.init()
     display.set_contrast(BRIGHTNESS_NORMAL)
 

@@ -13,6 +13,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from shadowbox.ttid import (
+    apply_scale_to_mask,
+    get_root_names,
+    get_scale_names,
+    is_ttid_param,
+    normalize_ttid,
+    toggle_bit,
+)
+
 
 STATE_PATH = Path.home() / "rnbo-ui" / "shadowbox_state.json"
 
@@ -46,6 +55,17 @@ class UIState:
     audio_card_index: int = 0
 
     edit_value: Any = None
+
+    # TTID editor state
+    # mode:
+    #   keyboard  -> selected_pc 0..11 are keys, 12 is LOAD
+    #   load_root -> choose root
+    #   load_scale -> choose named scale to load into current mask
+    edit_ttid_mode: str = "keyboard"
+    edit_ttid_selected_pc: int = 0   # 0..12, where 12 = LOAD
+    edit_ttid_load_root: int = 0
+    edit_ttid_scale_names: list[str] = field(default_factory=list)
+    edit_ttid_scale_index: int = 0
 
     busy: bool = False
     busy_reason: str = ""
@@ -249,6 +269,13 @@ class ShadowboxUI:
         self.state.system_index = 0
         self.state.system_screen = "MENU"
         self.state.edit_value = None
+
+        self.state.edit_ttid_mode = "keyboard"
+        self.state.edit_ttid_selected_pc = 0
+        self.state.edit_ttid_load_root = 0
+        self.state.edit_ttid_scale_names = []
+        self.state.edit_ttid_scale_index = 0
+
         self._edit_original_value = None
 
     def save_state(self) -> None:
@@ -321,7 +348,11 @@ class ShadowboxUI:
         self._sync_audio_index()
 
         if self.state.ui_mode == "EDIT" and self.selected_param:
-            self.state.edit_value = normalize_current_value_for_edit(self.selected_param)
+            if is_ttid_param(self.selected_param):
+                # Preserve TTID editor state across refreshes.
+                self.state.edit_value = normalize_ttid(self.state.edit_value)
+            else:
+                self.state.edit_value = normalize_current_value_for_edit(self.selected_param)
 
     # ----------------------------
     # derived properties
@@ -353,6 +384,49 @@ class ShadowboxUI:
             self.state.audio_card_index = options.index(self.current_audio_card)
         else:
             self.state.audio_card_index = 0
+
+    # ----------------------------
+    # TTID helpers
+    # ----------------------------
+
+    def _begin_ttid_edit(self, param: dict) -> None:
+        raw_value = normalize_ttid(param.get("value", 0))
+
+        self.state.edit_value = raw_value
+        self.state.edit_ttid_mode = "keyboard"
+        self.state.edit_ttid_selected_pc = 0
+        self.state.edit_ttid_load_root = 0
+
+        scale_names = get_scale_names()
+        if not scale_names:
+            scale_names = ["major"]
+
+        self.state.edit_ttid_scale_names = scale_names
+        self.state.edit_ttid_scale_index = 0
+
+    def _current_ttid_scale_name(self) -> str:
+        names = self.state.edit_ttid_scale_names
+        if not names:
+            return "major"
+        idx = max(0, min(self.state.edit_ttid_scale_index, len(names) - 1))
+        return names[idx]
+
+    def _apply_ttid_scale_load(self) -> None:
+        mask = apply_scale_to_mask(
+            self.state.edit_ttid_load_root,
+            self._current_ttid_scale_name(),
+        )
+        self.state.edit_value = normalize_ttid(mask)
+        param = self.selected_param
+        if param is not None:
+            param["value"] = self.state.edit_value
+            self.queue_action(
+                UIAction(
+                    kind="set_param",
+                    path=param.get("path"),
+                    value=self.state.edit_value,
+                )
+            )
 
     # ----------------------------
     # action queue
@@ -399,18 +473,27 @@ class ShadowboxUI:
             param = self.selected_param
             if param is not None:
                 step_dir = 1 if delta > 0 else -1
-                self.state.edit_value = apply_edit_delta(param, self.state.edit_value, step_dir)
 
-                # optimistic local update
-                param["value"] = self.state.edit_value
+                if is_ttid_param(param):
+                    if self.state.edit_ttid_mode == "keyboard":
+                        self.state.edit_ttid_selected_pc = (self.state.edit_ttid_selected_pc + step_dir) % 13
+                    elif self.state.edit_ttid_mode == "load_root":
+                        self.state.edit_ttid_load_root = (self.state.edit_ttid_load_root + step_dir) % 12
+                    elif self.state.edit_ttid_mode == "load_scale":
+                        names = self.state.edit_ttid_scale_names
+                        if names:
+                            self.state.edit_ttid_scale_index = (self.state.edit_ttid_scale_index + step_dir) % len(names)
+                else:
+                    self.state.edit_value = apply_edit_delta(param, self.state.edit_value, step_dir)
+                    param["value"] = self.state.edit_value
 
-                self.queue_action(
-                    UIAction(
-                        kind="set_param",
-                        path=param.get("path"),
-                        value=self.state.edit_value,
+                    self.queue_action(
+                        UIAction(
+                            kind="set_param",
+                            path=param.get("path"),
+                            value=self.state.edit_value,
+                        )
                     )
-                )
 
         elif self.state.ui_mode == "SYSTEM":
             if self.state.system_screen == "MENU":
@@ -442,13 +525,46 @@ class ShadowboxUI:
             param = self.selected_param
             if param is not None:
                 self._edit_original_value = param.get("value")
-                self.state.edit_value = normalize_current_value_for_edit(param)
+
+                if is_ttid_param(param):
+                    self._begin_ttid_edit(param)
+                else:
+                    self.state.edit_value = normalize_current_value_for_edit(param)
+
                 self.state.ui_mode = "EDIT"
 
         elif self.state.ui_mode == "EDIT":
-            # Accept edit and return to PARAM page
-            self.state.ui_mode = "PARAM"
-            self._edit_original_value = None
+            param = self.selected_param
+
+            if param is not None and is_ttid_param(param):
+                if self.state.edit_ttid_mode == "keyboard":
+                    if self.state.edit_ttid_selected_pc < 12:
+                        self.state.edit_value = toggle_bit(
+                            normalize_ttid(self.state.edit_value),
+                            self.state.edit_ttid_selected_pc,
+                        )
+                        param["value"] = self.state.edit_value
+                        self.queue_action(
+                            UIAction(
+                                kind="set_param",
+                                path=param.get("path"),
+                                value=self.state.edit_value,
+                            )
+                        )
+                    else:
+                        self.state.edit_ttid_mode = "load_root"
+
+                elif self.state.edit_ttid_mode == "load_root":
+                    self.state.edit_ttid_mode = "load_scale"
+
+                elif self.state.edit_ttid_mode == "load_scale":
+                    self._apply_ttid_scale_load()
+                    self.state.edit_ttid_mode = "keyboard"
+                    self.state.edit_ttid_selected_pc = self.state.edit_ttid_load_root
+
+            else:
+                self.state.ui_mode = "PARAM"
+                self._edit_original_value = None
 
         elif self.state.ui_mode == "SYSTEM":
             if self.state.system_screen == "MENU":
@@ -469,21 +585,37 @@ class ShadowboxUI:
         self.queue_action(UIAction(kind="save_state"))
 
     def _handle_long_press(self) -> None:
-        # Long press always means ESC / back
         if self.state.ui_mode == "EDIT":
             param = self.selected_param
-            if param is not None and self._edit_original_value is not None:
-                param["value"] = self._edit_original_value
-                self.queue_action(
-                    UIAction(
-                        kind="set_param",
-                        path=param.get("path"),
-                        value=self._edit_original_value,
+
+            if param is not None and is_ttid_param(param):
+                # TTID edits are live; long press means exit and keep current value.
+                self.state.edit_value = None
+                self.state.edit_ttid_mode = "keyboard"
+                self.state.edit_ttid_selected_pc = 0
+                self.state.edit_ttid_load_root = 0
+                self.state.edit_ttid_scale_index = 0
+                self._edit_original_value = None
+                self.state.ui_mode = "PARAM"
+
+            else:
+                if param is not None and self._edit_original_value is not None:
+                    param["value"] = self._edit_original_value
+                    self.queue_action(
+                        UIAction(
+                            kind="set_param",
+                            path=param.get("path"),
+                            value=self._edit_original_value,
+                        )
                     )
-                )
-            self.state.edit_value = None
-            self._edit_original_value = None
-            self.state.ui_mode = "PARAM"
+
+                self.state.edit_value = None
+                self.state.edit_ttid_mode = "keyboard"
+                self.state.edit_ttid_selected_pc = 0
+                self.state.edit_ttid_load_root = 0
+                self.state.edit_ttid_scale_index = 0
+                self._edit_original_value = None
+                self.state.ui_mode = "PARAM"
 
         elif self.state.ui_mode == "SYSTEM" and self.state.system_screen != "MENU":
             self.state.system_screen = "MENU"

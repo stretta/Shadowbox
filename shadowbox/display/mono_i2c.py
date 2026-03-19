@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-Shadowbox
-Hardware UI for RNBO Runner
-
-https://github.com/stretta/shadowbox
+Shared monochrome I2C framebuffer backend for SSD1306/SSD1309-style displays.
 """
 
 from __future__ import annotations
 
 import smbus2 as smbus
+
+from shadowbox.display.base import DisplayBackend
 
 
 # 5x7 font for printable ASCII 32..126
@@ -48,16 +47,12 @@ FONT = bytes([
 ])
 
 
-class SSD1306Display:
-    """
-    Minimal SSD1306 128x32 I2C display driver with 5x7 text rendering.
-    """
-
-    def __init__(self, bus: int = 1, addr: int = 0x3C):
+class MonoI2CDisplay(DisplayBackend):
+    def __init__(self, width: int, height: int, bus: int = 1, addr: int = 0x3C):
         self.bus = smbus.SMBus(bus)
         self.addr = addr
-        self.width = 128
-        self.height = 32
+        self.width = width
+        self.height = height
         self.pages = self.height // 8
         self.buf = bytearray(self.width * self.pages)
         self.is_sleeping = False
@@ -70,31 +65,6 @@ class SSD1306Display:
     def _data(self, data_bytes: bytes | bytearray) -> None:
         for i in range(0, len(data_bytes), 32):
             self.bus.write_i2c_block_data(self.addr, 0x40, list(data_bytes[i:i + 32]))
-
-    def init(self) -> None:
-        self._cmd(
-            0xAE,             # display off
-            0x20, 0x00,       # horizontal addressing mode
-            0xB0,             # page start
-            0xC8,             # COM scan direction remapped
-            0x00, 0x10,       # low/high column start
-            0x40,             # start line = 0
-            0x81, 0x7F,       # contrast
-            0xA1,             # segment remap
-            0xA6,             # normal display
-            0xA8, 0x1F,       # multiplex ratio = 32
-            0xA4,             # display follows RAM
-            0xD3, 0x00,       # display offset
-            0xD5, 0x80,       # display clock divide
-            0xD9, 0xF1,       # pre-charge
-            0xDA, 0x02,       # COM pins
-            0xDB, 0x40,       # VCOM detect
-            0x8D, 0x14,       # charge pump on
-            0xAF,             # display on
-        )
-        self.is_sleeping = False
-        self.clear()
-        self.show()
 
     def clear(self) -> None:
         self.buf[:] = b"\x00" * len(self.buf)
