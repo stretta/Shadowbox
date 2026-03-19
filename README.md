@@ -21,7 +21,7 @@ Typical configuration:
 - Raspberry Pi 4 / 5
 - A display:
     - 128×32 I2C OLED display (SSD1306) or
--     128×64 I2C OLED display (SSD1309)
+    - 128×64 I2C OLED display (SSD1309)
 - Rotary encoder with push button
 
 Example OLED module:
