@@ -2,6 +2,8 @@
 
 set -e
 
+cd "$(dirname "$0")"
+
 echo "Shadowbox installer"
 echo "==================="
 
@@ -23,8 +25,12 @@ echo "Starting pigpio daemon..."
 sudo systemctl enable pigpiod
 sudo systemctl start pigpiod
 
-echo "Creating Python virtual environment..."
-python3 -m venv .venv
+if [ ! -d ".venv" ]; then
+    echo "Creating Python virtual environment..."
+    python3 -m venv .venv
+else
+    echo "Virtual environment already exists."
+fi
 
 echo "Activating venv..."
 source .venv/bin/activate
@@ -34,16 +40,25 @@ pip install --upgrade pip
 pip install -r requirements.txt
 
 echo "Installing systemd service..."
-sudo cp service/shadowbox.service /etc/systemd/system/
+sudo cp service/shadowbox.service /etc/systemd/system/shadowbox.service
 
+echo "Reloading systemd..."
 sudo systemctl daemon-reload
+
+echo "Enabling Shadowbox service..."
 sudo systemctl enable shadowbox
 
 echo "Starting Shadowbox..."
-sudo systemctl start shadowbox
+sudo systemctl restart shadowbox
 
 echo ""
 echo "Install complete."
+echo ""
+echo "Check status with:"
+echo "systemctl status shadowbox"
+echo ""
+echo "Check logs with:"
+echo "journalctl -u shadowbox -n 100 --no-pager"
 echo ""
 echo "Reboot recommended:"
 echo "sudo reboot"
