@@ -7,9 +7,6 @@ User=pi
 WorkingDirectory=/home/pi/shadowbox
 ExecStart=/home/pi/shadowbox/.venv/bin/python -m shadowbox.shadowbox
 Restart=always
-Environment=PYTHONUNBUFFERED=1
-StandardOutput=journal
-StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

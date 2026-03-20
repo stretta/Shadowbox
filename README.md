@@ -4,8 +4,11 @@ Shadowbox is a hardware UI for RNBO Runner designed for Raspberry Pi systems run
 
 It provides:
 
-- Patch selection
+- Instance browsing
+- Instance lifecycle control
 - Parameter editing
+- Preset loading
+- Audio and MIDI routing
 - Basic system management
 - OLED display interface
 - Rotary encoder navigation
@@ -14,14 +17,20 @@ Shadowbox complements the RNBO Runner web interface by providing a minimal physi
 
 ---
 
+# Documentation
+
+- [docs/uispec.md](./docs/uispec.md): UI behavior and interaction rules
+- [docs/architecture.md](./docs/architecture.md): codebase and runtime structure
+- [docs/walkthrough.md](./docs/walkthrough.md): end-to-end RNBO-to-Shadowbox editor flow, including `step16`
+
+---
+
 # Hardware
 
 Typical configuration:
 
 - Raspberry Pi 4 / 5
-- A display:
-    - 128×32 I2C OLED display (SSD1306) or
-    - 128×64 I2C OLED display (SSD1309)
+- 128×32 I2C OLED display (SSD1306)
 - Rotary encoder with push button
 
 Example OLED module:
@@ -32,7 +41,9 @@ https://www.adafruit.com/product/4484
 
 # Features
 
-- Patch selection from RNBO Runner
+- Instance browsing from RNBO Runner
+- Add instance from published patcher list
+- Replace or remove an existing instance when the backend publishes those commands
 - Parameter editing
 - Graphical value feedback
 - OLED dim/sleep management
@@ -182,39 +193,30 @@ cd shadowbox
 
 ---
 
-# 6. Install Shadowbox
+# 6. Create Python virtual environment
 
-From the repository root:
-```
-cd ~/shadowbox
-chmod +x install.sh
-./install.sh
-```
-Do not run the installer with `sudo`.
-The script uses `sudo` internally only where required.
-
----
-
-# 7. Verify installation
-
+Create environment:
 
 ```
-systemctl status shadowbox
+python3 -m venv .venv
 ```
 
-```
-journalctl -u shadowbox -n 100 --no-pager
-```
----
-
-# 8. Test I2C display
-
-Activate the virtual environment:
+Activate it:
 
 ```
 source .venv/bin/activate
+```
+
+Install Python dependencies:
 
 ```
+pip install -r requirements.txt
+```
+
+---
+
+# 7. Test I2C display
+
 Run:
 
 ```
@@ -237,7 +239,7 @@ Typical OLED address:
 
 ---
 
-# 9. Test encoder
+# 8. Test encoder
 
 Run:
 
@@ -249,7 +251,7 @@ Rotating the encoder should print movement values.
 
 ---
 
-# 10. Encoder + display test
+# 9. Encoder + display test
 
 Run:
 
@@ -258,6 +260,48 @@ python -m tools.encoder_display_test
 ```
 
 Turning the encoder should update the OLED display.
+
+---
+
+# 10. Install the Shadowbox service
+
+From the repository root:
+
+```
+./install.sh
+```
+
+This installs the service:
+
+```
+shadowbox.service
+```
+
+The installer uses `sudo` only for system package and service steps. It creates the virtual environment as your current user and generates a systemd unit for the current repository path.
+
+---
+
+# 11. Start the service
+
+```
+sudo systemctl start shadowbox
+```
+
+Check status:
+
+```
+systemctl status shadowbox
+```
+
+---
+
+# 12. Enable auto-start
+
+```
+sudo systemctl enable shadowbox
+```
+
+Shadowbox will now start automatically on boot.
 
 ---
 
@@ -271,15 +315,12 @@ shadowbox/
 ├── service/
 │   └── shadowbox.service
 ├── shadowbox/
-│   ├── __init__.py
 │   ├── shadowbox.py
 │   ├── ui.py
 │   ├── renderer.py
 │   ├── rnbo.py
 │   ├── encoder.py
-│   ├── core.py
-│   ├── ttid.py
-│   └── display.py
+│   └── display/
 └── tools/
     ├── display_test.py
     ├── encoder_test.py
