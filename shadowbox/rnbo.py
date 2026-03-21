@@ -252,6 +252,7 @@ def _discover_instance_state(instance_root: dict) -> list[dict]:
 
     state_roots = [
         ("", safe_get(instance_root, ["state", "CONTENTS"], {})),
+        ("", safe_get(instance_root, ["messages", "CONTENTS", "out", "CONTENTS"], {})),
         ("", safe_get(instance_root, ["messages", "CONTENTS", "out", "CONTENTS", "state", "CONTENTS"], {})),
     ]
     for prefix, root in state_roots:

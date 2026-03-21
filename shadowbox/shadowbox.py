@@ -71,7 +71,7 @@ class RunnerOSCListener:
 
 
 def _parse_instance_state_path(path: str) -> tuple[str, str] | None:
-    match = re.fullmatch(r"(/rnbo/inst/(\d+)/messages/out/state/.+)", str(path))
+    match = re.fullmatch(r"(/rnbo/inst/(\d+)/(?:state/.+|messages/out/.+))", str(path))
     if not match:
         return None
     return match.group(2), match.group(1)

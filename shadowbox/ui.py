@@ -18,11 +18,17 @@ from shadowbox.editors.ttid import (
     normalize_ttid,
     toggle_bit,
 )
+from shadowbox.editors.pitch_display import (
+    cents_state_key,
+    is_pitch_display_param,
+    pitch_state_key,
+)
 from shadowbox.editors.step16 import (
     clamp_playhead,
     is_step16_param,
     move_focus as move_step16_focus,
     normalize_mask as normalize_step16_mask,
+    playhead_state_key,
     toggle_step as toggle_step16,
 )
 
@@ -547,9 +553,23 @@ class ShadowboxUI:
                 return item
         return None
 
+    def active_pitch_display_state_value(self, param: dict | None, key_name: str) -> Optional[dict]:
+        key = str(key_name).strip()
+        if not key:
+            return None
+        return self._find_active_state_value(key)
+
+    @property
+    def active_pitch_display_pitch(self) -> Optional[dict]:
+        return self.active_pitch_display_state_value(self.selected_param, pitch_state_key(self.selected_param))
+
+    @property
+    def active_pitch_display_cents(self) -> Optional[dict]:
+        return self.active_pitch_display_state_value(self.selected_param, cents_state_key(self.selected_param))
+
     @property
     def active_step16_playhead(self) -> Optional[int]:
-        item = self._find_active_state_value("playhead")
+        item = self._find_active_state_value(playhead_state_key(self.selected_param))
         if item is None:
             return None
         return clamp_playhead(item.get("value"))
@@ -574,8 +594,9 @@ class ShadowboxUI:
         return actions
 
     def should_pause_refresh(self) -> bool:
-        if self.state.ui_mode == "EDIT" and self.selected_param and is_step16_param(self.selected_param):
-            return False
+        if self.state.ui_mode == "EDIT" and self.selected_param:
+            if is_step16_param(self.selected_param) or is_pitch_display_param(self.selected_param):
+                return False
         return self.state.ui_mode in {
             "INSTANCE_LIST",
             "PATCHER_PICKER",
@@ -633,6 +654,8 @@ class ShadowboxUI:
             self.state.param_cursor = self._cycle(self.state.param_cursor, len(self.active_params) + 1, step)
         elif self.state.ui_mode == "ENUM_LIST":
             self.state.enum_cursor = self._cycle(self.state.enum_cursor, len(self.active_enum_options), step)
+            if self.active_enum_options:
+                self.state.edit_value = self.active_enum_options[self.state.enum_cursor]
         elif self.state.ui_mode == "ROUTING_GROUP":
             self.state.routing_group_cursor = self._cycle(self.state.routing_group_cursor, len(ROUTING_GROUP_ITEMS) + 1, step)
         elif self.state.ui_mode == "ROUTING_PORTS":
@@ -667,6 +690,8 @@ class ShadowboxUI:
                         self.state.edit_ttid_scale_index = (self.state.edit_ttid_scale_index + step) % len(names)
             elif is_step16_param(param):
                 self.state.edit_step16_focus = move_step16_focus(self.state.edit_step16_focus, step)
+            elif is_pitch_display_param(param):
+                return
             else:
                 self.state.edit_value = apply_edit_delta(param, self.state.edit_value, step)
                 param["value"] = self.state.edit_value
@@ -800,6 +825,9 @@ class ShadowboxUI:
                         self.state.edit_value = normalize_step16_mask(param.get("value", 0))
                         self.state.edit_step16_focus = 0
                         self.state.ui_mode = "EDIT"
+                    elif is_pitch_display_param(param):
+                        self.state.edit_value = None
+                        self.state.ui_mode = "EDIT"
                     elif is_enum_param(param):
                         self.state.edit_value = normalize_current_value_for_edit(param)
                         options = self.active_enum_options
@@ -813,6 +841,7 @@ class ShadowboxUI:
             param = self.selected_param
             if param is not None and self.active_enum_options:
                 self.state.edit_value = self.active_enum_options[self.state.enum_cursor]
+                param["value"] = self.state.edit_value
                 self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=self.state.edit_value))
                 self.state.ui_mode = "PARAM_LIST"
                 self._edit_original_value = None
@@ -936,6 +965,10 @@ class ShadowboxUI:
                 self.state.edit_value = toggle_step16(self.state.edit_value, self.state.edit_step16_focus)
                 param["value"] = self.state.edit_value
                 self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=self.state.edit_value))
+            elif param is not None and is_pitch_display_param(param):
+                self.state.edit_value = None
+                self._edit_original_value = None
+                self.state.ui_mode = "PARAM_LIST"
             else:
                 if param is not None and is_discrete_param(param):
                     self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=self.state.edit_value))
@@ -957,6 +990,10 @@ class ShadowboxUI:
             elif param is not None and is_step16_param(param):
                 self.state.edit_value = None
                 self.state.edit_step16_focus = 0
+                self._edit_original_value = None
+                self.state.ui_mode = "PARAM_LIST"
+            elif param is not None and is_pitch_display_param(param):
+                self.state.edit_value = None
                 self._edit_original_value = None
                 self.state.ui_mode = "PARAM_LIST"
             else:

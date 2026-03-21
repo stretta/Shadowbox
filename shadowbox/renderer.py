@@ -9,6 +9,7 @@ from __future__ import annotations
 import socket
 from typing import Any
 
+from shadowbox.editors.pitch_display import is_pitch_display_param
 from shadowbox.editors.step16 import build_cells, is_step16_param
 from shadowbox.editors.ttid import get_root_names, is_pc_on, is_ttid_param, note_name
 from shadowbox.rnbo import RNBO_PORT
@@ -94,6 +95,11 @@ class ShadowboxRenderer:
     def text_center(self, text: str, y: int) -> None:
         x = max(0, (self.display.width - (len(str(text)) * 6)) // 2)
         self.display.text(str(text), x, y)
+
+    def text_center_scaled(self, text: str, y: int, scale: int = 1) -> None:
+        scale = max(1, int(scale))
+        x = max(0, (self.display.width - (len(str(text)) * 6 * scale)) // 2)
+        self.display.text_scaled(str(text), x, y, scale)
 
     def draw_header(self, title: str, busy: bool = False, ticks: int = 0) -> None:
         self.display.text(shorten(title, 19), 0, 0)
@@ -397,6 +403,29 @@ class ShadowboxRenderer:
         play_label = "--" if playhead is None else f"{playhead + 1:02d}"
         self.text_center(f"F{focus_label} P{play_label} {int(state.edit_value or 0)}", text_y)
 
+    def draw_edit_pitch_display(self, ui, param) -> None:
+        pitch_item = ui.active_pitch_display_pitch
+        cents_item = ui.active_pitch_display_cents
+        pitch_value = shorten(format_display_value(pitch_item.get("value") if pitch_item else None), 10)
+        cents_value = cents_item.get("value") if cents_item else None
+        cents_text = format_display_value(cents_value)
+        if cents_value not in (None, "-"):
+            try:
+                cents_float = float(cents_value)
+                cents_text = f"{cents_float:+.1f}"
+            except Exception:
+                cents_text = format_display_value(cents_value)
+        cents_text = shorten(cents_text, 10)
+
+        pitch_h = 14
+        cents_h = 14
+        gap = 4
+        total_h = pitch_h + gap + cents_h
+        start_y = max(0, (self.display.height - total_h) // 2)
+
+        self.text_center_scaled(pitch_value, start_y, 2)
+        self.text_center_scaled(cents_text, start_y + pitch_h + gap, 2)
+
     def draw_edit(self, ui, selected_param: dict, state) -> None:
         if selected_param is None:
             self.text_center("no param", 16)
@@ -406,6 +435,9 @@ class ShadowboxRenderer:
             return
         if is_step16_param(selected_param):
             self.draw_edit_step16(ui, selected_param, state)
+            return
+        if is_pitch_display_param(selected_param):
+            self.draw_edit_pitch_display(ui, selected_param)
             return
 
         title_y, gfx_x, gfx_y, gfx_w, gfx_h, value_y = (4, 4, 20, 120, 24, 52) if self.is_tall else (0, 4, 12, 120, 12, 26)
@@ -493,7 +525,7 @@ class ShadowboxRenderer:
             return
 
         header = {
-            "TOP": "TOP",
+            "TOP": "SHADOWBOX",
             "INSTANCE_LIST": "INSTANCES",
             "PATCHER_PICKER": "ADD INSTANCE" if state.patcher_picker_context == "add" else "REPLACE",
             "INSTANCE_MENU": ui.active_instance.get("label", "INSTANCE") if ui.active_instance else "INSTANCE",
