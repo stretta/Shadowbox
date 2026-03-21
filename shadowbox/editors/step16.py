@@ -27,6 +27,14 @@ def is_step16_param(param: dict | None) -> bool:
     return str(metadata.get("editor", "")).strip().lower() == "step16"
 
 
+def playhead_state_key(param: dict | None) -> str:
+    metadata = param.get("metadata", {}) if isinstance(param, dict) else {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    value = metadata.get("playhead_state", "step16_playhead")
+    return str(value).strip() or "step16_playhead"
+
+
 def normalize_mask(value: Any) -> int:
     if isinstance(value, list):
         value = value[0] if value else 0
