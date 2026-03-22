@@ -20,6 +20,7 @@ from shadowbox.renderer import create_renderer
 FPS = 20
 FRAME_DT = 1.0 / FPS
 REFRESH_SECONDS = 3.0
+STARTUP_MIN_SECONDS = 1.2
 STARTUP_DISCOVERY_TIMEOUT = 15.0
 STARTUP_DISCOVERY_POLL_SECONDS = 0.4
 STARTUP_STABLE_PASSES = 2
@@ -276,7 +277,10 @@ def main():
                         startup_signature = signature
                         startup_stable_passes = 1
 
-                    if startup_stable_passes >= STARTUP_STABLE_PASSES:
+                    if (
+                        startup_stable_passes >= STARTUP_STABLE_PASSES
+                        and (now - startup_started) >= STARTUP_MIN_SECONDS
+                    ):
                         break
                 else:
                     startup_signature = None

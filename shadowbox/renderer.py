@@ -928,30 +928,49 @@ class ShadowboxRenderer:
     def draw_startup_status(self, title: str, status_line: str = "", hint_line: str = "") -> None:
         self.display.clear()
         if self.is_tft:
-            scale = 3 if self.is_full_tft else 2
-            title_y = 54 if self.is_full_tft else 24
+            title_scale = 3 if self.is_full_tft else 2
+            status_scale = 1
+            hint_scale = 1
+            status_gap = 22 if self.is_full_tft else 14
+            hint_gap = 16 if self.is_full_tft else 12
             if title == "SHADOWBOX":
                 left = "SHADOW"
                 right = "BOX"
                 left_weight = "thin"
                 right_weight = "bold"
-                left_w, left_h = self._measure_text(left, scale, left_weight)
-                right_w, right_h = self._measure_text(right, scale, right_weight)
+                left_w, left_h = self._measure_text(left, title_scale, left_weight)
+                right_w, right_h = self._measure_text(right, title_scale, right_weight)
                 total_w = left_w + right_w
-                x = max(0, (self.display.width - total_w) // 2)
-                y = title_y
-                self._text(left, x, y, scale, left_weight)
-                self._text(right, x + left_w, y, scale, right_weight)
                 title_h = max(left_h, right_h)
             else:
-                title_h = self._measure_text(title, scale, "medium")[1]
-                self.text_center_scaled(title, title_y, scale)
+                total_w = self._measure_text(title, title_scale, "medium")[0]
+                title_h = self._measure_text(title, title_scale, "medium")[1]
 
-            status_y = title_y + title_h + (32 if self.is_full_tft else 22)
+            status_h = self._measure_text(status_line, status_scale)[1] if status_line else 0
+            hint_h = self._measure_text(hint_line, hint_scale)[1] if hint_line else 0
+            block_h = title_h
+            if status_h:
+                block_h += status_gap + status_h
+            if hint_h:
+                block_h += hint_gap + hint_h
+            title_y = max(0, (self.display.height - block_h) // 2)
+
+            if title == "SHADOWBOX":
+                x = max(0, (self.display.width - total_w) // 2)
+                self._text(left, x, title_y, title_scale, left_weight)
+                self._text(right, x + left_w, title_y, title_scale, right_weight)
+            else:
+                self.text_center_scaled(title, title_y, title_scale)
+
+            status_y = title_y + title_h + status_gap
             if status_line:
-                self.text_center(shorten(status_line, 44 if self.is_full_tft else 28), status_y)
+                self.text_center_scaled(shorten(status_line, 44 if self.is_full_tft else 28), status_y, status_scale)
             if hint_line:
-                self.text_center(shorten(hint_line, 34 if self.is_full_tft else 24), status_y + (26 if self.is_full_tft else 16))
+                self.text_center_scaled(
+                    shorten(hint_line, 34 if self.is_full_tft else 24),
+                    status_y + status_h + hint_gap,
+                    hint_scale,
+                )
         else:
             self.text_center(title, 28 if self.is_tall else 12)
             if status_line:

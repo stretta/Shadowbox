@@ -10,8 +10,11 @@ It provides:
 - Preset loading
 - Audio and MIDI routing
 - Basic system management
+- Startup audio-device recall
+- Startup discovery/status screen
 - Display interface for SSD1306, SSD1309, and ST7789 hardware
 - Rotary encoder navigation
+- Custom parameter editors for `step16`, TTID, and pitch display metadata
 
 Shadowbox complements the RNBO Runner web interface by providing a minimal physical control surface.
 
@@ -22,6 +25,7 @@ Shadowbox complements the RNBO Runner web interface by providing a minimal physi
 - [docs/uispec.md](./docs/uispec.md): UI behavior and interaction rules
 - [docs/architecture.md](./docs/architecture.md): codebase and runtime structure
 - [docs/walkthrough.md](./docs/walkthrough.md): end-to-end RNBO-to-Shadowbox editor flow, including `step16`
+- [docs/wiring.md](./docs/wiring.md): encoder and display wiring reference
 
 ---
 
@@ -59,6 +63,7 @@ https://www.adafruit.com/product/4484
 - Audio device switching
 - JACK restart
 - Startup configuration
+- Saved UI state in `~/rnbo-ui/shadowbox_state.json`
 
 ---
 
@@ -195,9 +200,9 @@ http://<pi-ip>:3000
 ```
 cd ~
 
-git clone https://github.com/stretta/shadowbox.git
+git clone https://github.com/stretta/shadowbox.git Shadowbox
 
-cd shadowbox
+cd Shadowbox
 ```
 
 ---
@@ -221,6 +226,14 @@ Install Python dependencies:
 ```
 pip install -r requirements.txt
 ```
+
+Run Shadowbox directly:
+
+```
+python -m shadowbox.shadowbox
+```
+
+If `pigpiod` is not running, startup will fail with `RuntimeError: pigpio daemon not running`.
 
 ---
 
@@ -288,6 +301,14 @@ shadowbox.service
 
 The installer uses `sudo` only for system package and service steps. It creates the virtual environment as your current user and generates a systemd unit for the current repository path.
 
+The repository also includes a static unit file at:
+
+```
+service/shadowbox.service
+```
+
+That file is a template for `/home/pi/shadowbox`. If your checkout lives elsewhere, either use `./install.sh` or update the unit before installing it manually.
+
 Display selection is controlled through environment variables. The service reads an optional config file at:
 
 ```
@@ -323,9 +344,7 @@ SHADOWBOX_LOGICAL_WIDTH=320
 SHADOWBOX_LOGICAL_HEIGHT=240
 ```
 
-The TFT backends now default to a full `320x240` logical framebuffer. You can
-still override `SHADOWBOX_LOGICAL_WIDTH` and `SHADOWBOX_LOGICAL_HEIGHT` if you
-want the older scaled-up rendering behavior while tuning layouts.
+The TFT backends default to a full `320x240` logical framebuffer. You can still override `SHADOWBOX_LOGICAL_WIDTH` and `SHADOWBOX_LOGICAL_HEIGHT` if you want the older scaled-up rendering behavior while tuning layouts.
 
 If the display uses `GPIO27` for reset, remap the encoder off that pin:
 
@@ -339,6 +358,7 @@ Encoder feel can also be tuned from the service env file:
 
 ```
 SHADOWBOX_ENCODER_STEPS_PER_DETENT=4
+SHADOWBOX_ENCODER_LONG_PRESS_SECONDS=0.6
 SHADOWBOX_ENCODER_AB_GLITCH_US=200
 SHADOWBOX_ENCODER_SW_GLITCH_US=8000
 SHADOWBOX_ENCODER_ACCEL_FAST_SECONDS=0.035
@@ -365,6 +385,8 @@ SHADOWBOX_I2C_BUS=1
 SHADOWBOX_I2C_ADDR=0x3C
 ```
 
+If `SHADOWBOX_DISPLAY` is not set, Shadowbox currently defaults to `ssd1309`.
+
 ---
 
 # 11. Start the service
@@ -389,18 +411,34 @@ sudo systemctl enable shadowbox
 
 Shadowbox will now start automatically on boot.
 
+For direct deploys to a Pi on your network, there is also a helper script:
+
+```
+tools/deploy_pi.sh
+```
+
+It syncs the repo with `rsync`, optionally installs Python requirements in the remote `.venv`, and restarts the `shadowbox` service. Override `PI_HOST`, `PI_USER`, `PI_PATH`, and related environment variables as needed.
+
 ---
 
 # Repository layout
 
 ```
 shadowbox/
+├── assets/
+├── docs/
+│   ├── architecture.md
+│   ├── uispec.md
+│   ├── walkthrough.md
+│   └── wiring.md
 ├── install.sh
 ├── requirements.txt
 ├── README.md
 ├── service/
 │   └── shadowbox.service
 ├── shadowbox/
+│   ├── data/
+│   ├── editors/
 │   ├── shadowbox.py
 │   ├── ui.py
 │   ├── renderer.py
@@ -408,6 +446,7 @@ shadowbox/
 │   ├── encoder.py
 │   └── display/
 └── tools/
+    ├── deploy_pi.sh
     ├── display_test.py
     ├── encoder_test.py
     └── encoder_display_test.py
@@ -446,6 +485,24 @@ Expected address:
 
 ```
 0x3C
+```
+
+For encoder and display pin mappings, see [docs/wiring.md](./docs/wiring.md).
+
+---
+
+## Encoder not responding
+
+Check the pigpio daemon:
+
+```
+systemctl status pigpiod
+```
+
+If needed:
+
+```
+sudo systemctl restart pigpiod
 ```
 
 ---
