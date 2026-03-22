@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
 
+import os
 import pigpio
 import time
 
-CLK = 17
-DT = 27
-SW = 22
+CLK = int(os.environ.get("SHADOWBOX_ENCODER_CLK", "17"), 0)
+DT = int(os.environ.get("SHADOWBOX_ENCODER_DT", "27"), 0)
+SW = int(os.environ.get("SHADOWBOX_ENCODER_SW", "22"), 0)
 
-STEPS_PER_DETENT = 4
+STEPS_PER_DETENT = int(os.environ.get("SHADOWBOX_ENCODER_STEPS_PER_DETENT", "4"), 0)
+AB_GLITCH_US = int(os.environ.get("SHADOWBOX_ENCODER_AB_GLITCH_US", "200"), 0)
+SW_GLITCH_US = int(os.environ.get("SHADOWBOX_ENCODER_SW_GLITCH_US", "8000"), 0)
+ACCEL_FAST_SECONDS = float(os.environ.get("SHADOWBOX_ENCODER_ACCEL_FAST_SECONDS", "0.035"))
+ACCEL_FAST_MULTIPLIER = int(os.environ.get("SHADOWBOX_ENCODER_ACCEL_FAST_MULTIPLIER", "2"), 0)
+ACCEL_TURBO_SECONDS = float(os.environ.get("SHADOWBOX_ENCODER_ACCEL_TURBO_SECONDS", "0.018"))
+ACCEL_TURBO_MULTIPLIER = int(os.environ.get("SHADOWBOX_ENCODER_ACCEL_TURBO_MULTIPLIER", "3"), 0)
 
 # quadrature decode table
 TRANS = (
@@ -27,9 +34,9 @@ for pin in (CLK, DT, SW):
     pi.set_mode(pin, pigpio.INPUT)
     pi.set_pull_up_down(pin, pigpio.PUD_UP)
 
-pi.set_glitch_filter(CLK, 200)
-pi.set_glitch_filter(DT, 200)
-pi.set_glitch_filter(SW, 8000)
+pi.set_glitch_filter(CLK, AB_GLITCH_US)
+pi.set_glitch_filter(DT, AB_GLITCH_US)
+pi.set_glitch_filter(SW, SW_GLITCH_US)
 
 
 def read_ab():
@@ -40,10 +47,11 @@ def read_ab():
 
 state = read_ab()
 accum = 0
+last_detent_at = None
 
 
 def on_ab(gpio, level, tick):
-    global state, accum
+    global state, accum, last_detent_at
 
     if level == 2:
         return
@@ -60,11 +68,29 @@ def on_ab(gpio, level, tick):
 
     if accum >= STEPS_PER_DETENT:
         accum -= STEPS_PER_DETENT
-        print("CW +1")
+        now = time.monotonic()
+        scale = 1
+        if last_detent_at is not None:
+            elapsed = now - last_detent_at
+            if ACCEL_TURBO_SECONDS > 0 and elapsed <= ACCEL_TURBO_SECONDS:
+                scale = ACCEL_TURBO_MULTIPLIER
+            elif ACCEL_FAST_SECONDS > 0 and elapsed <= ACCEL_FAST_SECONDS:
+                scale = ACCEL_FAST_MULTIPLIER
+        last_detent_at = now
+        print(f"CW +{scale}")
 
     elif accum <= -STEPS_PER_DETENT:
         accum += STEPS_PER_DETENT
-        print("CCW -1")
+        now = time.monotonic()
+        scale = 1
+        if last_detent_at is not None:
+            elapsed = now - last_detent_at
+            if ACCEL_TURBO_SECONDS > 0 and elapsed <= ACCEL_TURBO_SECONDS:
+                scale = ACCEL_TURBO_MULTIPLIER
+            elif ACCEL_FAST_SECONDS > 0 and elapsed <= ACCEL_FAST_SECONDS:
+                scale = ACCEL_FAST_MULTIPLIER
+        last_detent_at = now
+        print(f"CCW -{scale}")
 
 
 cb_a = pi.callback(CLK, pigpio.EITHER_EDGE, on_ab)
@@ -74,6 +100,13 @@ cb_b = pi.callback(DT, pigpio.EITHER_EDGE, on_ab)
 last_sw = 1
 
 print("Encoder test running")
+print(f"pins: clk={CLK} dt={DT} sw={SW}")
+print(f"steps_per_detent={STEPS_PER_DETENT} ab_glitch_us={AB_GLITCH_US} sw_glitch_us={SW_GLITCH_US}")
+print(
+    "accel:"
+    f" fast<={ACCEL_FAST_SECONDS:.3f}s x{ACCEL_FAST_MULTIPLIER}"
+    f" turbo<={ACCEL_TURBO_SECONDS:.3f}s x{ACCEL_TURBO_MULTIPLIER}"
+)
 print("Turn encoder or press button\n")
 
 try:

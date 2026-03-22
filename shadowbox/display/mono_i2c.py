@@ -124,19 +124,31 @@ class MonoI2CDisplay(DisplayBackend):
         self.vline(x, y, h, on)
         self.vline(x + w - 1, y, h, on)
 
-    def _draw_char(self, ch: str, x: int, y: int) -> None:
+    def _draw_char(self, ch: str, x: int, y: int, on: bool = True) -> None:
+        self._draw_char_scaled(ch, x, y, 1, on=on)
+
+    def _draw_char_scaled(self, ch: str, x: int, y: int, scale: int = 1, on: bool = True) -> None:
         o = ord(ch)
         if o < 32 or o > 126:
             o = ord("?")
 
         idx = (o - 32) * 5
+        scale = max(1, int(scale))
 
         for col in range(5):
             bits = FONT[idx + col]
             for row in range(7):
                 if bits & (1 << row):
-                    self.pixel(x + col, y + row, True)
+                    px = x + (col * scale)
+                    py = y + (row * scale)
+                    for dx in range(scale):
+                        for dy in range(scale):
+                            self.pixel(px + dx, py + dy, on)
 
-    def text(self, s: str, x: int, y: int) -> None:
+    def text(self, s: str, x: int, y: int, on: bool = True) -> None:
+        self.text_scaled(s, x, y, 1, on=on)
+
+    def text_scaled(self, s: str, x: int, y: int, scale: int = 1, on: bool = True) -> None:
+        scale = max(1, int(scale))
         for i, ch in enumerate(str(s)):
-            self._draw_char(ch, x + i * 6, y)
+            self._draw_char_scaled(ch, x + i * 6 * scale, y, scale, on=on)

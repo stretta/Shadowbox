@@ -1,3 +1,8 @@
 python-osc
 pigpio
 smbus2
+Pillow
+st7789
+numpy
+spidev
+gpiozero

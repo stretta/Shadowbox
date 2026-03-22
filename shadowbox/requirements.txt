@@ -1,3 +1,0 @@
-python-osc
-pigpio
-smbus2

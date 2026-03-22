@@ -12,9 +12,11 @@ The UI is organized around RNBO instances.
 
 2. Source of Truth
 
-- All runtime data comes from OSCQuery
+- Instance-scoped runtime data comes from OSCQuery
 - Shadowbox may store local UI state such as cursor position or startup preferences
 - Shadowbox must not invent patch, graph, preset, or routing structures that are not published
+- `SYSTEM` may expose a small curated set of host-level status or maintenance actions that are not owned by any instance and may come from local OS/integration data instead of OSCQuery
+- Non-OSCQuery `SYSTEM` features must be explicit, minimal, and documented; they must not be generalized into arbitrary host inspection
 
 Definitions:
 - Instance = one live published RNBO instance under `/rnbo/inst/<n>`
@@ -66,7 +68,7 @@ Rules:
 - Instance labels should use published alias/name when available
 - `ADD INSTANCE` should appear in the `INSTANCES` menu only if the backend exposes a supported command path for creating an instance from a patcher
 - `SYSTEM` is always present
-- Only published branches appear; empty branches may render as empty lists, but no synthetic content should be added
+- Outside `SYSTEM`, only published branches appear; empty branches may render as empty lists, but no synthetic content should be added
 
 4. Navigation Model
 
@@ -178,6 +180,7 @@ Supported editor types:
 - enum
 - ttid
 - step16
+- pitch_display
 
 Parameter rules:
 - Only editable published parameters are shown
@@ -193,7 +196,8 @@ Editor behavior:
 - Bool parameters use a dedicated boolean editor
 - Enum parameters use a list selector, regardless of option count
 - TTID uses a specialized editor only when the parameter metadata explicitly includes `editor: "ttid"`
-- `step16` uses a specialized live editor when the parameter metadata explicitly includes `editor: "step16"`
+- `step16` uses a specialized live editor when the parameter metadata explicitly includes `editor: "step16"`; its default runtime state key is `step16_playhead` and may be overridden with `playhead_state`
+- `pitch_display` uses a specialized live viewer when the parameter metadata explicitly includes `editor: "pitch_display"`; its default runtime state keys are `pitch_name` and `pitch_cents` and may be overridden with `pitch_state` and `cents_state`
 
 8. Presets
 
@@ -241,6 +245,8 @@ Rules:
 
 `SYSTEM` contains global controls and status not owned by a single instance.
 
+Unlike instance browsing and editing, `SYSTEM` may include a tightly scoped set of curated host-level information or actions that are sourced outside OSCQuery when they are not instance-owned and cannot be expressed through the published RNBO tree.
+
 Initial system areas:
 - status
 - audio device selection
@@ -248,7 +254,11 @@ Initial system areas:
 - startup behavior
 - maintenance actions
 
-System must remain clearly separate from per-instance editing and routing.
+Rules:
+- System must remain clearly separate from per-instance editing and routing
+- Per-instance structure, lifecycle, parameters, presets, and routing remain OSCQuery/published-command driven
+- Non-OSCQuery `SYSTEM` entries must be explicitly chosen product features, not a generic escape hatch for backend gaps
+- Host-derived `SYSTEM` data should stay read-only unless there is a deliberately integrated control path for that feature
 
 12. Rendering Contract
 
@@ -266,6 +276,13 @@ Screens must not:
 - modify published hierarchy
 - invent new structural categories
 - bypass navigation rules
+
+Display rendering rules:
+- Navigation behavior and screen semantics are shared across display types
+- Visual presentation may differ by display class
+- OLED rendering should prioritize compactness, legibility, and graphical simplicity
+- TFT rendering may use richer typography, banners, spacing, and other display-specific visual treatment
+- Display-specific styling must not change the underlying navigation model or screen meaning
 
 13. Constraints
 

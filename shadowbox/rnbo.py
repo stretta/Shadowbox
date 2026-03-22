@@ -383,23 +383,21 @@ def discover_patchers(tree: dict) -> list[str]:
 
 
 def discover_add_instance_path(tree: dict) -> str:
-    return str(
-        safe_get(
-            tree,
-            ["CONTENTS", "rnbo", "CONTENTS", "inst", "CONTENTS", "control", "CONTENTS", "load", "FULL_PATH"],
-            "/rnbo/inst/control/load",
-        )
+    value = safe_get(
+        tree,
+        ["CONTENTS", "rnbo", "CONTENTS", "inst", "CONTENTS", "control", "CONTENTS", "load", "FULL_PATH"],
+        "",
     )
+    return str(value) if value is not None else ""
 
 
 def discover_remove_instance_path(tree: dict) -> str:
-    return str(
-        safe_get(
-            tree,
-            ["CONTENTS", "rnbo", "CONTENTS", "inst", "CONTENTS", "control", "CONTENTS", "unload", "FULL_PATH"],
-            "/rnbo/inst/control/unload",
-        )
+    value = safe_get(
+        tree,
+        ["CONTENTS", "rnbo", "CONTENTS", "inst", "CONTENTS", "control", "CONTENTS", "unload", "FULL_PATH"],
+        "",
     )
+    return str(value) if value is not None else ""
 
 
 def discover_system(tree: dict) -> dict:
@@ -439,6 +437,11 @@ def discover_system(tree: dict) -> dict:
         ["CONTENTS", "rnbo", "CONTENTS", "info", "CONTENTS", "runner_version", "VALUE"],
         "",
     )
+    jack_restart_path = safe_get(
+        tree,
+        ["CONTENTS", "rnbo", "CONTENTS", "jack", "CONTENTS", "restart", "FULL_PATH"],
+        "",
+    )
 
     return {
         "audio": {
@@ -462,7 +465,7 @@ def discover_system(tree: dict) -> dict:
             "runner_version": runner_version,
         },
         "maint": {
-            "jack_restart_path": "/rnbo/jack/restart",
+            "jack_restart_path": str(jack_restart_path) if jack_restart_path is not None else "",
         },
     }
 
@@ -496,7 +499,9 @@ class RNBOClient:
             path = snapshot.system.get("audio", {}).get("card_path", "/rnbo/jack/config/card")
         self.send_value(path, device_name)
 
-    def restart_jack(self, path: str = "/rnbo/jack/restart") -> None:
+    def restart_jack(self, path: str) -> None:
+        if not path:
+            return
         self.send_trigger(path)
 
     def fetch_tree(self) -> dict:
@@ -518,8 +523,8 @@ class RNBOClient:
             return RNBOSnapshot(
                 instances=[],
                 patchers=[],
-                add_instance_path="/rnbo/inst/control/load",
-                remove_instance_path="/rnbo/inst/control/unload",
+                add_instance_path="",
+                remove_instance_path="",
                 system={
                     "audio": {
                         "card_path": "/rnbo/jack/config/card",
@@ -542,7 +547,7 @@ class RNBOClient:
                         "runner_version": "",
                     },
                     "maint": {
-                        "jack_restart_path": "/rnbo/jack/restart",
+                        "jack_restart_path": "",
                     },
                 },
             )

@@ -26,10 +26,15 @@ sudo apt install -y \
     python3-pip \
     python3-smbus \
     i2c-tools \
-    pigpio
+    pigpio \
+    python3-spidev \
+    python3-rpi.gpio
 
 echo "Enabling I2C..."
 sudo raspi-config nonint do_i2c 0
+
+echo "Enabling SPI..."
+sudo raspi-config nonint do_spi 0
 
 echo "Starting pigpio daemon..."
 sudo systemctl enable pigpiod
@@ -56,6 +61,9 @@ User=${RUN_USER}
 WorkingDirectory=${REPO_DIR}
 ExecStart=${VENV_PYTHON} -m shadowbox.shadowbox
 Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/default/shadowbox
 
 [Install]
 WantedBy=multi-user.target

@@ -9,6 +9,7 @@ https://github.com/stretta/shadowbox
 
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass
 
@@ -50,20 +51,42 @@ class EncoderInput:
 
     def __init__(
         self,
-        clk_pin: int = 17,
-        dt_pin: int = 27,
-        sw_pin: int = 22,
+        clk_pin: int | None = None,
+        dt_pin: int | None = None,
+        sw_pin: int | None = None,
         steps_per_detent: int = 4,
         ab_glitch_us: int = 200,
         sw_glitch_us: int = 8000,
         long_press_seconds: float = 0.6,
+        accel_fast_seconds: float = 0.035,
+        accel_fast_multiplier: int = 2,
+        accel_turbo_seconds: float = 0.018,
+        accel_turbo_multiplier: int = 3,
     ):
-        self.clk_pin = clk_pin
-        self.dt_pin = dt_pin
-        self.sw_pin = sw_pin
+        self.clk_pin = _env_int("SHADOWBOX_ENCODER_CLK", 17 if clk_pin is None else clk_pin)
+        self.dt_pin = _env_int("SHADOWBOX_ENCODER_DT", 27 if dt_pin is None else dt_pin)
+        self.sw_pin = _env_int("SHADOWBOX_ENCODER_SW", 22 if sw_pin is None else sw_pin)
 
-        self.steps_per_detent = steps_per_detent
-        self.long_press_seconds = long_press_seconds
+        self.steps_per_detent = _env_int("SHADOWBOX_ENCODER_STEPS_PER_DETENT", steps_per_detent)
+        self.long_press_seconds = _env_float("SHADOWBOX_ENCODER_LONG_PRESS_SECONDS", long_press_seconds)
+        ab_glitch_us = _env_int("SHADOWBOX_ENCODER_AB_GLITCH_US", ab_glitch_us)
+        sw_glitch_us = _env_int("SHADOWBOX_ENCODER_SW_GLITCH_US", sw_glitch_us)
+        self.accel_fast_seconds = max(
+            0.0,
+            _env_float("SHADOWBOX_ENCODER_ACCEL_FAST_SECONDS", accel_fast_seconds),
+        )
+        self.accel_fast_multiplier = max(
+            1,
+            _env_int("SHADOWBOX_ENCODER_ACCEL_FAST_MULTIPLIER", accel_fast_multiplier),
+        )
+        self.accel_turbo_seconds = max(
+            0.0,
+            _env_float("SHADOWBOX_ENCODER_ACCEL_TURBO_SECONDS", accel_turbo_seconds),
+        )
+        self.accel_turbo_multiplier = max(
+            1,
+            _env_int("SHADOWBOX_ENCODER_ACCEL_TURBO_MULTIPLIER", accel_turbo_multiplier),
+        )
 
         self._events: list[EncoderEvent] = []
 
@@ -82,6 +105,7 @@ class EncoderInput:
         self._enc_state = self._read_ab()
         self._enc_accum = 0
         self._last_move_sign = 0
+        self._last_detent_at: float | None = None
 
         self._press_started_at: float | None = None
         self._long_press_fired = False
@@ -128,11 +152,25 @@ class EncoderInput:
 
         if self._enc_accum >= self.steps_per_detent:
             self._enc_accum -= self.steps_per_detent
-            self._events.append(EncoderEvent(kind="rotate", delta=+1))
+            self._events.append(EncoderEvent(kind="rotate", delta=self._scaled_rotate_delta(+1)))
 
         elif self._enc_accum <= -self.steps_per_detent:
             self._enc_accum += self.steps_per_detent
-            self._events.append(EncoderEvent(kind="rotate", delta=-1))
+            self._events.append(EncoderEvent(kind="rotate", delta=self._scaled_rotate_delta(-1)))
+
+    def _scaled_rotate_delta(self, direction: int) -> int:
+        now = time.monotonic()
+        multiplier = 1
+
+        if self._last_detent_at is not None:
+            elapsed = now - self._last_detent_at
+            if self.accel_turbo_seconds > 0 and elapsed <= self.accel_turbo_seconds:
+                multiplier = self.accel_turbo_multiplier
+            elif self.accel_fast_seconds > 0 and elapsed <= self.accel_fast_seconds:
+                multiplier = self.accel_fast_multiplier
+
+        self._last_detent_at = now
+        return direction * multiplier
 
     # --------------------------------------------------------
     # button polling
@@ -179,3 +217,17 @@ class EncoderInput:
             self._cb_b.cancel()
         if hasattr(self, "_pi") and self._pi is not None:
             self._pi.stop()
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    return int(value, 0)
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    return float(value)

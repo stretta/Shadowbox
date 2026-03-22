@@ -29,9 +29,10 @@ The snapshot currently includes:
 
 Shadowbox currently discovers read-only instance state from:
 - `/rnbo/inst/<id>/state/...`
+- `/rnbo/inst/<id>/messages/out/...`
 - `/rnbo/inst/<id>/messages/out/state/...`
 
-This second path is important for RNBO message outports that Runner republishes through OSCQuery.
+These message paths are important for RNBO outports that Runner republishes through OSCQuery.
 
 3. Metadata-driven editors
 
@@ -40,6 +41,7 @@ Custom editors are selected through parameter metadata.
 Current specialized editors:
 - `ttid` via `{"editor":"ttid"}`
 - `step16` via `{"editor":"step16"}`
+- `pitch_display` via `{"editor":"pitch_display"}`
 
 If metadata is missing or malformed, Shadowbox falls back to the generic editor path.
 
@@ -52,12 +54,15 @@ The `step16` editor is designed for a 16-step binary sequence stored in one para
 Expected published structure:
 - editable param: `/rnbo/inst/<id>/params/<name>`
 - param metadata: `{"editor":"step16"}`
-- runtime playhead: `/rnbo/inst/<id>/messages/out/state/playhead`
+- runtime playhead: `/rnbo/inst/<id>/messages/out/step16_playhead`
 
 Expected semantics:
 - the editable parameter is a 16-bit mask in the range `0..65535`
 - bit 0 corresponds to step 1 in the UI
 - the playhead is a read-only integer-like value in the range `0..15`
+
+Optional metadata overrides:
+- `playhead_state`: alternate state key for the playhead
 
 Shadowbox behavior:
 - rotate moves the focus step
@@ -77,12 +82,32 @@ To support live updates, `shadowbox/shadowbox.py` starts a local OSC listener an
 - `/rnbo/listeners/add`
 
 Incoming OSC messages matching:
+- `/rnbo/inst/<id>/messages/out/...`
 - `/rnbo/inst/<id>/messages/out/state/...`
 
 are routed into the UI's cached instance state through:
 - `ui.apply_instance_state_update(instance_id, path, value)`
 
 This allows editors such as `step16` to update their runtime display without waiting for the normal refresh cycle.
+
+5a. Pitch display editor contract
+
+The `pitch_display` editor is a live viewer for two runtime state values, typically note name/number and pitch deviation in cents.
+
+Expected published structure:
+- viewer param: `/rnbo/inst/<id>/params/<name>`
+- param metadata: `{"editor":"pitch_display"}`
+- runtime pitch value: `/rnbo/inst/<id>/messages/out/pitch_name`
+- runtime cents value: `/rnbo/inst/<id>/messages/out/pitch_cents`
+
+Optional metadata overrides:
+- `pitch_state`: alternate state key for pitch
+- `cents_state`: alternate state key for cents
+
+Shadowbox behavior:
+- opening the parameter enters a live display-only screen
+- incoming OSC state updates keep the screen current in real time
+- short press or long press exits back to the parameter list
 
 6. RNBO authoring guidelines
 
@@ -94,7 +119,12 @@ For custom editor integration, the RNBO side should follow these rules:
 
 For `step16`, the recommended split is:
 - param: sequence mask
-- out/state: playhead
+- out: step16_playhead
+
+For the tuner-style pitch display, the recommended split is:
+- param: viewer/dummy parameter with `{"editor":"pitch_display"}`
+- out: pitch_name
+- out: pitch_cents
 
 7. Current limitations
 

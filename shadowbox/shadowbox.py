@@ -10,16 +10,19 @@ from time import monotonic, sleep
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import ThreadingOSCUDPServer
 
-from shadowbox.display import create_display
+from shadowbox.display import load_display_from_env
 from shadowbox.encoder import EncoderInput
 from shadowbox.rnbo import RNBOClient
 from shadowbox.ui import ShadowboxUI
-from shadowbox.renderer import ShadowboxRenderer
+from shadowbox.renderer import create_renderer
 
 
 FPS = 20
 FRAME_DT = 1.0 / FPS
 REFRESH_SECONDS = 3.0
+STARTUP_DISCOVERY_TIMEOUT = 15.0
+STARTUP_DISCOVERY_POLL_SECONDS = 0.4
+STARTUP_STABLE_PASSES = 2
 
 DIM_TIMEOUT = 120.0
 SLEEP_TIMEOUT = 600.0
@@ -85,6 +88,55 @@ def _playback_index(name: str) -> int:
 def _capture_index(name: str) -> int:
     match = re.fullmatch(r"system:capture_(\d+)", str(name))
     return int(match.group(1)) if match else 10**9
+
+
+def _snapshot_ready(snapshot) -> bool:
+    if snapshot is None:
+        return False
+    audio = snapshot.system.get("audio", {})
+    status = snapshot.system.get("status", {})
+    maint = snapshot.system.get("maint", {})
+    return bool(
+        snapshot.instances
+        or snapshot.patchers
+        or snapshot.add_instance_path
+        or snapshot.remove_instance_path
+        or status.get("runner_version")
+        or audio.get("current_card")
+        or audio.get("card_options")
+        or audio.get("sample_rate_options")
+        or maint.get("jack_restart_path")
+    )
+
+
+def _snapshot_signature(snapshot) -> tuple:
+    if snapshot is None:
+        return ()
+    audio = snapshot.system.get("audio", {})
+    status = snapshot.system.get("status", {})
+    maint = snapshot.system.get("maint", {})
+    return (
+        tuple((str(item.get("id", "")), str(item.get("label", ""))) for item in snapshot.instances),
+        tuple(str(item) for item in snapshot.patchers),
+        str(snapshot.add_instance_path),
+        str(snapshot.remove_instance_path),
+        str(status.get("runner_version", "")),
+        str(audio.get("current_card", "")),
+        tuple(str(item) for item in audio.get("card_options", [])),
+        tuple(str(item) for item in audio.get("sample_rate_options", [])),
+        str(maint.get("jack_restart_path", "")),
+    )
+
+
+def _startup_status_line(listener_spec: str, snapshot, stable_passes: int, timed_out: bool) -> str:
+    if timed_out:
+        return "oscquery unavailable or incomplete"
+    if not _snapshot_ready(snapshot):
+        return f"osc {listener_spec} waiting for oscquery"
+    instance_count = len(snapshot.instances)
+    if stable_passes <= 0:
+        return f"osc {listener_spec} discovered {instance_count} inst"
+    return f"osc {listener_spec} stable {stable_passes}/{STARTUP_STABLE_PASSES}"
 
 
 def _assign_next_unused_inputs(ui, rnbo, instance_id: str) -> bool:
@@ -176,7 +228,7 @@ def _assign_next_unused_outputs(ui, rnbo, instance_id: str) -> bool:
 
 
 def main():
-    display = create_display("ssd1309")
+    display = load_display_from_env(default_kind="ssd1309")
     display.init()
     display.set_contrast(BRIGHTNESS_NORMAL)
 
@@ -184,25 +236,67 @@ def main():
     osc_listener = RunnerOSCListener()
     encoder = EncoderInput()
     ui = ShadowboxUI(rnbo=rnbo)
-    renderer = ShadowboxRenderer(display=display)
+    renderer = create_renderer(display=display)
     ui.restore_from_saved_state()
     osc_listener.start()
     rnbo.send_value("/rnbo/listeners/add", osc_listener.listener_spec)
 
-    # Startup splash
-    renderer.draw_splash("SHADOWBOX")
-    sleep(1.2)
+    # Startup discovery
+    startup_started = monotonic()
+    startup_last_poll = 0.0
+    startup_stable_passes = 0
+    startup_signature = None
+    startup_timed_out = False
 
-    # Initial discovery
-    ui.set_busy(True, "refresh")
-    ui.apply_runner_snapshot(rnbo.discover())
-    ui.set_busy(False)
+    current_snapshot = None
+    proceed_from_timeout = False
+
+    while True:
+        now = monotonic()
+
+        for event in encoder.get_events():
+            if startup_timed_out and event.kind in {"short_press", "long_press"}:
+                proceed_from_timeout = True
+                break
+        if proceed_from_timeout:
+            break
+        else:
+            if (now - startup_last_poll) >= STARTUP_DISCOVERY_POLL_SECONDS:
+                startup_last_poll = now
+                ui.set_busy(True, "refresh")
+                current_snapshot = rnbo.discover()
+                ui.apply_runner_snapshot(current_snapshot)
+                ui.set_busy(False)
+
+                if _snapshot_ready(current_snapshot):
+                    signature = _snapshot_signature(current_snapshot)
+                    if signature == startup_signature:
+                        startup_stable_passes += 1
+                    else:
+                        startup_signature = signature
+                        startup_stable_passes = 1
+
+                    if startup_stable_passes >= STARTUP_STABLE_PASSES:
+                        break
+                else:
+                    startup_signature = None
+                    startup_stable_passes = 0
+
+            startup_timed_out = (now - startup_started) >= STARTUP_DISCOVERY_TIMEOUT
+            renderer.draw_startup_status(
+                "SHADOWBOX",
+                _startup_status_line(osc_listener.listener_spec, current_snapshot, startup_stable_passes, startup_timed_out),
+                "click to proceed" if startup_timed_out else "",
+            )
+            sleep(0.05)
+            continue
+        break
 
     # Always start clean at TOP level
     ui.reset_to_top()
 
     last_frame = 0.0
-    last_refresh = 0.0
+    last_refresh = monotonic()
     last_activity = monotonic()
 
     is_dimmed = False
@@ -320,7 +414,7 @@ def main():
                 elif action.kind == "set_audio_device":
                     ui.set_busy(True, "audio")
                     rnbo.set_audio_device(action.device_name)
-                    rnbo.restart_jack()
+                    rnbo.restart_jack(ui.state.system.get("maint", {}).get("jack_restart_path", ""))
                     sleep(0.6)
                     ui.apply_runner_snapshot(rnbo.discover())
                     ui.set_busy(False)
@@ -329,14 +423,14 @@ def main():
                     if action.path is not None:
                         ui.set_busy(True, "audio")
                         rnbo.send_value(action.path, action.value)
-                        rnbo.restart_jack()
+                        rnbo.restart_jack(ui.state.system.get("maint", {}).get("jack_restart_path", ""))
                         sleep(0.6)
                         ui.apply_runner_snapshot(rnbo.discover())
                         ui.set_busy(False)
 
                 elif action.kind == "restart_jack":
                     ui.set_busy(True, "audio")
-                    rnbo.restart_jack()
+                    rnbo.restart_jack(ui.state.system.get("maint", {}).get("jack_restart_path", ""))
                     sleep(0.6)
                     ui.apply_runner_snapshot(rnbo.discover())
                     ui.set_busy(False)

@@ -10,7 +10,7 @@ It provides:
 - Preset loading
 - Audio and MIDI routing
 - Basic system management
-- OLED display interface
+- Display interface for SSD1306, SSD1309, and ST7789 hardware
 - Rotary encoder navigation
 
 Shadowbox complements the RNBO Runner web interface by providing a minimal physical control surface.
@@ -32,6 +32,12 @@ Typical configuration:
 - Raspberry Pi 4 / 5
 - 128×32 I2C OLED display (SSD1306)
 - Rotary encoder with push button
+
+Also supported:
+
+- 128x64 I2C OLED display (SSD1309)
+- 240x320 SPI TFT display (ST7789)
+- Waveshare 2-inch LCD Module (ST7789V, 240x320 SPI)
 
 Example OLED module:
 
@@ -67,7 +73,7 @@ Tested on:
 
 ---
 
-# 1. Enable I2C
+# 1. Enable I2C / SPI
 
 Run:
 
@@ -78,6 +84,7 @@ sudo raspi-config
 Navigate to:
 
 Interface Options → I2C → Enable
+Interface Options → SPI → Enable
 
 Then reboot:
 
@@ -102,7 +109,9 @@ python3-pip \
 git \
 pigpio \
 python3-smbus \
-i2c-tools
+i2c-tools \
+python3-spidev \
+python3-rpi.gpio
 ```
 
 Enable pigpio:
@@ -278,6 +287,83 @@ shadowbox.service
 ```
 
 The installer uses `sudo` only for system package and service steps. It creates the virtual environment as your current user and generates a systemd unit for the current repository path.
+
+Display selection is controlled through environment variables. The service reads an optional config file at:
+
+```
+/etc/default/shadowbox
+```
+
+Example ST7789 configuration:
+
+```
+SHADOWBOX_DISPLAY=st7789
+SHADOWBOX_ST7789_SPI_BUS=0
+SHADOWBOX_ST7789_SPI_CS=0
+SHADOWBOX_ST7789_DC=9
+SHADOWBOX_ST7789_RST=13
+SHADOWBOX_ST7789_BACKLIGHT=19
+SHADOWBOX_ST7789_ROTATION=90
+SHADOWBOX_ST7789_WIDTH=320
+SHADOWBOX_ST7789_HEIGHT=240
+SHADOWBOX_LOGICAL_WIDTH=320
+SHADOWBOX_LOGICAL_HEIGHT=240
+```
+
+Example Waveshare 2-inch configuration:
+
+``` 
+SHADOWBOX_DISPLAY=waveshare_2inch
+SHADOWBOX_WAVESHARE_SPI_BUS=0
+SHADOWBOX_WAVESHARE_SPI_CS=0
+SHADOWBOX_WAVESHARE_DC=25
+SHADOWBOX_WAVESHARE_RST=27
+SHADOWBOX_WAVESHARE_BACKLIGHT=18
+SHADOWBOX_LOGICAL_WIDTH=320
+SHADOWBOX_LOGICAL_HEIGHT=240
+```
+
+The TFT backends now default to a full `320x240` logical framebuffer. You can
+still override `SHADOWBOX_LOGICAL_WIDTH` and `SHADOWBOX_LOGICAL_HEIGHT` if you
+want the older scaled-up rendering behavior while tuning layouts.
+
+If the display uses `GPIO27` for reset, remap the encoder off that pin:
+
+```
+SHADOWBOX_ENCODER_CLK=17
+SHADOWBOX_ENCODER_DT=26
+SHADOWBOX_ENCODER_SW=22
+```
+
+Encoder feel can also be tuned from the service env file:
+
+```
+SHADOWBOX_ENCODER_STEPS_PER_DETENT=4
+SHADOWBOX_ENCODER_AB_GLITCH_US=200
+SHADOWBOX_ENCODER_SW_GLITCH_US=8000
+SHADOWBOX_ENCODER_ACCEL_FAST_SECONDS=0.035
+SHADOWBOX_ENCODER_ACCEL_FAST_MULTIPLIER=2
+SHADOWBOX_ENCODER_ACCEL_TURBO_SECONDS=0.018
+SHADOWBOX_ENCODER_ACCEL_TURBO_MULTIPLIER=3
+```
+
+Lower `STEPS_PER_DETENT` makes one click register sooner. Higher `AB_GLITCH_US`
+filters more bounce but can make the knob feel heavier. The acceleration values
+let slow turns stay precise while fast turns jump farther through long lists.
+
+OLED examples:
+
+```
+SHADOWBOX_DISPLAY=ssd1306
+SHADOWBOX_I2C_BUS=1
+SHADOWBOX_I2C_ADDR=0x3C
+```
+
+```
+SHADOWBOX_DISPLAY=ssd1309
+SHADOWBOX_I2C_BUS=1
+SHADOWBOX_I2C_ADDR=0x3C
+```
 
 ---
 

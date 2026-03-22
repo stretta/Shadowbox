@@ -36,7 +36,6 @@ from shadowbox.editors.step16 import (
 STATE_PATH = Path.home() / "rnbo-ui" / "shadowbox_state.json"
 
 ROUTING_GROUP_ITEMS = ["INPUTS", "OUTPUTS"]
-SYSTEM_MENU_ITEMS = ["STATUS", "AUDIO", "NETWORK", "STARTUP", "MAINT"]
 SYSTEM_AUDIO_ITEMS = ["DEVICE", "SAMPLE RATE", "BUFFER SIZE"]
 REMOVE_INSTANCE_CONFIRM_ITEMS = ["..", "REMOVE"]
 
@@ -53,8 +52,8 @@ class UIAction:
 class UIState:
     instances: list[dict] = field(default_factory=list)
     patchers: list[str] = field(default_factory=list)
-    add_instance_path: str = "/rnbo/inst/control/load"
-    remove_instance_path: str = "/rnbo/inst/control/unload"
+    add_instance_path: str = ""
+    remove_instance_path: str = ""
     system: dict = field(default_factory=dict)
 
     ui_mode: str = "TOP"
@@ -384,6 +383,17 @@ class ShadowboxUI:
         return bool(self.state.instances and self.state.remove_instance_path)
 
     @property
+    def can_restart_jack(self) -> bool:
+        return bool(self.state.system.get("maint", {}).get("jack_restart_path"))
+
+    @property
+    def system_menu_items(self) -> list[str]:
+        items = ["STATUS", "AUDIO", "NETWORK", "STARTUP"]
+        if self.can_restart_jack:
+            items.append("MAINT")
+        return items
+
+    @property
     def active_instance(self) -> Optional[dict]:
         for instance in self.state.instances:
             if instance.get("id") == self.state.active_instance_id:
@@ -626,7 +636,7 @@ class ShadowboxUI:
     def _handle_rotate(self, delta: int) -> None:
         if delta == 0:
             return
-        step = 1 if delta > 0 else -1
+        step = delta
         self.state.activity_ticks += 1
 
         if self.state.ui_mode == "TOP":
@@ -663,7 +673,7 @@ class ShadowboxUI:
         elif self.state.ui_mode == "ROUTING_TARGETS":
             self.state.routing_target_cursor = self._cycle(self.state.routing_target_cursor, len(self.active_routing_targets) + 2, step)
         elif self.state.ui_mode == "SYSTEM_MENU":
-            self.state.system_cursor = self._cycle(self.state.system_cursor, len(SYSTEM_MENU_ITEMS) + 1, step)
+            self.state.system_cursor = self._cycle(self.state.system_cursor, len(self.system_menu_items) + 1, step)
         elif self.state.ui_mode == "SYSTEM_AUDIO":
             self.state.system_audio_cursor = self._cycle(self.state.system_audio_cursor, len(SYSTEM_AUDIO_ITEMS) + 1, step)
         elif self.state.ui_mode == "SYSTEM_AUDIO_DEVICE":
@@ -689,7 +699,10 @@ class ShadowboxUI:
                     if names:
                         self.state.edit_ttid_scale_index = (self.state.edit_ttid_scale_index + step) % len(names)
             elif is_step16_param(param):
-                self.state.edit_step16_focus = move_step16_focus(self.state.edit_step16_focus, step)
+                steps = abs(step)
+                direction = 1 if step > 0 else -1
+                for _ in range(steps):
+                    self.state.edit_step16_focus = move_step16_focus(self.state.edit_step16_focus, direction)
             elif is_pitch_display_param(param):
                 return
             else:
@@ -888,7 +901,7 @@ class ShadowboxUI:
             if self.state.system_cursor == 0:
                 self.state.ui_mode = "TOP"
             else:
-                choice = SYSTEM_MENU_ITEMS[self.state.system_cursor - 1]
+                choice = self.system_menu_items[self.state.system_cursor - 1]
                 if choice == "AUDIO":
                     self.state.ui_mode = "SYSTEM_AUDIO"
                     self.state.system_audio_cursor = 1

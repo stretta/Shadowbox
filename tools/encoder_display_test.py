@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 
+import os
 import time
 
 import pigpio
 from shadowbox.display import SSD1306Display
 
-CLK = 17
-DT = 27
-SW = 22
+CLK = int(os.environ.get("SHADOWBOX_ENCODER_CLK", "17"), 0)
+DT = int(os.environ.get("SHADOWBOX_ENCODER_DT", "27"), 0)
+SW = int(os.environ.get("SHADOWBOX_ENCODER_SW", "22"), 0)
 
 STEPS_PER_DETENT = 4
 

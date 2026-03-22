@@ -13,7 +13,7 @@ from shadowbox.editors.pitch_display import is_pitch_display_param
 from shadowbox.editors.step16 import build_cells, is_step16_param
 from shadowbox.editors.ttid import get_root_names, is_pc_on, is_ttid_param, note_name
 from shadowbox.rnbo import RNBO_PORT
-from shadowbox.ui import REMOVE_INSTANCE_CONFIRM_ITEMS, ROUTING_GROUP_ITEMS, SYSTEM_AUDIO_ITEMS, SYSTEM_MENU_ITEMS
+from shadowbox.ui import REMOVE_INSTANCE_CONFIRM_ITEMS, ROUTING_GROUP_ITEMS, SYSTEM_AUDIO_ITEMS
 
 
 def shorten(text: str, max_chars: int) -> str:
@@ -84,27 +84,213 @@ class ShadowboxRenderer:
     def __init__(self, display):
         self.display = display
 
+    def _text(self, text: str, x: int, y: int, scale: int = 1, weight: str = "regular", on: bool = True) -> None:
+        self.display.text_with_style(str(text), x, y, scale, weight, on=on)
+
+    def _measure_text(self, text: str, scale: int = 1, weight: str = "regular") -> tuple[int, int]:
+        return self.display.measure_text(str(text), scale, weight)
+
+    def _line_height(self, scale: int = 1, weight: str = "regular") -> int:
+        return self.display.line_height(scale, weight)
+
+    def _truncate_to_width(self, text: str, max_width: int, scale: int = 1, weight: str = "regular") -> str:
+        text = str(text)
+        if max_width <= 0:
+            return ""
+        if self._measure_text(text, scale, weight)[0] <= max_width:
+            return text
+        ellipsis = "..."
+        if self._measure_text(ellipsis, scale, weight)[0] > max_width:
+            return ""
+        truncated = text
+        while truncated:
+            truncated = truncated[:-1]
+            candidate = truncated + ellipsis
+            if self._measure_text(candidate, scale, weight)[0] <= max_width:
+                return candidate
+        return ellipsis
+
+    def _draw_right_aligned(self, text: str, right_x: int, y: int, scale: int = 1, weight: str = "regular") -> None:
+        text_w, _ = self._measure_text(text, scale, weight)
+        self._text(text, max(0, right_x - text_w), y, scale, weight)
+
+    def _draw_full_tft_row(
+        self,
+        y: int,
+        prefix: str,
+        left: str,
+        right: str = "",
+        selected: bool = False,
+        text_weight: str | None = None,
+    ) -> None:
+        left_x = self.full_tft_text_x
+        right_x = self.display.width - self.full_tft_right_padding
+        text_weight = text_weight or "regular"
+        prefix_text = f"{prefix} "
+        prefix_w, _ = self._measure_text(prefix_text, 2, text_weight)
+        right_text = str(right)
+        right_w = self._measure_text(right_text, 2, "medium")[0] if right_text else 0
+        gap = 12 if right_text else 0
+        available_left = max(0, right_x - left_x - prefix_w - right_w - gap)
+        left_text = self._truncate_to_width(left, available_left, 2, text_weight)
+        self._text(prefix_text, left_x, y, 2, text_weight)
+        self._text(left_text, left_x + prefix_w, y, 2, text_weight)
+        if right_text:
+            fitted_right = self._truncate_to_width(right_text, max(0, right_x - left_x - prefix_w - gap), 2, "medium")
+            self._draw_right_aligned(fitted_right, right_x, y, 2, "medium")
+
+    @property
+    def full_tft_text_x(self) -> int:
+        return 8
+
+    @property
+    def full_tft_right_padding(self) -> int:
+        return 8
+
+    @property
+    def layout_mode(self) -> str:
+        width = getattr(self.display, "width", 128)
+        height = getattr(self.display, "height", 32)
+        if width >= 320 and height >= 240:
+            return "tft_full"
+        if width >= 160 or height >= 96:
+            return "tft"
+        return "oled"
+
+    @property
+    def is_tft(self) -> bool:
+        return self.layout_mode in {"tft", "tft_full"}
+
+    @property
+    def is_full_tft(self) -> bool:
+        return self.layout_mode == "tft_full"
+
     @property
     def is_tall(self) -> bool:
         return getattr(self.display, "height", 32) >= 64
 
     @property
+    def header_height(self) -> int:
+        if self.is_full_tft:
+            return self._line_height(2, "semibold") + 8
+        if self.is_tft:
+            return 10
+        return 8
+
+    @property
+    def content_top(self) -> int:
+        return self.header_height + (4 if self.is_full_tft else 2 if self.is_tft else 0)
+
+    @property
+    def content_bottom(self) -> int:
+        return max(self.content_top, self.display.height - (10 if self.is_full_tft else 8 if self.is_tft else 0))
+
+    @property
     def content_rows(self) -> list[int]:
+        if self.is_full_tft:
+            rows = list(range(self.content_top + 8, self.content_bottom, self._line_height(2) + 4))
+            return rows or [self.content_top + 4]
+        if self.is_tft:
+            return [12, 22, 32, 42, 52, 62, 72, 82, 92, 102, 112]
         return [10, 20, 30, 40, 50] if self.is_tall else [8, 16, 24]
 
+    @property
+    def text_cols(self) -> int:
+        if self.is_full_tft:
+            usable_width = max(
+                0,
+                getattr(self.display, "width", 320) - self.full_tft_text_x - self.full_tft_right_padding,
+            )
+            sample_w, _ = self._measure_text("abcdefghijklmnopqrstuvwxyz", 2)
+            avg_char_w = max(1, sample_w // 26)
+            return max(8, usable_width // avg_char_w)
+        return max(8, getattr(self.display, "width", 128) // 6)
+
+    @property
+    def header_cols(self) -> int:
+        return max(8, self.text_cols - 2)
+
+    @property
+    def title_cols(self) -> int:
+        return max(8, self.text_cols - 1)
+
+    @property
+    def value_name_cols(self) -> int:
+        if self.is_full_tft:
+            return 30
+        return 13 if self.is_tft else 9
+
+    @property
+    def value_cols(self) -> int:
+        if self.is_full_tft:
+            return 18
+        return 11 if self.is_tft else 9
+
+    @property
+    def value_row_cols(self) -> int:
+        return max(12, self.text_cols - 2)
+
     def text_center(self, text: str, y: int) -> None:
-        x = max(0, (self.display.width - (len(str(text)) * 6)) // 2)
-        self.display.text(str(text), x, y)
+        if self.is_full_tft:
+            self.text_center_scaled(text, y, 2)
+            return
+        text = str(text)
+        x = max(0, (self.display.width - self._measure_text(text)[0]) // 2)
+        self._text(text, x, y)
 
     def text_center_scaled(self, text: str, y: int, scale: int = 1) -> None:
+        text = str(text)
         scale = max(1, int(scale))
-        x = max(0, (self.display.width - (len(str(text)) * 6 * scale)) // 2)
-        self.display.text_scaled(str(text), x, y, scale)
+        x = max(0, (self.display.width - self._measure_text(text, scale)[0]) // 2)
+        self._text(text, x, y, scale, "medium" if self.is_full_tft and scale >= 2 else "regular")
+
+    def edit_header_title(self, param: dict | None) -> str:
+        if not param:
+            return "EDIT"
+        return shorten(shorten_param_name(param.get("name", "")), 19 if self.is_full_tft else self.header_cols)
+
+    def edit_content_top(self, block_height: int) -> int:
+        available_top = self.content_top
+        available_height = max(0, self.display.height - available_top)
+        return max(available_top, available_top + ((available_height - block_height) // 2))
 
     def draw_header(self, title: str, busy: bool = False, ticks: int = 0) -> None:
-        self.display.text(shorten(title, 19), 0, 0)
+        self._text(shorten(title, self.header_cols), 0, 0)
         if busy:
-            self.display.text(activity_frame(ticks), 120, 0)
+            self._text(activity_frame(ticks), max(0, self.display.width - 8), 0)
+
+    def _draw_panel(self, x: int, y: int, w: int, h: int, title: str | None = None) -> None:
+        if self.is_full_tft:
+            if title:
+                self._text(self._truncate_to_width(title, max(0, w - 8), 2, "semibold"), x + 4, y + 2, 2, "semibold")
+            return
+        self.display.rect(x, y, w, h, True, False)
+        if title:
+            self._text(shorten(title, max(1, (w // 6) - 2)), x + 4, y + 2)
+            self.display.hline(x + 1, y + (12 if self.is_full_tft else 10), max(0, w - 2), True)
+
+    def _draw_text_block(self, x: int, y: int, lines: list[str], max_chars: int | None = None, line_step: int = 12) -> None:
+        width_chars = max_chars if max_chars is not None else max(1, (self.display.width - x) // 6)
+        for idx, line in enumerate(lines):
+            if self.is_full_tft:
+                self._text(self._truncate_to_width(line, self.display.width - x - self.full_tft_right_padding, 2), x, y + idx * line_step, 2)
+            else:
+                self._text(shorten(line, width_chars), x, y + idx * line_step)
+
+    def _content_panel_box(self) -> tuple[int, int, int, int]:
+        x = 0
+        y = self.content_top
+        w = self.display.width
+        h = max(0, self.display.height - y)
+        return x, y, w, h
+
+    def _panel_list_rows(self, panel_y: int, panel_h: int) -> list[int]:
+        if self.is_full_tft:
+            start = panel_y + 8
+            end = panel_y + max(8, panel_h - 20)
+            rows = list(range(start, end, self._line_height(2) + 4))
+            return rows or [start]
+        return [14, 22, 30, 38, 46, 54, 62, 70, 78, 86, 94, 102, 110]
 
     def list_window(self, selected_idx: int, total: int):
         rows = self.content_rows
@@ -121,26 +307,75 @@ class ShadowboxRenderer:
 
     def draw_menu_row(self, y: int, selected: bool, label: str) -> None:
         prefix = "> " if selected else "  "
-        self.display.text((prefix + shorten(label, 19))[:21], 0, y)
+        text = (prefix + shorten(label, self.value_row_cols))[: self.text_cols]
+        if self.is_full_tft:
+            self._draw_full_tft_row(y, ">" if selected else " ", label, selected=selected)
+            return
+        self._text(text, 0, y)
 
     def draw_value_row(self, y: int, selected: bool, name: str, value: Any) -> None:
         prefix = "> " if selected else "  "
-        left = shorten(shorten_param_name(name), 9)
-        right = shorten(format_display_value(value), 9)
-        self.display.text(f"{prefix}{left:<9} {right:>9}"[:21], 0, y)
+        left = shorten(shorten_param_name(name), self.value_name_cols)
+        right = shorten(format_display_value(value), self.value_cols)
+        row = f"{prefix}{left:<{self.value_name_cols}} {right:>{self.value_cols}}"
+        if self.is_full_tft:
+            self._draw_full_tft_row(y, ">" if selected else " ", left, right, selected)
+            return
+        self._text(row[: self.text_cols], 0, y)
 
     def draw_param_value_row(self, y: int, selected: bool, param: dict) -> None:
         prefix = "> " if selected else "  "
-        left = shorten(shorten_param_name(param.get("name", "")), 9)
-        right = shorten(format_param_value(param, param.get("value")), 9)
-        self.display.text(f"{prefix}{left:<9} {right:>9}"[:21], 0, y)
+        left = shorten(shorten_param_name(param.get("name", "")), self.value_name_cols)
+        right = shorten(format_param_value(param, param.get("value")), self.value_cols)
+        row = f"{prefix}{left:<{self.value_name_cols}} {right:>{self.value_cols}}"
+        if self.is_full_tft:
+            self._draw_full_tft_row(y, ">" if selected else " ", left, right, selected)
+            return
+        self._text(row[: self.text_cols], 0, y)
 
     def draw_string_list(self, items: list[str], selected_idx: int) -> None:
+        if self.is_tft:
+            self._draw_string_list_tft(items, selected_idx)
+            return
         indices, selected_row, rows = self.list_window(selected_idx, len(items))
         for row_idx, item_idx in enumerate(indices):
             self.draw_menu_row(rows[row_idx], row_idx == selected_row, items[item_idx])
 
+    def _draw_string_list_tft(self, items: list[str], selected_idx: int) -> None:
+        panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
+        self._draw_panel(panel_x, panel_y, panel_w, panel_h, None)
+
+        rows = self._panel_list_rows(panel_y, panel_h)
+        visible = len(rows)
+        total = len(items)
+        if total <= 0:
+            return
+        selected_idx = max(0, min(selected_idx, total - 1))
+        if total <= visible:
+            indices = list(range(total))
+            selected_row = selected_idx
+        else:
+            half = visible // 2
+            start = max(0, min(selected_idx - half, total - visible))
+            indices = list(range(start, start + visible))
+            selected_row = selected_idx - start
+
+        for row_idx, item_idx in enumerate(indices):
+            y = rows[row_idx]
+            selected = row_idx == selected_row
+            if selected and not self.is_full_tft:
+                self.display.rect(2, y - 2, max(0, self.display.width - 4), 12 if self.is_full_tft else 8, True, False)
+            prefix = ">" if selected else " "
+            line_limit = self.text_cols - 3 if self.is_full_tft else 50
+            if self.is_full_tft:
+                self._draw_full_tft_row(y, prefix, shorten(str(items[item_idx]), line_limit), selected=selected)
+            else:
+                self._text(f"{prefix} {shorten(str(items[item_idx]), line_limit)}"[: self.text_cols], 6, y)
+
     def draw_param_list(self, params: list[dict], selected_idx: int) -> None:
+        if self.is_tft:
+            self._draw_param_list_tft(params, selected_idx)
+            return
         indices, selected_row, rows = self.list_window(selected_idx, len(params) + 1)
         for row_idx, item_idx in enumerate(indices):
             if item_idx == 0:
@@ -149,8 +384,99 @@ class ShadowboxRenderer:
                 param = params[item_idx - 1]
                 self.draw_param_value_row(rows[row_idx], row_idx == selected_row, param)
 
+    def _draw_param_list_tft(self, params: list[dict], selected_idx: int) -> None:
+        items = [None] + list(params)
+        panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
+        self._draw_panel(panel_x, panel_y, panel_w, panel_h, None)
+
+        rows = self._panel_list_rows(panel_y, panel_h)
+        visible = len(rows)
+        total = len(items)
+        selected_idx = max(0, min(selected_idx, total - 1))
+        if total <= visible:
+            indices = list(range(total))
+            selected_row = selected_idx
+        else:
+            half = visible // 2
+            start = max(0, min(selected_idx - half, total - visible))
+            indices = list(range(start, start + visible))
+            selected_row = selected_idx - start
+
+        for row_idx, item_idx in enumerate(indices):
+            y = rows[row_idx]
+            selected = row_idx == selected_row
+            if item_idx == 0:
+                if selected and not self.is_full_tft:
+                    self.display.rect(2, y - 2, max(0, self.display.width - 4), 12 if self.is_full_tft else 8, True, False)
+                if self.is_full_tft:
+                    self._draw_full_tft_row(y, ">" if selected else " ", "..", selected=selected)
+                else:
+                    self._text(("> " if selected else "  ") + "..", 6, y)
+            else:
+                param = items[item_idx]
+                prefix = "> " if selected else "  "
+                if selected and not self.is_full_tft:
+                    self.display.rect(2, y - 2, max(0, self.display.width - 4), 12 if self.is_full_tft else 8, True, False)
+                if self.is_full_tft:
+                    right_cols = 8
+                    left_cols = max(8, self.text_cols - right_cols - 3)
+                else:
+                    left_cols = 33
+                    right_cols = 16
+                left = shorten(shorten_param_name(param.get("name", "")), left_cols)
+                right = shorten(format_param_value(param, param.get("value")), right_cols)
+                row = f"{prefix}{left:<{left_cols}} {right:>{right_cols}}"[: self.text_cols]
+                if self.is_full_tft:
+                    self._draw_full_tft_row(y, ">" if selected else " ", left, right, selected)
+                else:
+                    self._text(row, 6, y)
+
     def draw_preset_list(self, presets: list[dict], selected_idx: int) -> None:
         self.draw_string_list([".."] + [str(item.get("name", "")) for item in presets], selected_idx)
+
+    def draw_instance_list(self, ui) -> None:
+        items = [".."] + [str(item.get("label", "")) for item in ui.state.instances]
+        action_start = len(items)
+        if ui.can_add_instance:
+            items.append("ADD INSTANCE")
+        if ui.can_remove_instances:
+            items.append("REMOVE INSTANCE")
+        if self.is_tft:
+            self._draw_instance_list_tft(items, ui.state.instance_cursor, action_start)
+            return
+        self.draw_string_list(items, ui.state.instance_cursor)
+
+    def _draw_instance_list_tft(self, items: list[str], selected_idx: int, action_start: int) -> None:
+        panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
+        self._draw_panel(panel_x, panel_y, panel_w, panel_h, None)
+
+        rows = self._panel_list_rows(panel_y, panel_h)
+        visible = len(rows)
+        total = len(items)
+        if total <= 0:
+            return
+        selected_idx = max(0, min(selected_idx, total - 1))
+        if total <= visible:
+            indices = list(range(total))
+            selected_row = selected_idx
+        else:
+            half = visible // 2
+            start = max(0, min(selected_idx - half, total - visible))
+            indices = list(range(start, start + visible))
+            selected_row = selected_idx - start
+
+        for row_idx, item_idx in enumerate(indices):
+            y = rows[row_idx]
+            selected = row_idx == selected_row
+            label = str(items[item_idx])
+            prefix = ">" if selected else " "
+            text_weight = "semibold" if item_idx >= action_start else None
+            if self.is_full_tft:
+                self._draw_full_tft_row(y, prefix, label, selected=selected, text_weight=text_weight)
+            else:
+                if selected:
+                    self.display.rect(2, y - 2, max(0, self.display.width - 4), 8, True, False)
+                self._text(f"{prefix} {shorten(label, 50)}"[: self.text_cols], 6, y, weight=text_weight or "regular")
 
     def draw_enum_list(self, ui, selected_idx: int) -> None:
         labels = [str(item) for item in ui.active_enum_options]
@@ -169,11 +495,17 @@ class ShadowboxRenderer:
     def draw_routing_targets(self, ui, selected_idx: int) -> None:
         port = ui.selected_routing_port
         labels = ["..", "DISCONNECT"] + ui.active_routing_targets
+        if self.is_tft:
+            self._draw_routing_targets_tft(port, labels, selected_idx)
+            return
         self.draw_string_list(labels, selected_idx)
         if port and self.is_tall:
             current = port.get("connections", [])
-            current_text = "none" if not current else shorten(format_display_value(current), 18)
-            self.text_center(current_text, 56)
+            current_text = "none" if not current else shorten(format_display_value(current), self.title_cols)
+            self.text_center(current_text, self.content_rows[-1] + 2 if self.is_tft else 56)
+
+    def _draw_routing_targets_tft(self, port: dict | None, labels: list[str], selected_idx: int) -> None:
+        self._draw_string_list_tft(labels, selected_idx)
 
     def _is_bool_param(self, param: dict, value: Any) -> bool:
         metadata = param.get("metadata", {})
@@ -226,25 +558,51 @@ class ShadowboxRenderer:
         self._draw_steps(idx, len(vals), x, y, w, h)
 
     def _draw_choice_box(self, x: int, y: int, w: int, h: int, label: str, active: bool) -> None:
+        if self.is_full_tft:
+            prefix = "> " if active else "  "
+            self._text(prefix + label, x, y, 2, "medium" if active else "regular")
+            return
         self.display.rect(x, y, w, h, True, active)
         text_w = len(label) * 6
         tx = x + max(0, (w - text_w) // 2)
         ty = y + max(0, (h - 8) // 2)
-        self.display.text(label, tx, ty)
+        self._text(label, tx, ty)
 
     def draw_bool_edit(self, name: str, value: Any) -> None:
         if self.is_tall:
-            self.text_center(shorten(name, 21), 4)
-            box_y = 22
-            box_h = 22
-            box_w = 54
-            self._draw_choice_box(6, box_y, box_w, box_h, "OFF", not bool(value))
-            self._draw_choice_box(68, box_y, box_w, box_h, "ON", bool(value))
-            self.text_center("press = commit", 54)
+            if self.is_tft:
+                if self.is_full_tft:
+                    block_h = 98
+                    top = self.edit_content_top(block_h)
+                    box_y = top + 16
+                    gap = 48
+                    left = 44
+                    self._draw_choice_box(left, box_y, 0, 0, "OFF", not bool(value))
+                    self._draw_choice_box(left + 96 + gap, box_y, 0, 0, "ON", bool(value))
+                    self.text_center("press = commit", top + 86)
+                else:
+                    block_h = 60
+                    top = self.edit_content_top(block_h)
+                    box_y = top + 4
+                    box_h = 30
+                    box_w = 64
+                    self._draw_choice_box(12, box_y, box_w, box_h, "OFF", not bool(value))
+                    self._draw_choice_box(84, box_y, box_w, box_h, "ON", bool(value))
+                    self.text_center("press = commit", top + 54)
+            else:
+                block_h = 40
+                top = self.edit_content_top(block_h)
+                box_y = top
+                box_h = 22
+                box_w = 54
+                self._draw_choice_box(6, box_y, box_w, box_h, "OFF", not bool(value))
+                self._draw_choice_box(68, box_y, box_w, box_h, "ON", bool(value))
+                self.text_center("press = commit", top + 32)
         else:
-            self.text_center(shorten(name, 21), 0)
-            self.text_center("ON" if bool(value) else "OFF", 12)
-            self.display.text("< OFF   ON >", 20, 24)
+            block_h = 20
+            top = self.edit_content_top(block_h)
+            self.text_center("ON" if bool(value) else "OFF", top)
+            self._text("< OFF   ON >", 20, top + 12)
 
     def draw_enum_edit(self, name: str, vals: list[Any], value: Any) -> None:
         try:
@@ -252,21 +610,38 @@ class ShadowboxRenderer:
         except ValueError:
             idx = 0
 
-        current = shorten(format_display_value(vals[idx]), 21)
-        prev_value = shorten(format_display_value(vals[(idx - 1) % len(vals)]), 12) if vals else ""
-        next_value = shorten(format_display_value(vals[(idx + 1) % len(vals)]), 12) if vals else ""
+        current = shorten(format_display_value(vals[idx]), self.title_cols)
+        prev_value = shorten(format_display_value(vals[(idx - 1) % len(vals)]), self.value_name_cols) if vals else ""
+        next_value = shorten(format_display_value(vals[(idx + 1) % len(vals)]), self.value_name_cols) if vals else ""
         position = f"{idx + 1}/{len(vals)}" if vals else ""
 
         if self.is_tall:
-            self.text_center(shorten(name, 21), 2)
-            self.text_center(current, 24)
-            self.draw_menu_row(42, False, prev_value)
-            row = f"{position:>4} {next_value}"[:21]
-            self.display.text(row, 0, 52)
+            if self.is_tft:
+                if self.is_full_tft:
+                    block_h = 116
+                    top = self.edit_content_top(block_h)
+                    self.text_center_scaled(current, top + 8, 2)
+                    self.text_center(f"{prev_value}  {position}  {next_value}", top + 64)
+                    self.text_center("press = commit", top + 100)
+                else:
+                    block_h = 50
+                    top = self.edit_content_top(block_h)
+                    self.text_center(current, top)
+                    self.draw_menu_row(top + 28, False, prev_value)
+                    row = f"{position:>4} {next_value}"[: self.text_cols]
+                    self._text(row, 0, top + 42)
+            else:
+                block_h = 36
+                top = self.edit_content_top(block_h)
+                self.text_center(current, top)
+                self.draw_menu_row(top + 18, False, prev_value)
+                row = f"{position:>4} {next_value}"[:21]
+                self._text(row, 0, top + 28)
         else:
-            self.text_center(shorten(name, 21), 0)
-            self.text_center(current, 12)
-            self.text_center(position, 24)
+            block_h = 20
+            top = self.edit_content_top(block_h)
+            self.text_center(current, top)
+            self.text_center(position, top + 12)
 
     def _draw_ttid_keyboard(self, mask: int, selected_pc: int, x: int, y: int, w: int, h: int) -> None:
         white_h = h
@@ -319,67 +694,111 @@ class ShadowboxRenderer:
                 self._fill_rect(wx + 2, max(0, y - 4), max(3, white_w - 4), 3, True)
 
     def draw_edit_ttid(self, state, param) -> None:
-        title = shorten(shorten_param_name(param.get("name", "")), 21)
         mask = int(state.edit_value or 0)
         mode = state.edit_ttid_mode
         if self.is_tall:
-            self.text_center(title, 2)
             if mode == "keyboard":
-                self._draw_ttid_keyboard(mask, state.edit_ttid_selected_pc, 4, 16, 120, 32)
+                if self.is_full_tft:
+                    block_h = 152
+                    top = self.edit_content_top(block_h)
+                    self._draw_ttid_keyboard(mask, state.edit_ttid_selected_pc, 20, top, 280, 104)
+                else:
+                    block_h = 48
+                    top = self.edit_content_top(block_h)
+                    self._draw_ttid_keyboard(mask, state.edit_ttid_selected_pc, 4, top, 120, 32)
                 if state.edit_ttid_selected_pc == 12:
-                    self.display.rect(92, 52, 32, 10, True, False)
-                    self.text_center("LOAD", 54)
-                    self.display.text(str(mask), 4, 54)
+                    if self.is_full_tft:
+                        self._text("> LOAD", 196, top + 126, 2, "medium")
+                        self._text(str(mask), 24, top + 126, 2, "medium")
+                    else:
+                        self.display.rect(92, top + 36, 32, 10, True, False)
+                        self.text_center("LOAD", top + 38)
+                        self._text(str(mask), 4, top + 38)
                 else:
                     pc = state.edit_ttid_selected_pc
-                    self.display.text(note_name(pc), 4, 54)
-                    self.display.text("ON" if is_pc_on(mask, pc) else "OFF", 28, 54)
-                    self.display.text(str(mask), 84, 54)
+                    if self.is_full_tft:
+                        self._text(note_name(pc), 24, top + 126, 2, "medium")
+                        self._text("ON" if is_pc_on(mask, pc) else "OFF", 72, top + 126, 2, "medium")
+                        self._draw_right_aligned(str(mask), self.display.width - 24, top + 126, 2, "medium")
+                    else:
+                        self._text(note_name(pc), 4, top + 38)
+                        self._text("ON" if is_pc_on(mask, pc) else "OFF", 28, top + 38)
+                        self._text(str(mask), 84, top + 38)
             elif mode == "load_root":
                 roots = get_root_names()
-                self.text_center("load root", 16)
-                self.text_center(roots[state.edit_ttid_load_root % 12], 32)
-                self.text_center("press -> scale", 54)
+                if self.is_full_tft:
+                    block_h = 116
+                    top = self.edit_content_top(block_h)
+                    self.text_center("load root", top + 8)
+                    self.text_center_scaled(roots[state.edit_ttid_load_root % 12], top + 44, 2)
+                    self.text_center("press -> scale", top + 106)
+                else:
+                    block_h = 46
+                    top = self.edit_content_top(block_h)
+                    self.text_center("load root", top)
+                    self.text_center(roots[state.edit_ttid_load_root % 12], top + 16)
+                    self.text_center("press -> scale", top + 38)
             else:
                 names = state.edit_ttid_scale_names or ["major"]
                 idx = max(0, min(len(names) - 1, state.edit_ttid_scale_index))
-                self.text_center("load scale", 14)
-                self.text_center(shorten(names[idx], 18), 30)
-                self.text_center("press -> apply", 54)
+                if self.is_full_tft:
+                    block_h = 116
+                    top = self.edit_content_top(block_h)
+                    self.text_center("load scale", top + 8)
+                    self.text_center_scaled(shorten(names[idx], 18), top + 44, 2)
+                    self.text_center("press -> apply", top + 106)
+                else:
+                    block_h = 48
+                    top = self.edit_content_top(block_h)
+                    self.text_center("load scale", top)
+                    self.text_center(shorten(names[idx], 18), top + 16)
+                    self.text_center("press -> apply", top + 40)
         else:
-            self.text_center(title, 0)
+            block_h = 20
+            top = self.edit_content_top(block_h)
             if mode == "keyboard":
                 line = "LOAD" if state.edit_ttid_selected_pc == 12 else f"{note_name(state.edit_ttid_selected_pc)} {'ON' if is_pc_on(mask, state.edit_ttid_selected_pc) else 'OFF'}"
-                self.text_center(line, 12)
-                self.text_center(str(mask), 24)
+                self.text_center(line, top)
+                self.text_center(str(mask), top + 12)
             elif mode == "load_root":
-                self.text_center("root", 12)
-                self.text_center(get_root_names()[state.edit_ttid_load_root % 12], 24)
+                self.text_center("root", top)
+                self.text_center(get_root_names()[state.edit_ttid_load_root % 12], top + 12)
             else:
                 names = state.edit_ttid_scale_names or ["major"]
                 idx = max(0, min(len(names) - 1, state.edit_ttid_scale_index))
-                self.text_center(shorten(names[idx], 21), 18)
+                self.text_center(shorten(names[idx], 21), top + 6)
 
     def draw_edit_step16(self, ui, param, state) -> None:
-        title = shorten(shorten_param_name(param.get("name", "")), 21)
         cells = build_cells(int(state.edit_value or 0), state.edit_step16_focus, ui.active_step16_playhead)
 
         if self.is_tall:
-            self.text_center(title, 2)
-            origin_x = 8
-            origin_y = 16
-            cell_w = 12
-            cell_h = 16
-            gap = 3
-            text_y = 54
+            if self.is_full_tft:
+                origin_x = 20
+                block_h = 132
+                top = self.edit_content_top(block_h)
+                origin_y = top
+                cell_w = 30
+                cell_h = 48
+                gap = 6
+                text_y = top + 118
+            else:
+                origin_x = 8
+                block_h = 56
+                top = self.edit_content_top(block_h)
+                origin_y = top
+                cell_w = 12
+                cell_h = 16
+                gap = 3
+                text_y = top + 38
         else:
-            self.text_center(title, 0)
             origin_x = 8
-            origin_y = 10
+            block_h = 22
+            top = self.edit_content_top(block_h)
+            origin_y = top
             cell_w = 11
             cell_h = 8
             gap = 3
-            text_y = 24
+            text_y = top + 14
 
         for cell in cells:
             col = cell.index % 8
@@ -420,11 +839,17 @@ class ShadowboxRenderer:
         pitch_h = 14
         cents_h = 14
         gap = 4
+        if self.is_full_tft:
+            pitch_h = 36
+            cents_h = 24
+            gap = 16
         total_h = pitch_h + gap + cents_h
-        start_y = max(0, (self.display.height - total_h) // 2)
+        start_y = self.edit_content_top(total_h)
 
-        self.text_center_scaled(pitch_value, start_y, 2)
-        self.text_center_scaled(cents_text, start_y + pitch_h + gap, 2)
+        pitch_scale = 4 if self.is_full_tft else 2
+        cents_scale = 3 if self.is_full_tft else 2
+        self.text_center_scaled(pitch_value, start_y, pitch_scale)
+        self.text_center_scaled(cents_text, start_y + pitch_h + gap, cents_scale)
 
     def draw_edit(self, ui, selected_param: dict, state) -> None:
         if selected_param is None:
@@ -440,10 +865,21 @@ class ShadowboxRenderer:
             self.draw_edit_pitch_display(ui, selected_param)
             return
 
-        title_y, gfx_x, gfx_y, gfx_w, gfx_h, value_y = (4, 4, 20, 120, 24, 52) if self.is_tall else (0, 4, 12, 120, 12, 26)
+        if self.is_full_tft:
+            block_h = 96
+            top = self.edit_content_top(block_h)
+            gfx_x, gfx_y, gfx_w, gfx_h, value_y = (16, top, self.display.width - 32, 40, top + 64)
+        else:
+            if self.is_tall:
+                block_h = 56
+                top = self.edit_content_top(block_h)
+                gfx_x, gfx_y, gfx_w, gfx_h, value_y = (4, top, 120, 24, top + 32)
+            else:
+                block_h = 26
+                top = self.edit_content_top(block_h)
+                gfx_x, gfx_y, gfx_w, gfx_h, value_y = (4, top, 120, 12, top + 14)
         name = shorten_param_name(selected_param.get("name", ""))
         value = state.edit_value
-        self.text_center(shorten(name, 21), title_y)
 
         vals = selected_param.get("vals")
         pmin = selected_param.get("min")
@@ -466,10 +902,86 @@ class ShadowboxRenderer:
 
     def draw_splash(self, title: str = "SHADOWBOX") -> None:
         self.display.clear()
-        self.text_center(title, 28 if self.is_tall else 12)
+        if self.is_tft:
+            scale = 3 if self.is_full_tft else 2
+            if title == "SHADOWBOX":
+                left = "SHADOW"
+                right = "BOX"
+                left_weight = "thin"
+                right_weight = "bold"
+                left_w, left_h = self._measure_text(left, scale, left_weight)
+                right_w, right_h = self._measure_text(right, scale, right_weight)
+                total_w = left_w + right_w
+                text_h = max(left_h, right_h)
+                x = max(0, (self.display.width - total_w) // 2)
+                y = max(0, (self.display.height - text_h) // 2)
+                self._text(left, x, y, scale, left_weight)
+                self._text(right, x + left_w, y, scale, right_weight)
+            else:
+                text_height = 7 * scale
+                y = max(0, (self.display.height - text_height) // 2)
+                self.text_center_scaled(title, y, scale)
+        else:
+            self.text_center(title, 28 if self.is_tall else 12)
+        self.display.show()
+
+    def draw_startup_status(self, title: str, status_line: str = "", hint_line: str = "") -> None:
+        self.display.clear()
+        if self.is_tft:
+            scale = 3 if self.is_full_tft else 2
+            title_y = 54 if self.is_full_tft else 24
+            if title == "SHADOWBOX":
+                left = "SHADOW"
+                right = "BOX"
+                left_weight = "thin"
+                right_weight = "bold"
+                left_w, left_h = self._measure_text(left, scale, left_weight)
+                right_w, right_h = self._measure_text(right, scale, right_weight)
+                total_w = left_w + right_w
+                x = max(0, (self.display.width - total_w) // 2)
+                y = title_y
+                self._text(left, x, y, scale, left_weight)
+                self._text(right, x + left_w, y, scale, right_weight)
+                title_h = max(left_h, right_h)
+            else:
+                title_h = self._measure_text(title, scale, "medium")[1]
+                self.text_center_scaled(title, title_y, scale)
+
+            status_y = title_y + title_h + (32 if self.is_full_tft else 22)
+            if status_line:
+                self.text_center(shorten(status_line, 44 if self.is_full_tft else 28), status_y)
+            if hint_line:
+                self.text_center(shorten(hint_line, 34 if self.is_full_tft else 24), status_y + (26 if self.is_full_tft else 16))
+        else:
+            self.text_center(title, 28 if self.is_tall else 12)
+            if status_line:
+                self.text_center(shorten(status_line, self.text_cols), 44 if self.is_tall else 22)
+            if hint_line and self.is_tall:
+                self.text_center(shorten(hint_line, self.text_cols), 56)
         self.display.show()
 
     def draw_status(self, ui) -> None:
+        if self.is_tft:
+            status = ui.state.system.get("status", {})
+            cpu_text = "-" if status.get("cpu_load") is None else f"{status.get('cpu_load'):.1f}"
+            panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
+            self._draw_panel(panel_x, panel_y, panel_w, panel_h, None)
+            lines = [
+                f"instances  {len(ui.state.instances)}",
+                f"cpu        {cpu_text}",
+                f"xruns      {status.get('xruns', '-')}",
+                f"rnbo       {status.get('runner_version', '-')}",
+                f"set        {ui.state.system.get('set_name', '-')}",
+            ]
+            audio = ui.state.system.get("audio", {})
+            lines += [
+                f"device     {audio.get('device_name', '-')}",
+                f"rate       {audio.get('sample_rate', '-')}",
+                f"buffer     {audio.get('buffer_size', '-')}",
+                f"startup    {'ON' if ui.state.startup_enabled else 'OFF'}",
+            ]
+            self._draw_text_block(8, panel_y + 8, lines, max_chars=40 if not self.is_full_tft else 48, line_step=14 if self.is_full_tft else 10)
+            return
         rows = self.content_rows
         self.draw_value_row(rows[0], False, "inst", len(ui.state.instances))
         self.draw_value_row(rows[1], False, "cpu", "-" if ui.state.system.get("status", {}).get("cpu_load") is None else f"{ui.state.system['status']['cpu_load']:.1f}")
@@ -497,32 +1009,54 @@ class ShadowboxRenderer:
             sock.close()
         except Exception:
             ip = "?"
+        if self.is_tft:
+            panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
+            self._draw_panel(panel_x, panel_y, panel_w, panel_h, None)
+            self._draw_text_block(8, panel_y + 18, [f"ip     {ip}", f"osc    {RNBO_PORT}", f"host   127.0.0.1"], max_chars=40 if not self.is_full_tft else 48, line_step=14 if self.is_full_tft else 10)
+            return
         rows = self.content_rows
         self.draw_value_row(rows[0], False, "ip", ip)
         self.draw_value_row(rows[1], False, "osc", RNBO_PORT)
 
     def draw_startup(self, ui) -> None:
+        if self.is_tft:
+            panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
+            self._draw_panel(panel_x, panel_y, panel_w, panel_h, "STARTUP")
+            if self.is_full_tft:
+                self.text_center("startup behavior", panel_y + 34)
+                self.text_center_scaled("ON" if ui.state.startup_enabled else "OFF", panel_y + 76, 4)
+                self.text_center("press = toggle", panel_y + 156)
+            else:
+                self.text_center("startup behavior", 24)
+                self.text_center_scaled("ON" if ui.state.startup_enabled else "OFF", 44, 2)
+                self.text_center("press = toggle", 74)
+            return
         rows = self.content_rows
         self.draw_value_row(rows[1], False, "startup", "ON" if ui.state.startup_enabled else "OFF")
         if self.is_tall:
             self.text_center("press = toggle", 56)
 
     def draw_maint(self) -> None:
+        if self.is_tft:
+            panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
+            self._draw_panel(panel_x, panel_y, panel_w, panel_h, "MAINTENANCE")
+            if self.is_full_tft:
+                self.text_center("jack restart", panel_y + 58)
+                self.text_center("press to run", panel_y + 114)
+            else:
+                self.text_center("jack restart", 26)
+                self.text_center("press to run", 58)
+            return
         if self.is_tall:
             self.text_center("jack restart", 20)
             self.text_center("press to run", 40)
         else:
-            self.display.text("jack restart", 0, 10)
-            self.display.text("short press", 0, 22)
+            self._text("jack restart", 0, 10)
+            self._text("short press", 0, 22)
 
     def draw(self, ui) -> None:
         state = ui.state
         self.display.clear()
-
-        if state.ui_mode == "EDIT":
-            self.draw_edit(ui, ui.selected_param, state)
-            self.display.show()
-            return
 
         header = {
             "TOP": "SHADOWBOX",
@@ -547,17 +1081,16 @@ class ShadowboxRenderer:
             "STARTUP": "STARTUP",
             "MAINT": "MAINT",
         }.get(state.ui_mode, state.ui_mode)
+        if state.ui_mode == "EDIT":
+            header = self.edit_header_title(ui.selected_param)
         self.draw_header(header, busy=state.busy, ticks=state.activity_ticks)
 
-        if state.ui_mode == "TOP":
+        if state.ui_mode == "EDIT":
+            self.draw_edit(ui, ui.selected_param, state)
+        elif state.ui_mode == "TOP":
             self.draw_string_list(ui.top_level_items, state.top_index)
         elif state.ui_mode == "INSTANCE_LIST":
-            items = [".."] + [str(item.get("label", "")) for item in state.instances]
-            if ui.can_add_instance:
-                items.append("ADD INSTANCE")
-            if ui.can_remove_instances:
-                items.append("REMOVE INSTANCE")
-            self.draw_string_list(items, state.instance_cursor)
+            self.draw_instance_list(ui)
         elif state.ui_mode == "REMOVE_INSTANCE_PICKER":
             self.draw_string_list([".."] + [str(item.get("label", "")) for item in state.instances], state.remove_instance_picker_cursor)
         elif state.ui_mode == "PATCHER_PICKER":
@@ -579,7 +1112,7 @@ class ShadowboxRenderer:
         elif state.ui_mode == "ROUTING_TARGETS":
             self.draw_routing_targets(ui, state.routing_target_cursor)
         elif state.ui_mode == "SYSTEM_MENU":
-            self.draw_string_list([".."] + SYSTEM_MENU_ITEMS, state.system_cursor)
+            self.draw_string_list([".."] + ui.system_menu_items, state.system_cursor)
         elif state.ui_mode == "STATUS":
             self.draw_status(ui)
         elif state.ui_mode == "SYSTEM_AUDIO":
@@ -598,3 +1131,34 @@ class ShadowboxRenderer:
             self.draw_maint()
 
         self.display.show()
+
+
+class OledShadowboxRenderer(ShadowboxRenderer):
+    pass
+
+
+class TftShadowboxRenderer(ShadowboxRenderer):
+    def draw_header(self, title: str, busy: bool = False, ticks: int = 0) -> None:
+        banner_h = self.header_height
+        pad_x = 4
+        text_scale = 2 if self.is_full_tft else 1
+        text_weight = "semibold" if self.is_full_tft else "regular"
+        fitted = self._truncate_to_width(title, self.display.width - (pad_x * 2) - 20, text_scale, text_weight)
+        _, text_h = self._measure_text(fitted, text_scale, text_weight)
+        text_y = max(1, (banner_h - text_h) // 2)
+        self.display.rect(0, 0, self.display.width, banner_h, True, True)
+        self._text(fitted, pad_x, text_y, text_scale, text_weight, on=False)
+        if busy:
+            spinner_scale = 2 if self.is_full_tft else 1
+            spinner = activity_frame(ticks)
+            spinner_w, spinner_h = self._measure_text(spinner, spinner_scale, "medium")
+            spinner_y = max(1, (banner_h - spinner_h) // 2)
+            self._text(spinner, max(pad_x, self.display.width - pad_x - spinner_w), spinner_y, spinner_scale, "medium", on=False)
+
+
+def create_renderer(display) -> ShadowboxRenderer:
+    width = getattr(display, "width", 128)
+    height = getattr(display, "height", 32)
+    if width >= 160 or height >= 96:
+        return TftShadowboxRenderer(display=display)
+    return OledShadowboxRenderer(display=display)

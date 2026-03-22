@@ -8,6 +8,14 @@ SW  → GPIO22
 GND → GND
 VCC → 3.3V
 
+Waveshare 2-inch TFT variant
+
+CLK → GPIO17
+DT  → GPIO26
+SW  → GPIO22
+GND → GND
+VCC → 3.3V
+
 SSD1306 I2C display
 
 VCC → 3.3V

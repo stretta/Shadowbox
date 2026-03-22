@@ -14,8 +14,22 @@ class DisplayBackend:
     def show(self) -> None:
         raise NotImplementedError
 
-    def text(self, s: str, x: int, y: int) -> None:
+    def text(self, s: str, x: int, y: int, on: bool = True) -> None:
         raise NotImplementedError
+
+    def text_scaled(self, s: str, x: int, y: int, scale: int = 1, on: bool = True) -> None:
+        raise NotImplementedError
+
+    def text_with_style(self, s: str, x: int, y: int, scale: int = 1, weight: str = "regular", on: bool = True) -> None:
+        self.text_scaled(s, x, y, scale, on=on)
+
+    def measure_text(self, s: str, scale: int = 1, weight: str = "regular") -> tuple[int, int]:
+        scale = max(1, int(scale))
+        return len(str(s)) * 6 * scale, 7 * scale
+
+    def line_height(self, scale: int = 1, weight: str = "regular") -> int:
+        scale = max(1, int(scale))
+        return 8 * scale
 
     def pixel(self, x: int, y: int, on: bool = True) -> None:
         raise NotImplementedError
