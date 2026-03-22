@@ -1055,23 +1055,8 @@ class ShadowboxRenderer:
         if self.is_tall:
             self.text_center("press = toggle", 56)
 
-    def draw_maint(self) -> None:
-        if self.is_tft:
-            panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
-            self._draw_panel(panel_x, panel_y, panel_w, panel_h, "MAINTENANCE")
-            if self.is_full_tft:
-                self.text_center("jack restart", panel_y + 58)
-                self.text_center("press to run", panel_y + 114)
-            else:
-                self.text_center("jack restart", 26)
-                self.text_center("press to run", 58)
-            return
-        if self.is_tall:
-            self.text_center("jack restart", 20)
-            self.text_center("press to run", 40)
-        else:
-            self._text("jack restart", 0, 10)
-            self._text("short press", 0, 22)
+    def draw_maint(self, ui) -> None:
+        self.draw_string_list([".."] + ui.maint_menu_items, ui.state.maint_cursor)
 
     def draw(self, ui) -> None:
         state = ui.state
@@ -1147,7 +1132,7 @@ class ShadowboxRenderer:
         elif state.ui_mode == "STARTUP":
             self.draw_startup(ui)
         elif state.ui_mode == "MAINT":
-            self.draw_maint()
+            self.draw_maint(ui)
 
         self.display.show()
 

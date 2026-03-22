@@ -38,6 +38,8 @@ STATE_PATH = Path.home() / "rnbo-ui" / "shadowbox_state.json"
 ROUTING_GROUP_ITEMS = ["INPUTS", "OUTPUTS"]
 SYSTEM_AUDIO_ITEMS = ["DEVICE", "SAMPLE RATE", "BUFFER SIZE"]
 REMOVE_INSTANCE_CONFIRM_ITEMS = ["..", "REMOVE"]
+MAINT_ITEMS_REFRESH = "REFRESH"
+MAINT_ITEMS_RESTART_JACK = "RESTART JACK"
 
 
 @dataclass
@@ -71,6 +73,7 @@ class UIState:
     routing_target_cursor: int = 0
     system_cursor: int = 0
     system_audio_cursor: int = 0
+    maint_cursor: int = 0
     audio_device_cursor: int = 0
     sample_rate_cursor: int = 0
     buffer_size_cursor: int = 0
@@ -268,6 +271,7 @@ class ShadowboxUI:
         self.state.routing_target_cursor = 0
         self.state.system_cursor = 1
         self.state.system_audio_cursor = 1
+        self.state.maint_cursor = 1 if self.maint_menu_items else 0
         self.state.audio_device_cursor = 1 if self.audio_options else 0
         self.state.sample_rate_cursor = 1 if self.sample_rate_options else 0
         self.state.buffer_size_cursor = 1 if self.buffer_size_options else 0
@@ -324,6 +328,7 @@ class ShadowboxUI:
 
         self.state.param_cursor = clamp_index(self.state.param_cursor, len(self.active_params) + 1)
         self.state.preset_cursor = clamp_index(self.state.preset_cursor, len(self.active_presets) + 1)
+        self.state.maint_cursor = clamp_index(self.state.maint_cursor, len(self.maint_menu_items) + 1)
         self.state.routing_port_cursor = clamp_index(self.state.routing_port_cursor, len(self.active_routing_ports) + 1)
         self.state.routing_target_cursor = clamp_index(self.state.routing_target_cursor, len(self.active_routing_targets) + 2)
 
@@ -389,8 +394,15 @@ class ShadowboxUI:
     @property
     def system_menu_items(self) -> list[str]:
         items = ["STATUS", "AUDIO", "NETWORK", "STARTUP"]
-        if self.can_restart_jack:
+        if self.maint_menu_items:
             items.append("MAINT")
+        return items
+
+    @property
+    def maint_menu_items(self) -> list[str]:
+        items = [MAINT_ITEMS_REFRESH]
+        if self.can_restart_jack:
+            items.append(MAINT_ITEMS_RESTART_JACK)
         return items
 
     @property
@@ -614,7 +626,6 @@ class ShadowboxUI:
             "REMOVE_INSTANCE_PICKER",
             "REMOVE_INSTANCE_CONFIRM",
             "PRESET_LIST",
-            "PARAM_LIST",
             "ROUTING_GROUP",
             "ROUTING_PORTS",
             "EDIT",
@@ -676,6 +687,8 @@ class ShadowboxUI:
             self.state.system_cursor = self._cycle(self.state.system_cursor, len(self.system_menu_items) + 1, step)
         elif self.state.ui_mode == "SYSTEM_AUDIO":
             self.state.system_audio_cursor = self._cycle(self.state.system_audio_cursor, len(SYSTEM_AUDIO_ITEMS) + 1, step)
+        elif self.state.ui_mode == "MAINT":
+            self.state.maint_cursor = self._cycle(self.state.maint_cursor, len(self.maint_menu_items) + 1, step)
         elif self.state.ui_mode == "SYSTEM_AUDIO_DEVICE":
             self.state.audio_device_cursor = self._cycle(self.state.audio_device_cursor, len(self.audio_options) + 1, step)
         elif self.state.ui_mode == "SYSTEM_AUDIO_RATE":
@@ -822,7 +835,7 @@ class ShadowboxUI:
             else:
                 preset = self.selected_preset
                 if preset:
-                    self.queue_action(UIAction(kind="send_osc", path=preset.get("path"), value=preset.get("value")))
+                    self.queue_action(UIAction(kind="load_preset", path=preset.get("path"), value=preset.get("value")))
 
         elif self.state.ui_mode == "PARAM_LIST":
             if self.state.param_cursor == 0:
@@ -905,6 +918,9 @@ class ShadowboxUI:
                 if choice == "AUDIO":
                     self.state.ui_mode = "SYSTEM_AUDIO"
                     self.state.system_audio_cursor = 1
+                elif choice == "MAINT":
+                    self.state.ui_mode = "MAINT"
+                    self.state.maint_cursor = 1 if self.maint_menu_items else 0
                 else:
                     self.state.ui_mode = choice
 
@@ -915,13 +931,13 @@ class ShadowboxUI:
                 choice = SYSTEM_AUDIO_ITEMS[self.state.system_audio_cursor - 1]
                 if choice == "DEVICE":
                     self.state.ui_mode = "SYSTEM_AUDIO_DEVICE"
-                    self.state.audio_device_cursor = 1 if self.audio_options else 0
+                    self._sync_audio_index()
                 elif choice == "SAMPLE RATE":
                     self.state.ui_mode = "SYSTEM_AUDIO_RATE"
-                    self.state.sample_rate_cursor = 1 if self.sample_rate_options else 0
+                    self._sync_audio_index()
                 elif choice == "BUFFER SIZE":
                     self.state.ui_mode = "SYSTEM_AUDIO_BUFFER"
-                    self.state.buffer_size_cursor = 1 if self.buffer_size_options else 0
+                    self._sync_audio_index()
 
         elif self.state.ui_mode == "SYSTEM_AUDIO_DEVICE":
             if self.state.audio_device_cursor == 0:
@@ -953,7 +969,14 @@ class ShadowboxUI:
             self.queue_action(UIAction(kind="save_state"))
 
         elif self.state.ui_mode == "MAINT":
-            self.queue_action(UIAction(kind="restart_jack"))
+            if self.state.maint_cursor == 0:
+                self.state.ui_mode = "SYSTEM_MENU"
+            else:
+                choice = self.maint_menu_items[self.state.maint_cursor - 1]
+                if choice == MAINT_ITEMS_REFRESH:
+                    self.queue_action(UIAction(kind="refresh_snapshot"))
+                elif choice == MAINT_ITEMS_RESTART_JACK:
+                    self.queue_action(UIAction(kind="restart_jack"))
 
         elif self.state.ui_mode == "EDIT":
             param = self.selected_param

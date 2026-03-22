@@ -315,6 +315,18 @@ Display selection is controlled through environment variables. The service reads
 /etc/default/shadowbox
 ```
 
+You can also choose where Shadowbox lands after loading or replacing an instance:
+
+```
+SHADOWBOX_POST_LOAD_VIEW=instance
+```
+
+Supported values:
+
+- `instance` keeps the current behavior and returns to the instance menu
+- `parameters` jumps straight into the parameter list for the loaded instance
+- `presets` jumps straight into the preset list for the loaded instance
+
 Example ST7789 configuration:
 
 ```

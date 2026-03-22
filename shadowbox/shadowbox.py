@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from queue import Empty, SimpleQueue
 from threading import Thread
@@ -24,6 +25,7 @@ STARTUP_MIN_SECONDS = 1.2
 STARTUP_DISCOVERY_TIMEOUT = 15.0
 STARTUP_DISCOVERY_POLL_SECONDS = 0.4
 STARTUP_STABLE_PASSES = 2
+STARTUP_FOUND_HOLD_SECONDS = 1.0
 
 DIM_TIMEOUT = 120.0
 SLEEP_TIMEOUT = 600.0
@@ -31,6 +33,7 @@ BRIGHTNESS_NORMAL = 0x7F
 BRIGHTNESS_DIM = 0x10
 OSC_LISTEN_HOST = "127.0.0.1"
 OSC_LISTEN_PORT = 13333
+POST_LOAD_VIEW_DEFAULT = "instance"
 
 
 class RunnerOSCListener:
@@ -129,15 +132,31 @@ def _snapshot_signature(snapshot) -> tuple:
     )
 
 
-def _startup_status_line(listener_spec: str, snapshot, stable_passes: int, timed_out: bool) -> str:
-    if timed_out:
-        return "oscquery unavailable or incomplete"
-    if not _snapshot_ready(snapshot):
-        return f"osc {listener_spec} waiting for oscquery"
-    instance_count = len(snapshot.instances)
-    if stable_passes <= 0:
-        return f"osc {listener_spec} discovered {instance_count} inst"
-    return f"osc {listener_spec} stable {stable_passes}/{STARTUP_STABLE_PASSES}"
+def _post_load_view() -> str:
+    value = os.environ.get("SHADOWBOX_POST_LOAD_VIEW", POST_LOAD_VIEW_DEFAULT).strip().lower()
+    if value in {"instance", "parameters", "presets"}:
+        return value
+    return POST_LOAD_VIEW_DEFAULT
+
+
+def _apply_post_load_view(ui) -> None:
+    view = _post_load_view()
+    if view == "parameters":
+        ui.state.ui_mode = "PARAM_LIST"
+        ui.state.param_cursor = 1 if ui.active_params else 0
+        return
+    if view == "presets":
+        ui.state.ui_mode = "PRESET_LIST"
+        ui.state.preset_cursor = 1 if ui.active_presets else 0
+        return
+    ui.state.ui_mode = "INSTANCE_MENU"
+    ui.state.instance_menu_cursor = 1
+
+
+def _startup_status_lines(snapshot) -> tuple[str, str]:
+    if _snapshot_ready(snapshot):
+        return "OSCQuery Runner found!", "Launching..."
+    return "waiting for OSCQuery Runner", "(this is normal) press encoder to enter"
 
 
 def _assign_next_unused_inputs(ui, rnbo, instance_id: str) -> bool:
@@ -247,19 +266,19 @@ def main():
     startup_last_poll = 0.0
     startup_stable_passes = 0
     startup_signature = None
-    startup_timed_out = False
+    startup_found_at = None
 
     current_snapshot = None
-    proceed_from_timeout = False
+    proceed_from_startup = False
 
     while True:
         now = monotonic()
 
         for event in encoder.get_events():
-            if startup_timed_out and event.kind in {"short_press", "long_press"}:
-                proceed_from_timeout = True
+            if event.kind in {"short_press", "long_press"}:
+                proceed_from_startup = True
                 break
-        if proceed_from_timeout:
+        if proceed_from_startup:
             break
         else:
             if (now - startup_last_poll) >= STARTUP_DISCOVERY_POLL_SECONDS:
@@ -281,16 +300,20 @@ def main():
                         startup_stable_passes >= STARTUP_STABLE_PASSES
                         and (now - startup_started) >= STARTUP_MIN_SECONDS
                     ):
-                        break
+                        if startup_found_at is None:
+                            startup_found_at = now
                 else:
                     startup_signature = None
                     startup_stable_passes = 0
+                    startup_found_at = None
 
-            startup_timed_out = (now - startup_started) >= STARTUP_DISCOVERY_TIMEOUT
+            if startup_found_at is not None and (now - startup_found_at) >= STARTUP_FOUND_HOLD_SECONDS:
+                break
+            status_line, hint_line = _startup_status_lines(current_snapshot)
             renderer.draw_startup_status(
                 "SHADOWBOX",
-                _startup_status_line(osc_listener.listener_spec, current_snapshot, startup_stable_passes, startup_timed_out),
-                "click to proceed" if startup_timed_out else "",
+                status_line,
+                hint_line,
             )
             sleep(0.05)
             continue
@@ -348,6 +371,14 @@ def main():
                     if action.path is not None:
                         rnbo.send_value(action.path, action.value)
 
+                elif action.kind == "load_preset":
+                    if action.path is not None:
+                        ui.set_busy(True, "load")
+                        rnbo.send_value(action.path, action.value)
+                        sleep(0.2)
+                        ui.apply_runner_snapshot(rnbo.discover())
+                        ui.set_busy(False)
+
                 elif action.kind == "set_routing":
                     if action.path is not None:
                         ui.set_busy(True, "routing")
@@ -374,14 +405,15 @@ def main():
                                 after_ids = [inst.get("id") for inst in ui.state.instances]
                             ui.state.active_instance_id = new_ids[-1]
                             ui.state.instance_cursor = after_ids.index(new_ids[-1]) + 1
-                            ui.state.ui_mode = "INSTANCE_MENU"
-                            ui.state.instance_menu_cursor = 1
+                            _apply_post_load_view(ui)
                         ui.set_busy(False)
 
                 elif action.kind == "replace_instance":
                     if action.path is not None:
                         ui.set_busy(True, "load")
                         target_id = ui.state.active_instance_id
+                        before_ids = [inst.get("id") for inst in ui.state.instances]
+                        target_index = before_ids.index(target_id) if target_id in before_ids else max(ui.state.instance_cursor - 1, 0)
                         rnbo.send_value(action.path, action.value)
                         sleep(0.2)
                         ui.apply_runner_snapshot(rnbo.discover())
@@ -389,8 +421,20 @@ def main():
                         if target_id in after_ids:
                             ui.state.active_instance_id = target_id
                             ui.state.instance_cursor = after_ids.index(target_id) + 1
-                        ui.state.ui_mode = "INSTANCE_MENU"
-                        ui.state.instance_menu_cursor = 1
+                        else:
+                            new_ids = [item for item in after_ids if item not in before_ids]
+                            if new_ids:
+                                replacement_id = new_ids[-1]
+                                ui.state.active_instance_id = replacement_id
+                                ui.state.instance_cursor = after_ids.index(replacement_id) + 1
+                            elif after_ids:
+                                fallback_index = min(target_index, len(after_ids) - 1)
+                                ui.state.active_instance_id = after_ids[fallback_index]
+                                ui.state.instance_cursor = fallback_index + 1
+                            else:
+                                ui.state.active_instance_id = ""
+                                ui.state.instance_cursor = 0
+                        _apply_post_load_view(ui)
                         ui.set_busy(False)
 
                 elif action.kind == "remove_instance":
@@ -436,6 +480,11 @@ def main():
                     ui.set_busy(True, "audio")
                     rnbo.restart_jack(ui.state.system.get("maint", {}).get("jack_restart_path", ""))
                     sleep(0.6)
+                    ui.apply_runner_snapshot(rnbo.discover())
+                    ui.set_busy(False)
+
+                elif action.kind == "refresh_snapshot":
+                    ui.set_busy(True, "refresh")
                     ui.apply_runner_snapshot(rnbo.discover())
                     ui.set_busy(False)
 
