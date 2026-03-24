@@ -20,7 +20,7 @@ from shadowbox.ui import (
     display_as_int,
     display_precision,
 )
-from shadowbox.version import SHADOWBOX_BUILD_DATE, SHADOWBOX_VERSION
+from shadowbox.version import SHADOWBOX_BUILD_INFO, SHADOWBOX_VERSION
 
 
 def shorten(text: str, max_chars: int) -> str:
@@ -1403,8 +1403,8 @@ class ShadowboxRenderer:
             self.text_center("press = toggle", 56)
 
     def draw_about(self) -> None:
-        version_text = f"v{SHADOWBOX_VERSION}"
-        build_text = f"build {SHADOWBOX_BUILD_DATE}"
+        version_text = SHADOWBOX_VERSION
+        build_text = f"build {SHADOWBOX_BUILD_INFO}"
         if self.is_tft:
             panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
             self._draw_panel(panel_x, panel_y, panel_w, panel_h, None)
@@ -1422,10 +1422,12 @@ class ShadowboxRenderer:
                 self.text_center("github.com/stretta/Shadowbox", 82)
             return
         rows = self.content_rows
-        title_row = rows[1] if len(rows) > 1 else rows[0]
+        title_row = rows[0]
+        version_row = rows[1] if len(rows) > 1 else rows[0]
         meta_row = rows[2] if len(rows) > 2 else rows[-1]
         self.text_center("Shadowbox", title_row)
-        self.text_center(f"{version_text} {SHADOWBOX_BUILD_DATE}", meta_row)
+        self.text_center(version_text, version_row)
+        self.text_center(SHADOWBOX_BUILD_INFO, meta_row)
         if self.is_tall and len(rows) > 3:
             self.text_center("stretta.com", rows[3])
         if self.is_tall and len(rows) > 4:
