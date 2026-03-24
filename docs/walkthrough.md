@@ -34,18 +34,38 @@ Shadowbox currently discovers read-only instance state from:
 
 These message paths are important for RNBO outports that Runner republishes through OSCQuery.
 
-3. Metadata-driven editors
+3. Metadata-driven UI hints
 
-Custom editors are selected through parameter metadata.
+Shadowbox uses parameter metadata as its general UI hint mechanism.
+
+Metadata may be used for:
+- custom editor selection
+- display formatting such as units or decimal precision
+- edit behavior such as encoder step size or integer-style editing
+- runtime state key overrides for specialized live editors
+
+Common metadata keys:
+- `editor`
+- `unit`, `units`
+- `display_precision`
+- `display_as`
+- `edit_step`
+- `edit_as`
+- `bool`, `is_bool`, `boolean`
+- `playhead_state`, `pitch_state`, `cents_state`
+
+Custom editors are selected through the `editor` metadata key.
 
 Current specialized editors:
 - `ttid` via `{"editor":"ttid"}`
 - `step16` via `{"editor":"step16"}`
 - `pitch_display` via `{"editor":"pitch_display"}`
 
-If metadata is missing or malformed, Shadowbox falls back to the generic editor path.
+If metadata is missing or malformed, Shadowbox falls back to generic display and editor heuristics based on the published type and range.
 
 In practice, the metadata must appear in the published OSCQuery tree so that `rnbo.py` can parse it from the parameter's `meta` node.
+
+One practical use of this contract is recovering integer-style UI behavior from float-like RNBO Runner exports. For example, metadata such as `{"display_precision":0,"edit_step":1,"edit_as":"int"}` lets Shadowbox present and edit a value as integer-like even when the transport value is published as a float.
 
 4. Step16 editor contract
 
@@ -111,10 +131,10 @@ Shadowbox behavior:
 
 6. RNBO authoring guidelines
 
-For custom editor integration, the RNBO side should follow these rules:
+For metadata-driven UI integration, the RNBO side should follow these rules:
 - publish editable controls as parameters
 - publish runtime-only values as message out/state
-- use metadata to request specialized editors
+- use metadata to describe UI intent, including specialized editors, display hints, and edit behavior
 - keep UI navigation state out of the patch
 
 For `step16`, the recommended split is:

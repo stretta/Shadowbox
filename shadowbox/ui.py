@@ -7,6 +7,7 @@ Hardware UI for RNBO Runner
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -99,6 +100,7 @@ class UIState:
 
     saved_audio_card: str = ""
     startup_enabled: bool = False
+    current_presets: dict[str, str] = field(default_factory=dict)
 
 
 def load_state_file() -> dict:
@@ -131,6 +133,66 @@ def clamp(v: float, lo: Optional[float], hi: Optional[float]) -> float:
     return v
 
 
+def _metadata_dict(param: dict | None) -> dict[str, Any]:
+    if not isinstance(param, dict):
+        return {}
+    metadata = param.get("metadata", {})
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _metadata_text(param: dict | None, key: str) -> str:
+    value = _metadata_dict(param).get(key)
+    if isinstance(value, str):
+        return value.strip()
+    return ""
+
+
+def _metadata_number(param: dict | None, key: str) -> float | None:
+    value = _metadata_dict(param).get(key)
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+    elif isinstance(value, str) and value.strip():
+        try:
+            numeric = float(value.strip())
+        except ValueError:
+            return None
+    else:
+        return None
+    if not math.isfinite(numeric):
+        return None
+    return numeric
+
+
+def display_precision(param: dict | None) -> int | None:
+    numeric = _metadata_number(param, "display_precision")
+    if numeric is None:
+        return None
+    rounded = int(round(numeric))
+    if rounded < 0 or abs(numeric - rounded) > 1e-9:
+        return None
+    return rounded
+
+
+def display_as_int(param: dict | None) -> bool:
+    return _metadata_text(param, "display_as").lower() == "int"
+
+
+def edit_as_int(param: dict | None) -> bool:
+    ptype = param.get("type", "") if isinstance(param, dict) else ""
+    if ptype in ("i", "h", "I", "c"):
+        return True
+    return _metadata_text(param, "edit_as").lower() == "int"
+
+
+def edit_step(param: dict | None) -> float | None:
+    numeric = _metadata_number(param, "edit_step")
+    if numeric is None or numeric <= 0:
+        return None
+    return numeric
+
+
 def is_boolish(param: dict) -> bool:
     pmin = param.get("min")
     pmax = param.get("max")
@@ -153,9 +215,12 @@ def is_boolish(param: dict) -> bool:
 def numeric_step(param: dict) -> float:
     pmin = param.get("min")
     pmax = param.get("max")
-    ptype = param.get("type", "")
+    explicit_step = edit_step(param)
 
-    if ptype in ("i", "h", "I", "c"):
+    if explicit_step is not None:
+        return explicit_step
+
+    if edit_as_int(param):
         return 1
     if pmin is not None and pmax is not None:
         span = abs(pmax - pmin)
@@ -194,6 +259,8 @@ def normalize_current_value_for_edit(param: dict) -> Any:
 
     if value is None:
         return param["min"] if param.get("min") is not None else 0
+    if edit_as_int(param) and isinstance(value, (int, float)):
+        return int(round(value))
     return value
 
 
@@ -211,8 +278,10 @@ def apply_edit_delta(param: dict, current_value: Any, delta: int) -> Any:
 
     step = numeric_step(param)
     if isinstance(current_value, (int, float)):
+        if edit_as_int(param):
+            current_value = int(round(current_value))
         new_value = current_value + (step * delta)
-        if param.get("type", "") in ("i", "h", "I", "c"):
+        if edit_as_int(param):
             new_value = int(round(new_value))
         return clamp(new_value, param.get("min"), param.get("max"))
     return current_value
@@ -275,7 +344,7 @@ class ShadowboxUI:
         self.state.audio_device_cursor = 1 if self.audio_options else 0
         self.state.sample_rate_cursor = 1 if self.sample_rate_options else 0
         self.state.buffer_size_cursor = 1 if self.buffer_size_options else 0
-        self.state.active_instance_id = self.state.instances[0]["id"] if self.state.instances else ""
+        self.state.active_instance_id = str(self.state.instances[0]["id"]) if self.state.instances else ""
         self.state.active_transport = "audio"
         self.state.active_routing_direction = "inputs"
         self.state.patcher_picker_context = "add"
@@ -297,7 +366,7 @@ class ShadowboxUI:
             self.state.activity_ticks += 1
 
     def apply_runner_snapshot(self, snapshot) -> None:
-        current_id = self.state.active_instance_id
+        current_id = str(self.state.active_instance_id)
         current_param_path = self.selected_param.get("path") if self.selected_param else ""
 
         self.state.instances = snapshot.instances
@@ -306,9 +375,10 @@ class ShadowboxUI:
         self.state.remove_instance_path = snapshot.remove_instance_path
         self.state.system = snapshot.system
         self._sync_audio_index()
+        self._cleanup_current_presets()
 
         if self.state.instances:
-            instance_ids = [item.get("id", "") for item in self.state.instances]
+            instance_ids = [str(item.get("id", "")) for item in self.state.instances]
             if current_id in instance_ids:
                 self.state.active_instance_id = current_id
                 self.state.instance_cursor = instance_ids.index(current_id) + 1
@@ -358,6 +428,14 @@ class ShadowboxUI:
                     return True
         return False
 
+    def _cleanup_current_presets(self) -> None:
+        valid_ids = {str(item.get("id", "")) for item in self.state.instances if str(item.get("id", ""))}
+        self.state.current_presets = {
+            instance_id: preset_name
+            for instance_id, preset_name in self.state.current_presets.items()
+            if instance_id in valid_ids and preset_name
+        }
+
     @property
     def top_level_items(self) -> list[str]:
         return ["INSTANCES", "SYSTEM"]
@@ -393,7 +471,7 @@ class ShadowboxUI:
 
     @property
     def system_menu_items(self) -> list[str]:
-        items = ["STATUS", "AUDIO", "NETWORK", "STARTUP"]
+        items = ["STATUS", "AUDIO", "NETWORK", "STARTUP", "ABOUT"]
         if self.maint_menu_items:
             items.append("MAINT")
         return items
@@ -408,7 +486,7 @@ class ShadowboxUI:
     @property
     def active_instance(self) -> Optional[dict]:
         for instance in self.state.instances:
-            if instance.get("id") == self.state.active_instance_id:
+            if str(instance.get("id", "")) == str(self.state.active_instance_id):
                 return instance
         return None
 
@@ -458,6 +536,13 @@ class ShadowboxUI:
         return list(vals) if isinstance(vals, list) else []
 
     @property
+    def current_enum_value(self) -> Any:
+        param = self.selected_param
+        if not param:
+            return None
+        return param.get("value")
+
+    @property
     def selected_preset(self) -> Optional[dict]:
         idx = self.state.preset_cursor - 1
         if idx >= 0 and idx < len(self.active_presets):
@@ -465,10 +550,17 @@ class ShadowboxUI:
         return None
 
     @property
+    def current_preset_name(self) -> str:
+        instance_id = str(self.state.active_instance_id)
+        if not instance_id:
+            return ""
+        return str(self.state.current_presets.get(instance_id, ""))
+
+    @property
     def remove_instance_target(self) -> Optional[dict]:
         if self.state.pending_remove_instance_id:
             for instance in self.state.instances:
-                if instance.get("id") == self.state.pending_remove_instance_id:
+                if str(instance.get("id", "")) == str(self.state.pending_remove_instance_id):
                     return instance
         if self.active_instance is not None:
             return self.active_instance
@@ -512,6 +604,26 @@ class ShadowboxUI:
         return [int(v) for v in options] if isinstance(options, list) else []
 
     @property
+    def current_sample_rate(self) -> Optional[int]:
+        value = self.state.system.get("audio", {}).get("sample_rate")
+        if value is None:
+            return None
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return None
+
+    @property
+    def current_buffer_size(self) -> Optional[int]:
+        value = self.state.system.get("audio", {}).get("period_frames")
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @property
     def selected_routing_port(self) -> Optional[dict]:
         idx = self.state.routing_port_cursor - 1
         if idx >= 0 and idx < len(self.active_routing_ports):
@@ -524,6 +636,13 @@ class ShadowboxUI:
         if not port:
             return []
         return [str(item) for item in port.get("targets", []) if str(item)]
+
+    @property
+    def current_routing_targets(self) -> list[str]:
+        port = self.selected_routing_port
+        if not port:
+            return []
+        return [str(item) for item in port.get("connections", []) if str(item)]
 
     def _sync_audio_index(self) -> None:
         if self.current_audio_card in self.audio_options:
@@ -580,6 +699,13 @@ class ShadowboxUI:
         if not key:
             return None
         return self._find_active_state_value(key)
+
+    def remember_loaded_preset(self, preset_name: Any) -> None:
+        instance_id = str(self.state.active_instance_id)
+        preset_text = str(preset_name or "")
+        if not instance_id or not preset_text:
+            return
+        self.state.current_presets[instance_id] = preset_text
 
     @property
     def active_pitch_display_pitch(self) -> Optional[dict]:
@@ -660,7 +786,7 @@ class ShadowboxUI:
             )
             idx = self.state.instance_cursor - 1
             if idx >= 0 and idx < len(self.state.instances):
-                self.state.active_instance_id = self.state.instances[idx].get("id", "")
+                self.state.active_instance_id = str(self.state.instances[idx].get("id", ""))
         elif self.state.ui_mode == "REMOVE_INSTANCE_PICKER":
             self.state.remove_instance_picker_cursor = self._cycle(self.state.remove_instance_picker_cursor, len(self.state.instances) + 1, step)
         elif self.state.ui_mode == "PATCHER_PICKER":
@@ -734,7 +860,7 @@ class ShadowboxUI:
                 self.state.ui_mode = "INSTANCE_LIST"
                 self.state.instance_cursor = 1 if self.state.instances or self.can_add_instance or self.can_remove_instances else 0
                 if self.state.instances:
-                    self.state.active_instance_id = self.state.instances[0].get("id", "")
+                    self.state.active_instance_id = str(self.state.instances[0].get("id", ""))
             else:
                 self.state.ui_mode = "SYSTEM_MENU"
                 self.state.system_cursor = 1
@@ -760,7 +886,7 @@ class ShadowboxUI:
             else:
                 idx = self.state.remove_instance_picker_cursor - 1
                 if 0 <= idx < len(self.state.instances):
-                    self.state.pending_remove_instance_id = self.state.instances[idx].get("id", "")
+                    self.state.pending_remove_instance_id = str(self.state.instances[idx].get("id", ""))
                     self.state.ui_mode = "REMOVE_INSTANCE_CONFIRM"
                     self.state.remove_instance_confirm_cursor = 1
 
@@ -835,6 +961,7 @@ class ShadowboxUI:
             else:
                 preset = self.selected_preset
                 if preset:
+                    self.remember_loaded_preset(preset.get("name"))
                     self.queue_action(UIAction(kind="load_preset", path=preset.get("path"), value=preset.get("value")))
 
         elif self.state.ui_mode == "PARAM_LIST":
@@ -1061,7 +1188,7 @@ class ShadowboxUI:
             self.state.ui_mode = "TOP"
         elif self.state.ui_mode == "REMOVE_INSTANCE_CONFIRM":
             self.state.ui_mode = "REMOVE_INSTANCE_PICKER" if self.state.remove_instance_origin == "instance_list" else "INSTANCE_MENU"
-        elif self.state.ui_mode in ("STATUS", "NETWORK", "STARTUP", "MAINT"):
+        elif self.state.ui_mode in ("STATUS", "NETWORK", "STARTUP", "ABOUT", "MAINT"):
             self.state.ui_mode = "SYSTEM_MENU"
         elif self.state.ui_mode in ("SYSTEM_AUDIO_DEVICE", "SYSTEM_AUDIO_RATE", "SYSTEM_AUDIO_BUFFER"):
             self.state.ui_mode = "SYSTEM_AUDIO"

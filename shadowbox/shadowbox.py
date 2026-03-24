@@ -153,6 +153,51 @@ def _apply_post_load_view(ui) -> None:
     ui.state.instance_menu_cursor = 1
 
 
+def _find_dummy_audio_device(ui) -> str:
+    for option in ui.state.system.get("audio", {}).get("card_options", []):
+        name = str(option).strip()
+        if name and "dummy" in name.lower():
+            return name
+    return ""
+
+
+def _try_dummy_audio_fallback(ui, rnbo) -> bool:
+    audio = ui.state.system.get("audio", {})
+    if audio.get("input_targets") or audio.get("output_targets"):
+        return False
+
+    dummy_device = _find_dummy_audio_device(ui)
+    if not dummy_device:
+        return False
+
+    current_card = str(audio.get("current_card", "")).strip()
+    if current_card == dummy_device:
+        return False
+
+    rnbo.set_audio_device(dummy_device)
+    rnbo.restart_jack(ui.state.system.get("maint", {}).get("jack_restart_path", ""))
+    sleep(0.6)
+    ui.apply_runner_snapshot(rnbo.discover())
+    return True
+
+
+def _discover_new_instance_ids(ui, rnbo, before_ids: list[str], attempts: int = 5, delay: float = 0.2) -> tuple[list[str], list[str]]:
+    after_ids: list[str] = [str(inst.get("id", "")) for inst in ui.state.instances]
+    new_ids = [item for item in after_ids if item not in before_ids]
+    if new_ids:
+        return after_ids, new_ids
+
+    for attempt in range(1, max(0, attempts) + 1):
+        sleep(delay)
+        ui.apply_runner_snapshot(rnbo.discover())
+        after_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
+        new_ids = [item for item in after_ids if item not in before_ids]
+        if new_ids:
+            return after_ids, new_ids
+
+    return after_ids, []
+
+
 def _startup_status_lines(snapshot) -> tuple[str, str]:
     if _snapshot_ready(snapshot):
         return "OSCQuery Runner found!", "Launching..."
@@ -160,7 +205,7 @@ def _startup_status_lines(snapshot) -> tuple[str, str]:
 
 
 def _assign_next_unused_inputs(ui, rnbo, instance_id: str) -> bool:
-    instance = next((item for item in ui.state.instances if item.get("id") == instance_id), None)
+    instance = next((item for item in ui.state.instances if str(item.get("id", "")) == str(instance_id)), None)
     if not instance:
         return False
 
@@ -178,7 +223,7 @@ def _assign_next_unused_inputs(ui, rnbo, instance_id: str) -> bool:
 
     used_targets: set[str] = set()
     for other in ui.state.instances:
-        if other.get("id") == instance_id:
+        if str(other.get("id", "")) == str(instance_id):
             continue
         other_inputs = other.get("routing", {}).get("audio", {}).get("inputs", [])
         for port in other_inputs:
@@ -204,7 +249,7 @@ def _assign_next_unused_inputs(ui, rnbo, instance_id: str) -> bool:
 
 
 def _assign_next_unused_outputs(ui, rnbo, instance_id: str) -> bool:
-    instance = next((item for item in ui.state.instances if item.get("id") == instance_id), None)
+    instance = next((item for item in ui.state.instances if str(item.get("id", "")) == str(instance_id)), None)
     if not instance:
         return False
 
@@ -222,7 +267,7 @@ def _assign_next_unused_outputs(ui, rnbo, instance_id: str) -> bool:
 
     used_targets: set[str] = set()
     for other in ui.state.instances:
-        if other.get("id") == instance_id:
+        if str(other.get("id", "")) == str(instance_id):
             continue
         other_outputs = other.get("routing", {}).get("audio", {}).get("outputs", [])
         for port in other_outputs:
@@ -390,20 +435,20 @@ def main():
                 elif action.kind == "add_instance":
                     if action.path is not None:
                         ui.set_busy(True, "load")
-                        before_ids = [inst.get("id") for inst in ui.state.instances]
+                        before_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
                         rnbo.send_value(action.path, action.value)
-                        sleep(0.2)
-                        ui.apply_runner_snapshot(rnbo.discover())
-                        after_ids = [inst.get("id") for inst in ui.state.instances]
-                        new_ids = [item for item in after_ids if item not in before_ids]
+                        after_ids, new_ids = _discover_new_instance_ids(ui, rnbo, before_ids)
+                        if not new_ids and _try_dummy_audio_fallback(ui, rnbo):
+                            rnbo.send_value(action.path, action.value)
+                            after_ids, new_ids = _discover_new_instance_ids(ui, rnbo, before_ids)
                         if new_ids:
                             changed = _assign_next_unused_inputs(ui, rnbo, new_ids[-1])
                             changed = _assign_next_unused_outputs(ui, rnbo, new_ids[-1]) or changed
                             if changed:
                                 sleep(0.1)
                                 ui.apply_runner_snapshot(rnbo.discover())
-                                after_ids = [inst.get("id") for inst in ui.state.instances]
-                            ui.state.active_instance_id = new_ids[-1]
+                                after_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
+                            ui.state.active_instance_id = str(new_ids[-1])
                             ui.state.instance_cursor = after_ids.index(new_ids[-1]) + 1
                             _apply_post_load_view(ui)
                         ui.set_busy(False)
@@ -411,25 +456,25 @@ def main():
                 elif action.kind == "replace_instance":
                     if action.path is not None:
                         ui.set_busy(True, "load")
-                        target_id = ui.state.active_instance_id
-                        before_ids = [inst.get("id") for inst in ui.state.instances]
+                        target_id = str(ui.state.active_instance_id)
+                        before_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
                         target_index = before_ids.index(target_id) if target_id in before_ids else max(ui.state.instance_cursor - 1, 0)
                         rnbo.send_value(action.path, action.value)
                         sleep(0.2)
                         ui.apply_runner_snapshot(rnbo.discover())
-                        after_ids = [inst.get("id") for inst in ui.state.instances]
+                        after_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
                         if target_id in after_ids:
-                            ui.state.active_instance_id = target_id
+                            ui.state.active_instance_id = str(target_id)
                             ui.state.instance_cursor = after_ids.index(target_id) + 1
                         else:
                             new_ids = [item for item in after_ids if item not in before_ids]
                             if new_ids:
                                 replacement_id = new_ids[-1]
-                                ui.state.active_instance_id = replacement_id
+                                ui.state.active_instance_id = str(replacement_id)
                                 ui.state.instance_cursor = after_ids.index(replacement_id) + 1
                             elif after_ids:
                                 fallback_index = min(target_index, len(after_ids) - 1)
-                                ui.state.active_instance_id = after_ids[fallback_index]
+                                ui.state.active_instance_id = str(after_ids[fallback_index])
                                 ui.state.instance_cursor = fallback_index + 1
                             else:
                                 ui.state.active_instance_id = ""
@@ -441,15 +486,15 @@ def main():
                     if action.path is not None:
                         ui.set_busy(True, "load")
                         removed_id = str(action.value)
-                        before_ids = [inst.get("id") for inst in ui.state.instances]
+                        before_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
                         removed_index = before_ids.index(removed_id) if removed_id in before_ids else max(ui.state.instance_cursor - 1, 0)
                         rnbo.send_value(action.path, action.value)
                         sleep(0.2)
                         ui.apply_runner_snapshot(rnbo.discover())
-                        after_ids = [inst.get("id") for inst in ui.state.instances]
+                        after_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
                         if after_ids:
                             new_index = min(removed_index, len(after_ids) - 1)
-                            ui.state.active_instance_id = after_ids[new_index]
+                            ui.state.active_instance_id = str(after_ids[new_index])
                             ui.state.instance_cursor = after_ids.index(ui.state.active_instance_id) + 1
                         else:
                             ui.state.active_instance_id = ""

@@ -172,7 +172,7 @@ Rules:
 
 Parameters come from the instance `params` branch.
 
-Parameter type is determined from published metadata and attributes.
+Parameter type and UI behavior are determined from published metadata and attributes.
 
 Supported editor types:
 - numeric
@@ -186,6 +186,22 @@ Parameter rules:
 - Only editable published parameters are shown
 - Helper nodes such as normalized/index/meta may be hidden
 - Display should favor readable parameter names over raw transport detail
+- Metadata is the general mechanism for parameter UI hints, not only custom editor selection
+
+Recognized metadata categories:
+- Editor selection: `editor`
+- Display hints: `unit`, `units`, `display_precision`, `display_as`
+- Edit behavior: `edit_step`, `edit_as`, `bool`, `is_bool`, `boolean`
+- Runtime state wiring: `playhead_state`, `pitch_state`, `cents_state`
+
+Metadata behavior rules:
+- `editor` selects a specialized editor when its value matches a supported editor type
+- `unit` and `units` provide a display suffix only
+- `display_precision` controls decimal formatting only and does not imply encoder step size
+- `edit_step` controls encoder increment only and does not imply display formatting
+- `display_as` and `edit_as` are semantic UI hints; for example, `int` means the value should be rendered or edited as integer-like even if the published transport value is float-like
+- Boolean hints in metadata may override heuristic type detection when the published RNBO type is not specific enough
+- If metadata is absent or malformed, Shadowbox falls back to type/range heuristics and generic editor behavior
 
 Editor behavior:
 - Continuous numeric editors may update live while rotating
@@ -198,6 +214,7 @@ Editor behavior:
 - TTID uses a specialized editor only when the parameter metadata explicitly includes `editor: "ttid"`
 - `step16` uses a specialized live editor when the parameter metadata explicitly includes `editor: "step16"`; its default runtime state key is `step16_playhead` and may be overridden with `playhead_state`
 - `pitch_display` uses a specialized live viewer when the parameter metadata explicitly includes `editor: "pitch_display"`; its default runtime state keys are `pitch_name` and `pitch_cents` and may be overridden with `pitch_state` and `cents_state`
+- Numeric parameters may be presented as integer-style controls when metadata such as `display_precision: 0`, `edit_step: 1`, or `edit_as: "int"` is present, even if RNBO Runner publishes the raw value as float-like
 
 8. Presets
 
@@ -265,6 +282,7 @@ Rules:
 Each screen defines only:
 - visible items
 - selected index
+- optional current index or current value marker
 - optional value or routing display
 
 Each screen responds to:
@@ -283,6 +301,7 @@ Display rendering rules:
 - OLED rendering should prioritize compactness, legibility, and graphical simplicity
 - TFT rendering may use richer typography, banners, spacing, and other display-specific visual treatment
 - Display-specific styling must not change the underlying navigation model or screen meaning
+- Where a menu has both a cursor position and a current state, the cursor and current state must remain visually distinct
 
 13. Constraints
 
