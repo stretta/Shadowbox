@@ -1,11 +1,12 @@
 [Unit]
 Description=Shadowbox RNBO Hardware UI
-After=network.target
+Wants=pigpiod.service
+After=network.target pigpiod.service
 
 [Service]
 User=pi
-WorkingDirectory=/home/pi/shadowbox
-ExecStart=/home/pi/shadowbox/.venv/bin/python -m shadowbox.shadowbox
+WorkingDirectory=/home/pi/Shadowbox
+ExecStart=/home/pi/Shadowbox/.venv/bin/python -m shadowbox.shadowbox
 Restart=always
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1

@@ -982,15 +982,13 @@ class ShadowboxRenderer:
         if self.is_tall:
             if mode == "keyboard":
                 if self.is_full_tft:
-                    block_h = 152
+                    block_h = 134
                     top = self.edit_content_top(block_h)
-                    self._draw_edit_caption("toggle notes", top)
                     self._draw_ttid_keyboard(mask, state.edit_ttid_selected_pc, 20, top, 280, 104)
                 else:
-                    block_h = 58
+                    block_h = 48
                     top = self.edit_content_top(block_h)
-                    self._draw_edit_caption("toggle notes", top)
-                    self._draw_ttid_keyboard(mask, state.edit_ttid_selected_pc, 4, top + 10, 120, 32)
+                    self._draw_ttid_keyboard(mask, state.edit_ttid_selected_pc, 4, top, 120, 32)
                 if state.edit_ttid_selected_pc == 12:
                     if self.is_full_tft:
                         self._text("> LOAD", 196, top + 126, 2, "medium")
@@ -1547,9 +1545,14 @@ class ShadowboxRenderer:
         elif state.ui_mode == "INSTANCE_LIST":
             self.draw_instance_list(ui)
         elif state.ui_mode == "REMOVE_INSTANCE_PICKER":
-            self.draw_string_list([".."] + [str(item.get("label", "")) for item in state.instances], state.remove_instance_picker_cursor)
+            self.draw_string_list(
+                [".."] + [str(item.get("label", "")) for item in state.instances]
+                if state.instances
+                else ["..", "no instances"],
+                state.remove_instance_picker_cursor,
+            )
         elif state.ui_mode == "PATCHER_PICKER":
-            self.draw_string_list([".."] + state.patchers, state.patcher_cursor)
+            self.draw_string_list([".."] + state.patchers if state.patchers else ["..", "no patchers"], state.patcher_cursor)
         elif state.ui_mode == "INSTANCE_MENU":
             self.draw_string_list([".."] + ui.instance_menu_items, state.instance_menu_cursor)
         elif state.ui_mode == "REMOVE_INSTANCE_CONFIRM":

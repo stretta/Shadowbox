@@ -13,9 +13,11 @@ REPO_DIR="$(pwd)"
 RUN_USER="$(id -un)"
 VENV_PYTHON="${REPO_DIR}/.venv/bin/python"
 SERVICE_PATH="/etc/systemd/system/shadowbox.service"
+DISPLAY_KIND="${SHADOWBOX_DISPLAY:-ssd1309}"
 
 echo "Shadowbox installer"
 echo "==================="
+echo "Display backend: ${DISPLAY_KIND}"
 
 echo "Updating system..."
 sudo apt update
@@ -24,14 +26,28 @@ echo "Installing system dependencies..."
 sudo apt install -y \
     python3-venv \
     python3-pip \
-    python3-smbus \
-    i2c-tools \
     pigpio \
     python3-spidev \
     python3-rpi.gpio
 
-echo "Enabling I2C..."
-sudo raspi-config nonint do_i2c 0
+case "${DISPLAY_KIND}" in
+    ssd1306|ssd1309)
+        echo "Installing OLED/I2C dependencies..."
+        sudo apt install -y \
+            python3-smbus \
+            i2c-tools
+
+        echo "Enabling I2C..."
+        sudo raspi-config nonint do_i2c 0
+        ;;
+    st7789|st7789_raw|waveshare_2inch)
+        echo "Skipping I2C setup for TFT display backend."
+        ;;
+    *)
+        echo "Unknown SHADOWBOX_DISPLAY='${DISPLAY_KIND}'."
+        echo "Skipping display-specific I2C setup."
+        ;;
+esac
 
 echo "Enabling SPI..."
 sudo raspi-config nonint do_spi 0
@@ -54,7 +70,8 @@ echo "Installing systemd service..."
 sudo tee "${SERVICE_PATH}" >/dev/null <<EOF
 [Unit]
 Description=Shadowbox RNBO Hardware UI
-After=network.target
+Wants=pigpiod.service
+After=network.target pigpiod.service
 
 [Service]
 User=${RUN_USER}
@@ -73,7 +90,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable shadowbox
 
 echo "Starting Shadowbox..."
-sudo systemctl start shadowbox
+sudo systemctl restart shadowbox
 
 echo ""
 echo "Install complete."

@@ -451,11 +451,11 @@ class ShadowboxUI:
 
     @property
     def can_add_instance(self) -> bool:
-        return bool(self.state.add_instance_path and self.state.patchers)
+        return bool(self.state.add_instance_path)
 
     @property
     def can_replace_instance(self) -> bool:
-        return bool(self.active_instance and self.state.add_instance_path and self.state.patchers)
+        return bool(self.active_instance and self.state.add_instance_path)
 
     @property
     def can_remove_instance(self) -> bool:
@@ -463,7 +463,7 @@ class ShadowboxUI:
 
     @property
     def can_remove_instances(self) -> bool:
-        return bool(self.state.instances and self.state.remove_instance_path)
+        return bool(self.state.remove_instance_path)
 
     @property
     def can_restart_jack(self) -> bool:

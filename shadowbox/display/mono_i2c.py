@@ -49,7 +49,14 @@ FONT = bytes([
 
 class MonoI2CDisplay(DisplayBackend):
     def __init__(self, width: int, height: int, bus: int = 1, addr: int = 0x3C):
-        self.bus = smbus.SMBus(bus)
+        try:
+            self.bus = smbus.SMBus(bus)
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                f"I2C bus /dev/i2c-{bus} is not available. "
+                "Enable I2C for SSD1306/SSD1309 displays, or set SHADOWBOX_DISPLAY "
+                "to your SPI TFT backend (for example: st7789 or waveshare_2inch)."
+            ) from exc
         self.addr = addr
         self.width = width
         self.height = height

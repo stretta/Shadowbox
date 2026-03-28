@@ -7,6 +7,7 @@ import time
 CLK = int(os.environ.get("SHADOWBOX_ENCODER_CLK", "17"), 0)
 DT = int(os.environ.get("SHADOWBOX_ENCODER_DT", "27"), 0)
 SW = int(os.environ.get("SHADOWBOX_ENCODER_SW", "22"), 0)
+BACK = int(os.environ.get("SHADOWBOX_BACK_BUTTON_PIN", "0"), 0)
 
 STEPS_PER_DETENT = int(os.environ.get("SHADOWBOX_ENCODER_STEPS_PER_DETENT", "4"), 0)
 AB_GLITCH_US = int(os.environ.get("SHADOWBOX_ENCODER_AB_GLITCH_US", "200"), 0)
@@ -30,13 +31,19 @@ if not pi.connected:
     print("pigpio daemon not running")
     exit()
 
-for pin in (CLK, DT, SW):
+button_pins = [CLK, DT, SW]
+if BACK > 0 and BACK not in button_pins:
+    button_pins.append(BACK)
+
+for pin in button_pins:
     pi.set_mode(pin, pigpio.INPUT)
     pi.set_pull_up_down(pin, pigpio.PUD_UP)
 
 pi.set_glitch_filter(CLK, AB_GLITCH_US)
 pi.set_glitch_filter(DT, AB_GLITCH_US)
 pi.set_glitch_filter(SW, SW_GLITCH_US)
+if BACK > 0:
+    pi.set_glitch_filter(BACK, int(os.environ.get("SHADOWBOX_BACK_BUTTON_GLITCH_US", str(SW_GLITCH_US)), 0))
 
 
 def read_ab():
@@ -98,9 +105,10 @@ cb_b = pi.callback(DT, pigpio.EITHER_EDGE, on_ab)
 
 
 last_sw = 1
+last_back = 1
 
 print("Encoder test running")
-print(f"pins: clk={CLK} dt={DT} sw={SW}")
+print(f"pins: clk={CLK} dt={DT} sw={SW} back={BACK if BACK > 0 else 'disabled'}")
 print(f"steps_per_detent={STEPS_PER_DETENT} ab_glitch_us={AB_GLITCH_US} sw_glitch_us={SW_GLITCH_US}")
 print(
     "accel:"
@@ -121,6 +129,15 @@ try:
                 print("SW pressed")
             else:
                 print("SW released")
+
+        if BACK > 0:
+            back = pi.read(BACK)
+            if back != last_back:
+                last_back = back
+                if back == 0:
+                    print("BACK long_press")
+                else:
+                    print("BACK released")
 
         time.sleep(0.01)
 

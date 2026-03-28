@@ -13,6 +13,13 @@ def _env_int(name: str, default: int) -> int:
     return int(value, 0)
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def load_display_from_env(default_kind: str = "ssd1309"):
     kind = os.environ.get("SHADOWBOX_DISPLAY", default_kind).strip().lower()
     kwargs = {}
@@ -35,6 +42,23 @@ def load_display_from_env(default_kind: str = "ssd1309"):
             offset_top=_env_int("SHADOWBOX_ST7789_OFFSET_TOP", 0),
             logical_width=_env_int("SHADOWBOX_LOGICAL_WIDTH", 320),
             logical_height=_env_int("SHADOWBOX_LOGICAL_HEIGHT", 240),
+        )
+    elif kind == "st7789_raw":
+        kwargs.update(
+            bus=_env_int("SHADOWBOX_ST7789_SPI_BUS", 0),
+            cs=_env_int("SHADOWBOX_ST7789_SPI_CS", 0),
+            dc=_env_int("SHADOWBOX_ST7789_DC", 25),
+            rst=None if os.environ.get("SHADOWBOX_ST7789_RST", "24").strip().lower() == "none" else _env_int("SHADOWBOX_ST7789_RST", 24),
+            backlight=None if os.environ.get("SHADOWBOX_ST7789_BACKLIGHT", "18").strip().lower() == "none" else _env_int("SHADOWBOX_ST7789_BACKLIGHT", 18),
+            spi_speed_hz=_env_int("SHADOWBOX_ST7789_SPI_SPEED_HZ", 40_000_000),
+            rotation=_env_int("SHADOWBOX_ST7789_ROTATION", 0),
+            physical_width=_env_int("SHADOWBOX_ST7789_WIDTH", 320),
+            physical_height=_env_int("SHADOWBOX_ST7789_HEIGHT", 240),
+            offset_left=_env_int("SHADOWBOX_ST7789_OFFSET_LEFT", 0),
+            offset_top=_env_int("SHADOWBOX_ST7789_OFFSET_TOP", 0),
+            logical_width=_env_int("SHADOWBOX_LOGICAL_WIDTH", 320),
+            logical_height=_env_int("SHADOWBOX_LOGICAL_HEIGHT", 240),
+            invert_colors=_env_bool("SHADOWBOX_ST7789_INVERT", False),
         )
     elif kind == "waveshare_2inch":
         kwargs.update(
@@ -60,6 +84,10 @@ def create_display(kind: str = "ssd1306", **kwargs):
         from shadowbox.display.st7789 import ST7789Display
 
         return ST7789Display(**kwargs)
+    if kind == "st7789_raw":
+        from shadowbox.display.st7789_raw import ST7789RawDisplay
+
+        return ST7789RawDisplay(**kwargs)
     if kind == "waveshare_2inch":
         from shadowbox.display.waveshare_2inch import Waveshare2InchDisplay
 

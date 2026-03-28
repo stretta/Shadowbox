@@ -88,8 +88,19 @@ sudo raspi-config
 
 Navigate to:
 
+For OLED builds:
+
+```
 Interface Options → I2C → Enable
+```
+
+For SPI TFT builds:
+
+```
 Interface Options → SPI → Enable
+```
+
+If you are using a TFT-only build, I2C is not required.
 
 Then reboot:
 
@@ -103,7 +114,7 @@ sudo reboot
 
 ⚠️ On the RNBO image **do not run `sudo apt upgrade`**.
 
-Install only the required packages:
+Install the required packages:
 
 ```
 sudo apt update
@@ -113,10 +124,14 @@ python3-venv \
 python3-pip \
 git \
 pigpio \
-python3-smbus \
-i2c-tools \
 python3-spidev \
 python3-rpi.gpio
+```
+
+For OLED builds, also install:
+
+```
+sudo apt install -y python3-smbus i2c-tools
 ```
 
 Enable pigpio:
@@ -233,11 +248,33 @@ Run Shadowbox directly:
 python -m shadowbox.shadowbox
 ```
 
+On TFT builds, export the display backend first or Shadowbox will fall back to
+the default OLED backend (`ssd1309`), which expects `/dev/i2c-1`.
+
+Library-backed ST7789 example:
+
+```
+export SHADOWBOX_DISPLAY=st7789
+python -m shadowbox.shadowbox
+```
+
+Raw ST7789 example for custom modules that stay blank with the library-backed
+driver:
+
+```
+export SHADOWBOX_DISPLAY=st7789_raw
+python -m shadowbox.shadowbox
+```
+
+Use `waveshare_2inch` instead if that matches your display wiring.
+
 If `pigpiod` is not running, startup will fail with `RuntimeError: pigpio daemon not running`.
 
 ---
 
-# 7. Test I2C display
+# 7. Test display
+
+For OLED builds:
 
 Run:
 
@@ -258,6 +295,15 @@ Typical OLED address:
 ```
 0x3C
 ```
+
+For ST7789 TFT builds, use the raw hardware test:
+
+```
+python -m tools.st7789_raw_test
+```
+
+If the raw test works but `SHADOWBOX_DISPLAY=st7789` stays blank, use
+`SHADOWBOX_DISPLAY=st7789_raw`.
 
 ---
 
@@ -290,6 +336,15 @@ Turning the encoder should update the OLED display.
 From the repository root:
 
 ```
+./install.sh
+```
+
+The installer checks `SHADOWBOX_DISPLAY` to decide whether I2C setup is needed.
+For TFT builds, export the display backend before running it so the installer can
+skip OLED/I2C setup:
+
+```
+export SHADOWBOX_DISPLAY=st7789_raw
 ./install.sh
 ```
 
@@ -343,6 +398,27 @@ SHADOWBOX_LOGICAL_WIDTH=320
 SHADOWBOX_LOGICAL_HEIGHT=240
 ```
 
+The generic `st7789` backend uses the Python `st7789` package. Some custom
+modules work better with the raw backend below.
+
+If a custom ST7789 module works with `tools/st7789_raw_test.py` but stays blank
+with the library-backed `st7789` driver, try the raw backend instead:
+
+```
+SHADOWBOX_DISPLAY=st7789_raw
+SHADOWBOX_ST7789_SPI_BUS=0
+SHADOWBOX_ST7789_SPI_CS=0
+SHADOWBOX_ST7789_DC=25
+SHADOWBOX_ST7789_RST=24
+SHADOWBOX_ST7789_BACKLIGHT=18
+SHADOWBOX_ST7789_ROTATION=0
+SHADOWBOX_ST7789_WIDTH=320
+SHADOWBOX_ST7789_HEIGHT=240
+SHADOWBOX_LOGICAL_WIDTH=320
+SHADOWBOX_LOGICAL_HEIGHT=240
+SHADOWBOX_ST7789_INVERT=0
+```
+
 Example Waveshare 2-inch configuration:
 
 ``` 
@@ -364,6 +440,7 @@ If the display uses `GPIO27` for reset, remap the encoder off that pin:
 SHADOWBOX_ENCODER_CLK=17
 SHADOWBOX_ENCODER_DT=26
 SHADOWBOX_ENCODER_SW=22
+SHADOWBOX_BACK_BUTTON_PIN=5
 ```
 
 Encoder feel can also be tuned from the service env file:
@@ -373,6 +450,7 @@ SHADOWBOX_ENCODER_STEPS_PER_DETENT=4
 SHADOWBOX_ENCODER_LONG_PRESS_SECONDS=0.6
 SHADOWBOX_ENCODER_AB_GLITCH_US=200
 SHADOWBOX_ENCODER_SW_GLITCH_US=8000
+SHADOWBOX_BACK_BUTTON_GLITCH_US=8000
 SHADOWBOX_ENCODER_ACCEL_FAST_SECONDS=0.035
 SHADOWBOX_ENCODER_ACCEL_FAST_MULTIPLIER=2
 SHADOWBOX_ENCODER_ACCEL_TURBO_SECONDS=0.018
@@ -382,6 +460,8 @@ SHADOWBOX_ENCODER_ACCEL_TURBO_MULTIPLIER=3
 Lower `STEPS_PER_DETENT` makes one click register sooner. Higher `AB_GLITCH_US`
 filters more bounce but can make the knob feel heavier. The acceleration values
 let slow turns stay precise while fast turns jump farther through long lists.
+If `SHADOWBOX_BACK_BUTTON_PIN` is set, that button emits the same normalized
+`long_press` back/cancel gesture used throughout the UI.
 
 OLED examples:
 
@@ -516,6 +596,19 @@ If needed:
 ```
 sudo systemctl restart pigpiod
 ```
+
+If you have copied an updated `service/shadowbox.service` onto the Pi, reload the
+installed unit before testing boot behavior:
+
+```sh
+sudo cp /home/pi/shadowbox/service/shadowbox.service /etc/systemd/system/shadowbox.service
+sudo systemctl daemon-reload
+sudo systemctl enable pigpiod shadowbox
+sudo systemctl restart shadowbox
+```
+
+The service now declares `Wants=pigpiod.service` and `After=pigpiod.service`, so
+Shadowbox will wait for pigpio during boot.
 
 ---
 
