@@ -36,6 +36,37 @@ OSC_LISTEN_PORT = 13333
 POST_LOAD_VIEW_DEFAULT = "instance"
 
 
+def _env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    try:
+        return int(value, 0)
+    except ValueError:
+        return default
+
+
+DIM_TIMEOUT = max(0.0, _env_float("SHADOWBOX_DIM_TIMEOUT", DIM_TIMEOUT))
+SLEEP_TIMEOUT = max(DIM_TIMEOUT, _env_float("SHADOWBOX_SLEEP_TIMEOUT", SLEEP_TIMEOUT))
+BRIGHTNESS_NORMAL = max(0, min(255, _env_int("SHADOWBOX_BRIGHTNESS_NORMAL", BRIGHTNESS_NORMAL)))
+BRIGHTNESS_DIM = max(0, min(BRIGHTNESS_NORMAL, _env_int("SHADOWBOX_BRIGHTNESS_DIM", BRIGHTNESS_DIM)))
+
+
+def _is_tft_display(display) -> bool:
+    module = type(display).__module__
+    return module.startswith("shadowbox.display.st7789") or module.startswith("shadowbox.display.waveshare_2inch")
+
+
 class RunnerOSCListener:
     def __init__(self, host: str = OSC_LISTEN_HOST, port: int = OSC_LISTEN_PORT):
         self.host = host
@@ -294,8 +325,14 @@ def _assign_next_unused_outputs(ui, rnbo, instance_id: str) -> bool:
 
 def main():
     display = load_display_from_env(default_kind="ssd1309")
+    brightness_normal = BRIGHTNESS_NORMAL
+    brightness_dim = BRIGHTNESS_DIM
+    if _is_tft_display(display) and "SHADOWBOX_BRIGHTNESS_NORMAL" not in os.environ:
+        brightness_normal = 0xFF
+    if _is_tft_display(display) and "SHADOWBOX_BRIGHTNESS_DIM" not in os.environ:
+        brightness_dim = min(brightness_normal, 0x40)
     display.init()
-    display.set_contrast(BRIGHTNESS_NORMAL)
+    display.set_contrast(brightness_normal)
 
     rnbo = RNBOClient()
     osc_listener = RunnerOSCListener()
@@ -383,7 +420,7 @@ def main():
             is_sleeping = False
 
         if is_dimmed:
-            display.set_contrast(BRIGHTNESS_NORMAL)
+            display.set_contrast(brightness_normal)
             is_dimmed = False
 
     try:
@@ -552,12 +589,13 @@ def main():
                 is_sleeping = True
 
             elif (not is_dimmed) and idle >= DIM_TIMEOUT:
-                display.set_contrast(BRIGHTNESS_DIM)
+                display.set_contrast(brightness_dim)
                 is_dimmed = True
 
             # Draw at fixed-ish frame rate, but skip while sleeping
             if (not is_sleeping) and (now - last_frame) >= FRAME_DT:
                 last_frame = now
+                ui.advance_frame()
                 renderer.draw(ui)
 
             sleep(0.001)
@@ -572,7 +610,7 @@ def main():
         osc_listener.stop()
         encoder.close()
         display.wake()
-        display.set_contrast(BRIGHTNESS_NORMAL)
+        display.set_contrast(brightness_normal)
         display.clear()
         display.show()
 

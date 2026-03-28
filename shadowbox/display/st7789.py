@@ -18,6 +18,11 @@ try:
 except ImportError as exc:  # pragma: no cover - hardware dependency
     raise RuntimeError("st7789 is required for the ST7789 display backend") from exc
 
+try:
+    from gpiozero import PWMOutputDevice
+except ImportError:  # pragma: no cover - optional hardware dependency
+    PWMOutputDevice = None
+
 
 class ST7789Display(DisplayBackend):
     def __init__(
@@ -46,6 +51,17 @@ class ST7789Display(DisplayBackend):
         self.is_sleeping = False
         self.fg_color = fg_color
         self.bg_color = bg_color
+        self._backlight = None
+
+        device_backlight = backlight
+        if backlight is not None and PWMOutputDevice is not None:
+            self._backlight = PWMOutputDevice(
+                backlight,
+                active_high=True,
+                initial_value=0.0,
+                frequency=1000,
+            )
+            device_backlight = None
 
         self.physical_width = physical_width
         self.physical_height = physical_height
@@ -54,7 +70,7 @@ class ST7789Display(DisplayBackend):
             cs=cs,
             dc=dc,
             rst=rst,
-            backlight=backlight,
+            backlight=device_backlight,
             width=physical_width,
             height=physical_height,
             rotation=rotation,
@@ -63,8 +79,19 @@ class ST7789Display(DisplayBackend):
             spi_speed_hz=spi_speed_hz,
         )
 
+    def _set_backlight(self, duty_cycle: float) -> None:
+        duty_cycle = max(0.0, min(1.0, duty_cycle))
+        if self._backlight is not None:
+            self._backlight.value = duty_cycle
+            return
+
+        setter = getattr(self._device, "set_backlight", None)
+        if callable(setter):
+            setter(duty_cycle > 0.0)
+
     def init(self) -> None:
         self.is_sleeping = False
+        self._set_backlight(1.0)
         self.clear()
         self.show()
 
@@ -93,16 +120,19 @@ class ST7789Display(DisplayBackend):
         self._device.display(self._to_image())
 
     def set_contrast(self, value: int) -> None:
-        # The ST7789 uses a backlight instead of OLED contrast. Keep the
-        # interface compatible and ignore contrast requests for now.
-        _ = value
+        # Map the OLED-era contrast API onto TFT backlight brightness.
+        self._set_backlight(max(0, min(255, int(value))) / 255.0)
 
     def sleep(self) -> None:
+        if self.is_sleeping:
+            return
         self.is_sleeping = True
+        self._set_backlight(0.0)
 
     def wake(self) -> None:
         if self.is_sleeping:
             self.is_sleeping = False
+            self._set_backlight(1.0)
             self.show()
 
     def pixel(self, x: int, y: int, on: bool = True) -> None:

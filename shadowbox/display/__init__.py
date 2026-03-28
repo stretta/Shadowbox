@@ -58,7 +58,7 @@ def load_display_from_env(default_kind: str = "ssd1309"):
             offset_top=_env_int("SHADOWBOX_ST7789_OFFSET_TOP", 0),
             logical_width=_env_int("SHADOWBOX_LOGICAL_WIDTH", 320),
             logical_height=_env_int("SHADOWBOX_LOGICAL_HEIGHT", 240),
-            invert_colors=_env_bool("SHADOWBOX_ST7789_INVERT", False),
+            invert_colors=_env_bool("SHADOWBOX_ST7789_INVERT", True),
         )
     elif kind == "waveshare_2inch":
         kwargs.update(

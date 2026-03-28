@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from shadowbox.brick_panel import BRICK_PANEL_TRIGGER_PRESSES, BrickPanelGame
 from shadowbox.editors.ttid import (
     apply_scale_to_mask,
     get_scale_names,
@@ -308,6 +309,8 @@ class ShadowboxUI:
         self._actions: list[UIAction] = []
         self._saved_state_cache = load_state_file()
         self._edit_original_value: Any = None
+        self.brick_panel = BrickPanelGame()
+        self._about_press_count = 0
 
     def restore_from_saved_state(self) -> None:
         saved = self._saved_state_cache
@@ -358,6 +361,8 @@ class ShadowboxUI:
         self.state.edit_ttid_scale_index = 0
         self.state.edit_step16_focus = 0
         self._edit_original_value = None
+        self._about_press_count = 0
+        self.brick_panel.reset()
 
     def set_busy(self, busy: bool, reason: str = "") -> None:
         self.state.busy = busy
@@ -760,7 +765,12 @@ class ShadowboxUI:
             "SYSTEM_AUDIO_DEVICE",
             "SYSTEM_AUDIO_RATE",
             "SYSTEM_AUDIO_BUFFER",
+            "BRICK_PANEL",
         }
+
+    def advance_frame(self) -> None:
+        if self.state.ui_mode == "BRICK_PANEL":
+            self.brick_panel.update()
 
     def handle_event(self, event: UIEvent) -> None:
         if event.kind == "rotate":
@@ -776,7 +786,11 @@ class ShadowboxUI:
         step = delta
         self.state.activity_ticks += 1
 
-        if self.state.ui_mode == "TOP":
+        if self.state.ui_mode == "BRICK_PANEL":
+            self.brick_panel.rotate(step)
+        elif self.state.ui_mode == "ABOUT":
+            self._about_press_count = 0
+        elif self.state.ui_mode == "TOP":
             self.state.top_index = self._cycle(self.state.top_index, len(self.top_level_items), step)
         elif self.state.ui_mode == "INSTANCE_LIST":
             self.state.instance_cursor = self._cycle(
@@ -854,6 +868,20 @@ class ShadowboxUI:
 
     def _handle_short_press(self) -> None:
         self.state.activity_ticks += 1
+
+        if self.state.ui_mode == "ABOUT":
+            self._about_press_count += 1
+            if self._about_press_count >= BRICK_PANEL_TRIGGER_PRESSES:
+                self._about_press_count = 0
+                self.brick_panel.reset()
+                self.state.ui_mode = "BRICK_PANEL"
+            self.queue_action(UIAction(kind="save_state"))
+            return
+
+        if self.state.ui_mode == "BRICK_PANEL":
+            self.brick_panel.press()
+            self.queue_action(UIAction(kind="save_state"))
+            return
 
         if self.state.ui_mode == "TOP":
             if self.top_level_items[self.state.top_index] == "INSTANCES":
@@ -1049,6 +1077,7 @@ class ShadowboxUI:
                     self.state.ui_mode = "MAINT"
                     self.state.maint_cursor = 1 if self.maint_menu_items else 0
                 else:
+                    self._about_press_count = 0
                     self.state.ui_mode = choice
 
         elif self.state.ui_mode == "SYSTEM_AUDIO":
@@ -1141,7 +1170,10 @@ class ShadowboxUI:
         self.queue_action(UIAction(kind="save_state"))
 
     def _handle_long_press(self) -> None:
-        if self.state.ui_mode == "EDIT":
+        if self.state.ui_mode == "BRICK_PANEL":
+            self._about_press_count = 0
+            self.state.ui_mode = "ABOUT"
+        elif self.state.ui_mode == "EDIT":
             param = self.selected_param
             if param is not None and is_ttid_param(param):
                 self.state.edit_value = None
@@ -1189,6 +1221,7 @@ class ShadowboxUI:
         elif self.state.ui_mode == "REMOVE_INSTANCE_CONFIRM":
             self.state.ui_mode = "REMOVE_INSTANCE_PICKER" if self.state.remove_instance_origin == "instance_list" else "INSTANCE_MENU"
         elif self.state.ui_mode in ("STATUS", "NETWORK", "STARTUP", "ABOUT", "MAINT"):
+            self._about_press_count = 0
             self.state.ui_mode = "SYSTEM_MENU"
         elif self.state.ui_mode in ("SYSTEM_AUDIO_DEVICE", "SYSTEM_AUDIO_RATE", "SYSTEM_AUDIO_BUFFER"):
             self.state.ui_mode = "SYSTEM_AUDIO"

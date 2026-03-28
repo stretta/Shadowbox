@@ -20,6 +20,11 @@ try:
 except ImportError as exc:  # pragma: no cover - hardware dependency
     raise RuntimeError("spidev is required for the ST7789 raw display backend") from exc
 
+try:
+    from gpiozero import PWMOutputDevice
+except ImportError:  # pragma: no cover - optional hardware dependency
+    PWMOutputDevice = None
+
 
 class _GPIOPin:
     def __init__(self, bcm_pin: int):
@@ -102,6 +107,8 @@ class ST7789RawDisplay(DisplayBackend):
         self.offset_top = offset_top
         self.invert_colors = invert_colors
         self.is_sleeping = False
+        self._backlight_level = 1.0
+        self._contrast_level = 255
 
         self._canvas = Image.new("L", (self.width, self.height), 0)
         self._draw = ImageDraw.Draw(self._canvas)
@@ -114,9 +121,20 @@ class ST7789RawDisplay(DisplayBackend):
 
         self._dc = _GPIOPin(dc)
         self._rst = _GPIOPin(rst) if rst is not None else None
-        self._backlight = _GPIOPin(backlight) if backlight is not None else None
-        if self._backlight is not None:
-            self._backlight.write(True)
+        self._backlight = None
+        if backlight is not None and PWMOutputDevice is not None:
+            try:
+                self._backlight = PWMOutputDevice(
+                    backlight,
+                    active_high=True,
+                    initial_value=0.0,
+                    frequency=1000,
+                )
+            except Exception:
+                self._backlight = None
+        if self._backlight is None and backlight is not None:
+            self._backlight = _GPIOPin(backlight)
+        self._set_backlight(1.0)
 
     def _command(self, cmd: int, data: bytes | bytearray | None = None) -> None:
         self._dc.write(False)
@@ -170,6 +188,7 @@ class ST7789RawDisplay(DisplayBackend):
         self._command(0x29)
         time.sleep(0.05)
         self.is_sleeping = False
+        self._set_backlight(self._backlight_level)
         self.clear()
         self.show()
 
@@ -183,6 +202,7 @@ class ST7789RawDisplay(DisplayBackend):
         data = image.tobytes()
         out = bytearray(len(data) * 2)
         for i, value in enumerate(data):
+            value = (value * self._contrast_level) // 255
             if self.invert_colors:
                 value = 255 - value
             # Map 8-bit grayscale to RGB565 while preserving antialiasing.
@@ -204,17 +224,37 @@ class ST7789RawDisplay(DisplayBackend):
         self._set_window(x0, y0, x1, y1)
         self._data(self._frame_bytes())
 
+    def _set_backlight(self, duty_cycle: float) -> None:
+        duty_cycle = max(0.0, min(1.0, float(duty_cycle)))
+        self._backlight_level = duty_cycle
+        if self._backlight is None:
+            return
+        if hasattr(self._backlight, "value"):
+            self._backlight.value = duty_cycle
+            return
+        self._backlight.write(duty_cycle > 0.0)
+
     def set_contrast(self, value: int) -> None:
-        _ = value
+        contrast = max(0, min(255, int(value)))
+        self._contrast_level = contrast
+        self._set_backlight(contrast / 255.0)
 
     def sleep(self) -> None:
+        if self.is_sleeping:
+            return
         self.is_sleeping = True
         self._command(0x28)
+        if self._backlight is not None:
+            if hasattr(self._backlight, "value"):
+                self._backlight.value = 0.0
+            else:
+                self._backlight.write(False)
 
     def wake(self) -> None:
         if self.is_sleeping:
             self._command(0x29)
             self.is_sleeping = False
+            self._set_backlight(self._backlight_level)
             self.show()
 
     def pixel(self, x: int, y: int, on: bool = True) -> None:

@@ -362,7 +362,7 @@ The repository also includes a static unit file at:
 service/shadowbox.service
 ```
 
-That file is a template for `/home/pi/shadowbox`. If your checkout lives elsewhere, either use `./install.sh` or update the unit before installing it manually.
+That file is a template for `/home/pi/Shadowbox`. If your checkout lives elsewhere, either use `./install.sh` or update the unit before installing it manually.
 
 Display selection is controlled through environment variables. The service reads an optional config file at:
 
@@ -382,6 +382,17 @@ Supported values:
 - `parameters` jumps straight into the parameter list for the loaded instance
 - `presets` jumps straight into the preset list for the loaded instance
 
+For dim/sleep testing, you can override the idle behavior in `/etc/default/shadowbox`:
+
+```
+SHADOWBOX_DIM_TIMEOUT=3
+SHADOWBOX_SLEEP_TIMEOUT=6
+SHADOWBOX_BRIGHTNESS_NORMAL=255
+SHADOWBOX_BRIGHTNESS_DIM=64
+```
+
+That makes the display dim after 3 seconds of no encoder activity and sleep after 6 seconds. On TFT backends, use `255/64`-style brightness values rather than OLED-style `127/16`, or the display can look dim immediately at startup.
+
 Example ST7789 configuration:
 
 ```
@@ -396,6 +407,8 @@ SHADOWBOX_ST7789_WIDTH=320
 SHADOWBOX_ST7789_HEIGHT=240
 SHADOWBOX_LOGICAL_WIDTH=320
 SHADOWBOX_LOGICAL_HEIGHT=240
+SHADOWBOX_BRIGHTNESS_NORMAL=255
+SHADOWBOX_BRIGHTNESS_DIM=64
 ```
 
 The generic `st7789` backend uses the Python `st7789` package. Some custom
@@ -416,7 +429,59 @@ SHADOWBOX_ST7789_WIDTH=320
 SHADOWBOX_ST7789_HEIGHT=240
 SHADOWBOX_LOGICAL_WIDTH=320
 SHADOWBOX_LOGICAL_HEIGHT=240
-SHADOWBOX_ST7789_INVERT=0
+SHADOWBOX_ST7789_INVERT=1
+SHADOWBOX_BRIGHTNESS_NORMAL=255
+SHADOWBOX_BRIGHTNESS_DIM=64
+```
+
+Known-good PT4 config:
+
+`pt4.local`, raw ST7789 backend, `/home/pi/Shadowbox`
+
+```sh
+SHADOWBOX_DISPLAY=st7789_raw
+SHADOWBOX_ST7789_SPI_BUS=0
+SHADOWBOX_ST7789_SPI_CS=0
+SHADOWBOX_ST7789_DC=25
+SHADOWBOX_ST7789_RST=24
+SHADOWBOX_ST7789_BACKLIGHT=18
+SHADOWBOX_ST7789_ROTATION=0
+SHADOWBOX_ST7789_WIDTH=320
+SHADOWBOX_ST7789_HEIGHT=240
+SHADOWBOX_ST7789_OFFSET_LEFT=0
+SHADOWBOX_ST7789_OFFSET_TOP=0
+SHADOWBOX_LOGICAL_WIDTH=320
+SHADOWBOX_LOGICAL_HEIGHT=240
+SHADOWBOX_ST7789_INVERT=1
+SHADOWBOX_ENCODER_CLK=17
+SHADOWBOX_ENCODER_DT=27
+SHADOWBOX_ENCODER_SW=22
+SHADOWBOX_BACK_BUTTON_PIN=23
+SHADOWBOX_BACK_BUTTON_GLITCH_US=8000
+SHADOWBOX_DIM_TIMEOUT=120
+SHADOWBOX_SLEEP_TIMEOUT=600
+SHADOWBOX_BRIGHTNESS_NORMAL=255
+SHADOWBOX_BRIGHTNESS_DIM=64
+```
+
+Deploy to PT4:
+
+```bash
+ssh pi@pt4.local "mkdir -p /home/pi/Shadowbox" && \
+rsync -av --delete --progress \
+  --exclude '.venv' \
+  --exclude '__pycache__' \
+  --exclude '*.pyc' \
+  --exclude '.DS_Store' \
+  /Users/mdavidson/Documents/Repos/Shadowbox/ \
+  pi@pt4.local:/home/pi/Shadowbox/
+```
+
+Restart Shadowbox on PT4:
+
+```bash
+sudo systemctl restart shadowbox
+sudo systemctl status shadowbox --no-pager -l
 ```
 
 Example Waveshare 2-inch configuration:
@@ -430,6 +495,8 @@ SHADOWBOX_WAVESHARE_RST=27
 SHADOWBOX_WAVESHARE_BACKLIGHT=18
 SHADOWBOX_LOGICAL_WIDTH=320
 SHADOWBOX_LOGICAL_HEIGHT=240
+SHADOWBOX_BRIGHTNESS_NORMAL=255
+SHADOWBOX_BRIGHTNESS_DIM=64
 ```
 
 The TFT backends default to a full `320x240` logical framebuffer. You can still override `SHADOWBOX_LOGICAL_WIDTH` and `SHADOWBOX_LOGICAL_HEIGHT` if you want the older scaled-up rendering behavior while tuning layouts.
@@ -510,6 +577,18 @@ tools/deploy_pi.sh
 ```
 
 It syncs the repo with `rsync`, optionally installs Python requirements in the remote `.venv`, and restarts the `shadowbox` service. Override `PI_HOST`, `PI_USER`, `PI_PATH`, and related environment variables as needed.
+
+Helpful flags:
+
+```bash
+tools/deploy_pi.sh --alias pt4
+tools/deploy_pi.sh --dry-run
+tools/deploy_pi.sh --sync-only
+tools/deploy_pi.sh --alias studio --no-install-deps
+```
+
+Built-in aliases currently include `pt4`, `studio`, and `bench`. Run `tools/deploy_pi.sh --help` to see all options.
+`--dry-run` still connects to the Pi so `rsync` can compare the remote tree, but it does not change files or restart services.
 
 ---
 
@@ -601,7 +680,7 @@ If you have copied an updated `service/shadowbox.service` onto the Pi, reload th
 installed unit before testing boot behavior:
 
 ```sh
-sudo cp /home/pi/shadowbox/service/shadowbox.service /etc/systemd/system/shadowbox.service
+sudo cp /home/pi/Shadowbox/service/shadowbox.service /etc/systemd/system/shadowbox.service
 sudo systemctl daemon-reload
 sudo systemctl enable pigpiod shadowbox
 sudo systemctl restart shadowbox

@@ -287,6 +287,18 @@ class ShadowboxRenderer:
             self._text(text, x, y, scale, weight)
             x += self._measure_text(text, scale, weight)[0]
 
+    def _measure_shadowbox_logo(self, scale: int) -> tuple[int, int, int]:
+        left_w, left_h = self._measure_text("SHADOW", scale, "thin")
+        right_w, right_h = self._measure_text("BOX", scale, "bold")
+        return left_w + right_w, max(left_h, right_h), left_w
+
+    def _draw_shadowbox_logo(self, y: int, scale: int) -> int:
+        total_w, text_h, left_w = self._measure_shadowbox_logo(scale)
+        x = max(0, (self.display.width - total_w) // 2)
+        self._text("SHADOW", x, y, scale, "thin")
+        self._text("BOX", x + left_w, y, scale, "bold")
+        return text_h
+
     def edit_header_title(self, param: dict | None) -> str:
         if not param:
             return "EDIT"
@@ -1242,18 +1254,9 @@ class ShadowboxRenderer:
         if self.is_tft:
             scale = 3 if self.is_full_tft else 2
             if title == "SHADOWBOX":
-                left = "SHADOW"
-                right = "BOX"
-                left_weight = "thin"
-                right_weight = "bold"
-                left_w, left_h = self._measure_text(left, scale, left_weight)
-                right_w, right_h = self._measure_text(right, scale, right_weight)
-                total_w = left_w + right_w
-                text_h = max(left_h, right_h)
-                x = max(0, (self.display.width - total_w) // 2)
+                _, text_h, _ = self._measure_shadowbox_logo(scale)
                 y = max(0, (self.display.height - text_h) // 2)
-                self._text(left, x, y, scale, left_weight)
-                self._text(right, x + left_w, y, scale, right_weight)
+                self._draw_shadowbox_logo(y, scale)
             else:
                 text_height = 7 * scale
                 y = max(0, (self.display.height - text_height) // 2)
@@ -1271,16 +1274,8 @@ class ShadowboxRenderer:
             status_gap = 22 if self.is_full_tft else 14
             hint_gap = 16 if self.is_full_tft else 12
             if title == "SHADOWBOX":
-                left = "SHADOW"
-                right = "BOX"
-                left_weight = "thin"
-                right_weight = "bold"
-                left_w, left_h = self._measure_text(left, title_scale, left_weight)
-                right_w, right_h = self._measure_text(right, title_scale, right_weight)
-                total_w = left_w + right_w
-                title_h = max(left_h, right_h)
+                _, title_h, _ = self._measure_shadowbox_logo(title_scale)
             else:
-                total_w = self._measure_text(title, title_scale, "medium")[0]
                 title_h = self._measure_text(title, title_scale, "medium")[1]
 
             status_h = self._measure_text(status_line, status_scale)[1] if status_line else 0
@@ -1293,9 +1288,7 @@ class ShadowboxRenderer:
             title_y = max(0, (self.display.height - block_h) // 2)
 
             if title == "SHADOWBOX":
-                x = max(0, (self.display.width - total_w) // 2)
-                self._text(left, x, title_y, title_scale, left_weight)
-                self._text(right, x + left_w, title_y, title_scale, right_weight)
+                self._draw_shadowbox_logo(title_y, title_scale)
             else:
                 self.text_center_scaled(title, title_y, title_scale)
 
@@ -1406,30 +1399,91 @@ class ShadowboxRenderer:
         if self.is_tft:
             panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
             self._draw_panel(panel_x, panel_y, panel_w, panel_h, None)
-            if self.is_full_tft:
-                self.text_center_scaled("Shadowbox", panel_y + 14, 3)
-                self.text_center(version_text, panel_y + 58)
-                self.text_center(build_text, panel_y + 80)
-                self.text_center_scaled("stretta.com", panel_y + 108, 2)
-                self.text_center("github.com/stretta/Shadowbox", panel_y + 146)
-            else:
-                self.text_center_scaled("Shadowbox", 14, 2)
-                self.text_center(version_text, 38)
-                self.text_center(build_text, 50)
-                self.text_center("stretta.com", 66)
-                self.text_center("github.com/stretta/Shadowbox", 82)
+            logo_scale = 3 if self.is_full_tft else 2
+            text_lines = [
+                version_text,
+                build_text,
+                "stretta.com",
+                "github.com/stretta/Shadowbox",
+            ]
+            logo_h = self._measure_shadowbox_logo(logo_scale)[1]
+            line_h = max(self._measure_text(line, 1, "regular")[1] for line in text_lines)
+            logo_gap = 14 if self.is_full_tft else 10
+            line_gap = 8 if self.is_full_tft else 4
+            block_h = logo_h + logo_gap + (line_h * len(text_lines)) + (line_gap * (len(text_lines) - 1))
+            y = panel_y + max(0, (panel_h - block_h) // 2)
+            y += self._draw_shadowbox_logo(y, logo_scale) + logo_gap
+            for idx, line in enumerate(text_lines):
+                self.text_center_scaled(line, y, 1)
+                y += line_h
+                if idx < len(text_lines) - 1:
+                    y += line_gap
             return
         rows = self.content_rows
         title_row = rows[0]
         version_row = rows[1] if len(rows) > 1 else rows[0]
         meta_row = rows[2] if len(rows) > 2 else rows[-1]
-        self.text_center("Shadowbox", title_row)
+        self.text_center("SHADOWBOX", title_row)
         self.text_center(version_text, version_row)
         self.text_center(SHADOWBOX_BUILD_INFO, meta_row)
         if self.is_tall and len(rows) > 3:
             self.text_center("stretta.com", rows[3])
         if self.is_tall and len(rows) > 4:
             self.text_center("github.com/stretta/Shadowbox", rows[4])
+
+    def draw_brick_panel(self, ui) -> None:
+        game = ui.brick_panel
+        panel_x = 2
+        panel_y = self.content_top + 2
+        panel_w = max(20, self.display.width - 4)
+        panel_h = max(20, self.display.height - panel_y - 2)
+        status_h = 16 if self.is_full_tft else 12 if self.is_tft or self.is_tall else 8
+        arena_h = max(12, panel_h - status_h)
+
+        self.display.rect(panel_x, panel_y, panel_w, arena_h, True, False)
+
+        inner_x = panel_x + 1
+        inner_y = panel_y + 1
+        inner_w = max(1, panel_w - 2)
+        inner_h = max(1, arena_h - 2)
+
+        brick_gap_px = 1 if inner_w < 120 else 2
+        brick_h = max(3, int(inner_h * ((game.brick_bottom - game.brick_top) / game.brick_rows)) - brick_gap_px)
+        brick_w = max(4, int(inner_w / game.brick_cols) - brick_gap_px)
+        brick_top = inner_y + int(inner_h * game.brick_top)
+
+        for row_idx, row in enumerate(game.bricks):
+            for col_idx, alive in enumerate(row):
+                if not alive:
+                    continue
+                brick_x = inner_x + int((col_idx / game.brick_cols) * inner_w)
+                brick_y = brick_top + row_idx * (brick_h + brick_gap_px)
+                self._fill_rect(brick_x, brick_y, brick_w, brick_h, True)
+
+        paddle_w = max(8, int(inner_w * game.paddle_width))
+        paddle_h = 3 if self.is_tft else 2
+        paddle_x = inner_x + int(inner_w * game.paddle_left)
+        paddle_y = inner_y + int(inner_h * game.paddle_y)
+        paddle_x = min(inner_x + inner_w - paddle_w, max(inner_x, paddle_x))
+        paddle_y = min(inner_y + inner_h - paddle_h, max(inner_y, paddle_y))
+        self._fill_rect(paddle_x, paddle_y, paddle_w, paddle_h, True)
+
+        ball_size = 4 if self.is_tft else 3
+        ball_x = inner_x + int(inner_w * game.ball_x) - (ball_size // 2)
+        ball_y = inner_y + int(inner_h * game.ball_y) - (ball_size // 2)
+        ball_x = min(inner_x + inner_w - ball_size, max(inner_x, ball_x))
+        ball_y = min(inner_y + inner_h - ball_size, max(inner_y, ball_y))
+        self._fill_rect(ball_x, ball_y, ball_size, ball_size, True)
+
+        score_text = f"{game.score:03d}"
+        lives_text = f"L{game.lives}"
+        status_y = panel_y + arena_h + 2
+        self._text(score_text, panel_x, status_y)
+        self._draw_right_aligned(lives_text, panel_x + panel_w, status_y)
+
+        if game.status_text:
+            message_y = inner_y + max(4, (inner_h // 2) - 4)
+            self.text_center(game.status_text, message_y)
 
     def draw_maint(self, ui) -> None:
         self.draw_string_list([".."] + ui.maint_menu_items, ui.state.maint_cursor)
@@ -1529,6 +1583,7 @@ class ShadowboxRenderer:
             "NETWORK": "NETWORK",
             "STARTUP": "STARTUP",
             "ABOUT": "ABOUT",
+            "BRICK_PANEL": "BRICK PANEL",
             "MAINT": "MAINT",
         }.get(state.ui_mode, state.ui_mode)
         if state.ui_mode == "EDIT":
@@ -1587,6 +1642,8 @@ class ShadowboxRenderer:
             self.draw_startup(ui)
         elif state.ui_mode == "ABOUT":
             self.draw_about()
+        elif state.ui_mode == "BRICK_PANEL":
+            self.draw_brick_panel(ui)
         elif state.ui_mode == "MAINT":
             self.draw_maint(ui)
 
