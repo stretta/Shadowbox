@@ -12,7 +12,7 @@ It provides:
 - Basic system management
 - Startup audio-device recall
 - Startup discovery/status screen
-- Display interface for SSD1306, SSD1309, and ST7789 hardware
+- Display interface for SSD1306, SSD1309, generic ST7789, and Waveshare 2-inch ST7789V hardware
 - Rotary encoder navigation
 - Custom parameter editors for `step16`, TTID, and pitch display metadata
 
@@ -40,8 +40,18 @@ Typical configuration:
 Also supported:
 
 - 128x64 I2C OLED display (SSD1309)
-- 240x320 SPI TFT display (ST7789)
+- 240x320 SPI TFT display (generic ST7789, library-backed or raw backend)
 - Waveshare 2-inch LCD Module (ST7789V, 240x320 SPI)
+
+Supported display backends in code:
+
+- `ssd1306`
+- `ssd1309`
+- `st7789`
+- `st7789_raw`
+- `waveshare_2inch`
+
+If `SHADOWBOX_DISPLAY` is not set, Shadowbox now defaults to `st7789_raw`.
 
 Example OLED module:
 
@@ -56,7 +66,7 @@ https://www.adafruit.com/product/4484
 - Replace or remove an existing instance when the backend publishes those commands
 - Parameter editing
 - Graphical value feedback
-- OLED dim/sleep management
+- Display dim/sleep management
 - Encoder navigation
 - RNBO OSCQuery integration
 - System status display
@@ -107,6 +117,14 @@ Then reboot:
 ```
 sudo reboot
 ```
+
+If you plan to use `./install.sh`, it will also enable the required interfaces
+for you with noninteractive `raspi-config` calls:
+
+- `ssd1306` / `ssd1309`: enables I2C and SPI
+- `st7789` / `st7789_raw` / `waveshare_2inch`: enables SPI and skips I2C setup
+
+You can still do the interface setup manually first if you prefer.
 
 ---
 
@@ -239,6 +257,7 @@ source .venv/bin/activate
 Install Python dependencies:
 
 ```
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
@@ -249,7 +268,8 @@ python -m shadowbox.shadowbox
 ```
 
 On TFT builds, export the display backend first or Shadowbox will fall back to
-the default OLED backend (`ssd1309`), which expects `/dev/i2c-1`.
+the default raw TFT backend (`st7789_raw`) if you leave `SHADOWBOX_DISPLAY`
+unset. OLED builds still use `/dev/i2c-1`.
 
 Library-backed ST7789 example:
 
@@ -339,6 +359,9 @@ From the repository root:
 ./install.sh
 ```
 
+Do not run the installer with `sudo`. Run it as your normal user from the
+repository root and let it prompt for `sudo` only when needed.
+
 The installer checks `SHADOWBOX_DISPLAY` to decide whether I2C setup is needed.
 For TFT builds, export the display backend before running it so the installer can
 skip OLED/I2C setup:
@@ -354,7 +377,21 @@ This installs the service:
 shadowbox.service
 ```
 
-The installer uses `sudo` only for system package and service steps. It creates the virtual environment as your current user and generates a systemd unit for the current repository path.
+The installer:
+
+- runs `apt update`
+- installs the required system packages
+- enables I2C automatically for OLED backends
+- enables SPI automatically
+- enables and starts `pigpiod`
+- creates the virtual environment as your current user
+- upgrades `pip` and installs `requirements.txt`
+- generates a systemd unit for the current repository path and current user
+- reloads systemd, enables `shadowbox`, and restarts the service
+
+It uses `sudo` only for system package, hardware interface, and service steps.
+If the installer changes I2C or SPI state on a fresh system, a reboot is still
+recommended afterward.
 
 The repository also includes a static unit file at:
 
@@ -370,6 +407,22 @@ Display selection is controlled through environment variables. The service reads
 /etc/default/shadowbox
 ```
 
+All currently supported `/etc/default/shadowbox` settings:
+
+- General UI/runtime: `SHADOWBOX_POST_LOAD_VIEW`, `SHADOWBOX_TURBO_FPS`, `SHADOWBOX_BRICK_PANEL_FPS`
+- Idle/backlight: `SHADOWBOX_DIM_TIMEOUT`, `SHADOWBOX_SLEEP_TIMEOUT`, `SHADOWBOX_BRIGHTNESS_NORMAL`, `SHADOWBOX_BRIGHTNESS_DIM`
+- Encoder/buttons: `SHADOWBOX_ENCODER_CLK`, `SHADOWBOX_ENCODER_DT`, `SHADOWBOX_ENCODER_SW`, `SHADOWBOX_BACK_BUTTON_PIN`, `SHADOWBOX_ENCODER_STEPS_PER_DETENT`, `SHADOWBOX_ENCODER_LONG_PRESS_SECONDS`, `SHADOWBOX_ENCODER_AB_GLITCH_US`, `SHADOWBOX_ENCODER_SW_GLITCH_US`, `SHADOWBOX_BACK_BUTTON_GLITCH_US`, `SHADOWBOX_ENCODER_ACCEL_FAST_SECONDS`, `SHADOWBOX_ENCODER_ACCEL_FAST_MULTIPLIER`, `SHADOWBOX_ENCODER_ACCEL_TURBO_SECONDS`, `SHADOWBOX_ENCODER_ACCEL_TURBO_MULTIPLIER`
+- OLED backends (`ssd1306`, `ssd1309`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_I2C_BUS`, `SHADOWBOX_I2C_ADDR`
+- Generic ST7789 backends (`st7789`, `st7789_raw`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_ST7789_SPI_BUS`, `SHADOWBOX_ST7789_SPI_CS`, `SHADOWBOX_ST7789_DC`, `SHADOWBOX_ST7789_RST`, `SHADOWBOX_ST7789_BACKLIGHT`, `SHADOWBOX_ST7789_SPI_SPEED_HZ`, `SHADOWBOX_ST7789_ROTATION`, `SHADOWBOX_ST7789_WIDTH`, `SHADOWBOX_ST7789_HEIGHT`, `SHADOWBOX_ST7789_OFFSET_LEFT`, `SHADOWBOX_ST7789_OFFSET_TOP`, `SHADOWBOX_ST7789_INVERT`, `SHADOWBOX_LOGICAL_WIDTH`, `SHADOWBOX_LOGICAL_HEIGHT`
+- Waveshare 2-inch backend (`waveshare_2inch`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_WAVESHARE_SPI_BUS`, `SHADOWBOX_WAVESHARE_SPI_CS`, `SHADOWBOX_WAVESHARE_DC`, `SHADOWBOX_WAVESHARE_RST`, `SHADOWBOX_WAVESHARE_BACKLIGHT`, `SHADOWBOX_WAVESHARE_SPI_SPEED_HZ`, `SHADOWBOX_LOGICAL_WIDTH`, `SHADOWBOX_LOGICAL_HEIGHT`
+
+Notes:
+
+- `SHADOWBOX_DISPLAY` defaults to `st7789_raw` if unset.
+- `SHADOWBOX_BRICK_PANEL_FPS` is a legacy fallback for `SHADOWBOX_TURBO_FPS`.
+- `SHADOWBOX_ST7789_RST`, `SHADOWBOX_ST7789_BACKLIGHT`, and `SHADOWBOX_WAVESHARE_BACKLIGHT` accept `none` to disable that pin.
+- `SHADOWBOX_ST7789_INVERT` accepts boolean-style values such as `1`, `true`, `yes`, or `on`.
+
 You can also choose where Shadowbox lands after loading or replacing an instance:
 
 ```
@@ -381,6 +434,17 @@ Supported values:
 - `instance` keeps the current behavior and returns to the instance menu
 - `parameters` jumps straight into the parameter list for the loaded instance
 - `presets` jumps straight into the preset list for the loaded instance
+
+Shadowbox also has a shared turbo render cadence for animation-heavy screens:
+
+```
+SHADOWBOX_TURBO_FPS=40
+```
+
+This is separate from the base UI frame rate and only applies to screens that
+explicitly opt in. Right now, Brick Panel is the only turbo-rendered screen.
+For compatibility, the older `SHADOWBOX_BRICK_PANEL_FPS` name is still accepted
+as a fallback, but new configs should prefer `SHADOWBOX_TURBO_FPS`.
 
 For dim/sleep testing, you can override the idle behavior in `/etc/default/shadowbox`:
 
@@ -402,6 +466,7 @@ SHADOWBOX_ST7789_SPI_CS=0
 SHADOWBOX_ST7789_DC=9
 SHADOWBOX_ST7789_RST=13
 SHADOWBOX_ST7789_BACKLIGHT=19
+SHADOWBOX_ST7789_SPI_SPEED_HZ=80000000
 SHADOWBOX_ST7789_ROTATION=90
 SHADOWBOX_ST7789_WIDTH=320
 SHADOWBOX_ST7789_HEIGHT=240
@@ -424,12 +489,13 @@ SHADOWBOX_ST7789_SPI_CS=0
 SHADOWBOX_ST7789_DC=25
 SHADOWBOX_ST7789_RST=24
 SHADOWBOX_ST7789_BACKLIGHT=18
+SHADOWBOX_ST7789_SPI_SPEED_HZ=40000000
 SHADOWBOX_ST7789_ROTATION=0
 SHADOWBOX_ST7789_WIDTH=320
 SHADOWBOX_ST7789_HEIGHT=240
 SHADOWBOX_LOGICAL_WIDTH=320
 SHADOWBOX_LOGICAL_HEIGHT=240
-SHADOWBOX_ST7789_INVERT=1
+SHADOWBOX_ST7789_INVERT=0
 SHADOWBOX_BRIGHTNESS_NORMAL=255
 SHADOWBOX_BRIGHTNESS_DIM=64
 ```
@@ -445,6 +511,7 @@ SHADOWBOX_ST7789_SPI_CS=0
 SHADOWBOX_ST7789_DC=25
 SHADOWBOX_ST7789_RST=24
 SHADOWBOX_ST7789_BACKLIGHT=18
+SHADOWBOX_ST7789_SPI_SPEED_HZ=40000000
 SHADOWBOX_ST7789_ROTATION=0
 SHADOWBOX_ST7789_WIDTH=320
 SHADOWBOX_ST7789_HEIGHT=240
@@ -452,12 +519,12 @@ SHADOWBOX_ST7789_OFFSET_LEFT=0
 SHADOWBOX_ST7789_OFFSET_TOP=0
 SHADOWBOX_LOGICAL_WIDTH=320
 SHADOWBOX_LOGICAL_HEIGHT=240
-SHADOWBOX_ST7789_INVERT=1
+SHADOWBOX_ST7789_INVERT=0
 SHADOWBOX_ENCODER_CLK=17
 SHADOWBOX_ENCODER_DT=27
 SHADOWBOX_ENCODER_SW=22
 SHADOWBOX_BACK_BUTTON_PIN=23
-SHADOWBOX_BACK_BUTTON_GLITCH_US=8000
+SHADOWBOX_BACK_BUTTON_GLITCH_US=0
 SHADOWBOX_DIM_TIMEOUT=120
 SHADOWBOX_SLEEP_TIMEOUT=600
 SHADOWBOX_BRIGHTNESS_NORMAL=255
@@ -493,6 +560,7 @@ SHADOWBOX_WAVESHARE_SPI_CS=0
 SHADOWBOX_WAVESHARE_DC=25
 SHADOWBOX_WAVESHARE_RST=27
 SHADOWBOX_WAVESHARE_BACKLIGHT=18
+SHADOWBOX_WAVESHARE_SPI_SPEED_HZ=40000000
 SHADOWBOX_LOGICAL_WIDTH=320
 SHADOWBOX_LOGICAL_HEIGHT=240
 SHADOWBOX_BRIGHTNESS_NORMAL=255
@@ -515,10 +583,10 @@ Encoder feel can also be tuned from the service env file:
 ```
 SHADOWBOX_ENCODER_STEPS_PER_DETENT=4
 SHADOWBOX_ENCODER_LONG_PRESS_SECONDS=0.6
-SHADOWBOX_ENCODER_AB_GLITCH_US=200
+SHADOWBOX_ENCODER_AB_GLITCH_US=0
 SHADOWBOX_ENCODER_SW_GLITCH_US=8000
-SHADOWBOX_BACK_BUTTON_GLITCH_US=8000
-SHADOWBOX_ENCODER_ACCEL_FAST_SECONDS=0.035
+SHADOWBOX_BACK_BUTTON_GLITCH_US=0
+SHADOWBOX_ENCODER_ACCEL_FAST_SECONDS=0.35
 SHADOWBOX_ENCODER_ACCEL_FAST_MULTIPLIER=2
 SHADOWBOX_ENCODER_ACCEL_TURBO_SECONDS=0.018
 SHADOWBOX_ENCODER_ACCEL_TURBO_MULTIPLIER=3
@@ -526,7 +594,8 @@ SHADOWBOX_ENCODER_ACCEL_TURBO_MULTIPLIER=3
 
 Lower `STEPS_PER_DETENT` makes one click register sooner. Higher `AB_GLITCH_US`
 filters more bounce but can make the knob feel heavier. The acceleration values
-let slow turns stay precise while fast turns jump farther through long lists.
+now apply to float-style parameter editing only, so fast turns can sweep wide
+ranges without making lists and discrete editors jump unpredictably.
 If `SHADOWBOX_BACK_BUTTON_PIN` is set, that button emits the same normalized
 `long_press` back/cancel gesture used throughout the UI.
 
@@ -544,7 +613,13 @@ SHADOWBOX_I2C_BUS=1
 SHADOWBOX_I2C_ADDR=0x3C
 ```
 
-If `SHADOWBOX_DISPLAY` is not set, Shadowbox currently defaults to `ssd1309`.
+If `SHADOWBOX_DISPLAY` is not set, Shadowbox now defaults to `st7789_raw`.
+
+Parameter metadata is documented in [docs/uispec.md](./docs/uispec.md) and
+[docs/walkthrough.md](./docs/walkthrough.md). Supported parameter/UI metadata
+keys currently include `editor`, `unit`, `units`, `display_precision`,
+`display_as`, `edit_step`, `edit_as`, `bool`, `is_bool`, `boolean`,
+`playhead_state`, `pitch_state`, `cents_state`, and `ui_role`.
 
 ---
 
@@ -589,6 +664,19 @@ tools/deploy_pi.sh --alias studio --no-install-deps
 
 Built-in aliases currently include `pt4`, `studio`, and `bench`. Run `tools/deploy_pi.sh --help` to see all options.
 `--dry-run` still connects to the Pi so `rsync` can compare the remote tree, but it does not change files or restart services.
+
+If an alias maps to a `.local` hostname, the deploy script now tries to resolve it to an IP before connecting. When mDNS is unavailable on your Mac, either pass the IP directly:
+
+```bash
+tools/deploy_pi.sh --host 192.168.68.123
+```
+
+or set a per-alias override:
+
+```bash
+export PI_HOST_ALIAS_PT4=192.168.68.123
+tools/deploy_pi.sh --alias pt4
+```
 
 ---
 

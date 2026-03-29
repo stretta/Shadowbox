@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -134,6 +136,20 @@ def clamp(v: float, lo: Optional[float], hi: Optional[float]) -> float:
     return v
 
 
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    return int(value, 0)
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    return float(value)
+
+
 def _metadata_dict(param: dict | None) -> dict[str, Any]:
     if not isinstance(param, dict):
         return {}
@@ -181,9 +197,6 @@ def display_as_int(param: dict | None) -> bool:
 
 
 def edit_as_int(param: dict | None) -> bool:
-    ptype = param.get("type", "") if isinstance(param, dict) else ""
-    if ptype in ("i", "h", "I", "c"):
-        return True
     return _metadata_text(param, "edit_as").lower() == "int"
 
 
@@ -195,9 +208,6 @@ def edit_step(param: dict | None) -> float | None:
 
 
 def is_boolish(param: dict) -> bool:
-    pmin = param.get("min")
-    pmax = param.get("max")
-    ptype = param.get("type", "")
     metadata = param.get("metadata", {})
 
     if isinstance(metadata, dict):
@@ -208,9 +218,7 @@ def is_boolish(param: dict) -> bool:
             if isinstance(value, str) and value.strip().lower() in ("1", "true", "yes", "bool", "boolean"):
                 return True
 
-    if ptype in ("T", "F"):
-        return True
-    return pmin == 0 and pmax == 1
+    return False
 
 
 def numeric_step(param: dict) -> float:
@@ -311,6 +319,40 @@ class ShadowboxUI:
         self._edit_original_value: Any = None
         self.brick_panel = BrickPanelGame()
         self._about_press_count = 0
+        self.float_edit_accel_fast_seconds = max(0.0, _env_float("SHADOWBOX_ENCODER_ACCEL_FAST_SECONDS", 0.35))
+        self.float_edit_accel_fast_multiplier = max(1, _env_int("SHADOWBOX_ENCODER_ACCEL_FAST_MULTIPLIER", 2))
+        self.float_edit_accel_turbo_seconds = max(0.0, _env_float("SHADOWBOX_ENCODER_ACCEL_TURBO_SECONDS", 0.018))
+        self.float_edit_accel_turbo_multiplier = max(1, _env_int("SHADOWBOX_ENCODER_ACCEL_TURBO_MULTIPLIER", 3))
+        self._last_float_edit_detent_at: float | None = None
+
+    def _reset_float_edit_acceleration(self) -> None:
+        self._last_float_edit_detent_at = None
+
+    def _is_float_edit_param(self, param: dict | None) -> bool:
+        return bool(
+            param
+            and not is_ttid_param(param)
+            and not is_step16_param(param)
+            and not is_pitch_display_param(param)
+            and not is_discrete_param(param)
+            and not edit_as_int(param)
+        )
+
+    def _accelerate_float_edit_delta(self, param: dict | None, delta: int) -> int:
+        if delta == 0 or not self._is_float_edit_param(param):
+            self._reset_float_edit_acceleration()
+            return delta
+
+        now = time.monotonic()
+        multiplier = 1
+        if self._last_float_edit_detent_at is not None:
+            elapsed = now - self._last_float_edit_detent_at
+            if self.float_edit_accel_turbo_seconds > 0 and elapsed <= self.float_edit_accel_turbo_seconds:
+                multiplier = self.float_edit_accel_turbo_multiplier
+            elif self.float_edit_accel_fast_seconds > 0 and elapsed <= self.float_edit_accel_fast_seconds:
+                multiplier = self.float_edit_accel_fast_multiplier
+        self._last_float_edit_detent_at = now
+        return delta * multiplier
 
     def restore_from_saved_state(self) -> None:
         saved = self._saved_state_cache
@@ -362,6 +404,7 @@ class ShadowboxUI:
         self.state.edit_step16_focus = 0
         self._edit_original_value = None
         self._about_press_count = 0
+        self._reset_float_edit_acceleration()
         self.brick_panel.reset()
 
     def set_busy(self, busy: bool, reason: str = "") -> None:
@@ -649,6 +692,35 @@ class ShadowboxUI:
             return []
         return [str(item) for item in port.get("connections", []) if str(item)]
 
+    @property
+    def used_routing_targets(self) -> set[str]:
+        port = self.selected_routing_port
+        if not port:
+            return set()
+
+        selected_path = str(port.get("path", ""))
+        available_targets = set(self.active_routing_targets)
+        if not available_targets:
+            return set()
+
+        used_targets: set[str] = set()
+        for instance in self.state.instances:
+            routing = instance.get("routing", {})
+            branch = routing.get(self.state.active_transport, {})
+            ports = branch.get(self.state.active_routing_direction, [])
+            if not isinstance(ports, list):
+                continue
+            for other_port in ports:
+                if not isinstance(other_port, dict):
+                    continue
+                if str(other_port.get("path", "")) == selected_path:
+                    continue
+                for connection in other_port.get("connections", []):
+                    target = str(connection)
+                    if target in available_targets:
+                        used_targets.add(target)
+        return used_targets
+
     def _sync_audio_index(self) -> None:
         if self.current_audio_card in self.audio_options:
             self.state.audio_device_cursor = self.audio_options.index(self.current_audio_card) + 1
@@ -727,6 +799,12 @@ class ShadowboxUI:
             return None
         return clamp_playhead(item.get("value"))
 
+    @property
+    def uses_turbo_rendering(self) -> bool:
+        if self.state.ui_mode == "BRICK_PANEL":
+            return True
+        return False
+
     def _apply_ttid_scale_load(self) -> None:
         mask = apply_scale_to_mask(
             self.state.edit_ttid_load_root,
@@ -768,9 +846,9 @@ class ShadowboxUI:
             "BRICK_PANEL",
         }
 
-    def advance_frame(self) -> None:
+    def advance_frame(self, frame_scale: float = 1.0) -> None:
         if self.state.ui_mode == "BRICK_PANEL":
-            self.brick_panel.update()
+            self.brick_panel.update(frame_scale=frame_scale)
 
     def handle_event(self, event: UIEvent) -> None:
         if event.kind == "rotate":
@@ -859,6 +937,7 @@ class ShadowboxUI:
             elif is_pitch_display_param(param):
                 return
             else:
+                step = self._accelerate_float_edit_delta(param, step)
                 self.state.edit_value = apply_edit_delta(param, self.state.edit_value, step)
                 param["value"] = self.state.edit_value
                 if not is_discrete_param(param):
@@ -1017,6 +1096,7 @@ class ShadowboxUI:
                     else:
                         self.state.edit_value = normalize_current_value_for_edit(param)
                         self.state.ui_mode = "EDIT"
+                    self._reset_float_edit_acceleration()
 
         elif self.state.ui_mode == "ENUM_LIST":
             param = self.selected_param
@@ -1160,10 +1240,12 @@ class ShadowboxUI:
             elif param is not None and is_pitch_display_param(param):
                 self.state.edit_value = None
                 self._edit_original_value = None
+                self._reset_float_edit_acceleration()
                 self.state.ui_mode = "PARAM_LIST"
             else:
                 if param is not None and is_discrete_param(param):
                     self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=self.state.edit_value))
+                self._reset_float_edit_acceleration()
                 self.state.ui_mode = "PARAM_LIST"
                 self._edit_original_value = None
 
@@ -1181,15 +1263,18 @@ class ShadowboxUI:
                 self.state.edit_ttid_selected_pc = 0
                 self.state.edit_ttid_load_root = 0
                 self.state.edit_ttid_scale_index = 0
+                self._reset_float_edit_acceleration()
                 self.state.ui_mode = "PARAM_LIST"
             elif param is not None and is_step16_param(param):
                 self.state.edit_value = None
                 self.state.edit_step16_focus = 0
                 self._edit_original_value = None
+                self._reset_float_edit_acceleration()
                 self.state.ui_mode = "PARAM_LIST"
             elif param is not None and is_pitch_display_param(param):
                 self.state.edit_value = None
                 self._edit_original_value = None
+                self._reset_float_edit_acceleration()
                 self.state.ui_mode = "PARAM_LIST"
             else:
                 if param is not None and self._edit_original_value is not None:
@@ -1199,10 +1284,12 @@ class ShadowboxUI:
                 self.state.edit_value = None
                 self.state.edit_step16_focus = 0
                 self._edit_original_value = None
+                self._reset_float_edit_acceleration()
                 self.state.ui_mode = "PARAM_LIST"
         elif self.state.ui_mode == "ENUM_LIST":
             self.state.edit_value = None
             self._edit_original_value = None
+            self._reset_float_edit_acceleration()
             self.state.ui_mode = "PARAM_LIST"
         elif self.state.ui_mode in ("PRESET_LIST", "PARAM_LIST", "ROUTING_GROUP"):
             self.state.ui_mode = "INSTANCE_MENU"

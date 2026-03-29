@@ -67,6 +67,40 @@ def extract_meta_info(node: dict) -> dict[str, Any]:
 
     metadata: dict[str, Any] = {}
 
+    def _apply_tag(value: Any) -> None:
+        if isinstance(value, bool):
+            return
+        if isinstance(value, (int, float)):
+            return
+        if not isinstance(value, str):
+            return
+
+        text = value.strip()
+        if not text:
+            return
+
+        tags = metadata.setdefault("tags", [])
+        if isinstance(tags, list) and text not in tags:
+            tags.append(text)
+
+        for separator in (":", "="):
+            if separator not in text:
+                continue
+            key, raw = text.split(separator, 1)
+            key = key.strip()
+            raw = raw.strip()
+            if not key or not raw or key in metadata:
+                return
+            try:
+                parsed = json.loads(raw)
+            except Exception:
+                parsed = raw
+            metadata[key] = parsed
+            return
+
+        if text.lower() in {"ttid", "step16", "pitch_display"} and "editor" not in metadata:
+            metadata["editor"] = text
+
     meta_node = contents.get("meta", {})
     if isinstance(meta_node, dict):
         raw_value = meta_node.get("VALUE", "")
@@ -77,11 +111,12 @@ def extract_meta_info(node: dict) -> dict[str, Any]:
                 if isinstance(parsed, dict):
                     metadata.update(parsed)
                 elif isinstance(parsed, list):
-                    metadata["tags"] = [str(item).strip() for item in parsed if str(item).strip()]
+                    for item in parsed:
+                        _apply_tag(item)
                 elif isinstance(parsed, str) and parsed.strip():
-                    metadata["tags"] = [parsed.strip()]
+                    _apply_tag(parsed)
             except Exception:
-                metadata["tags"] = [raw_value]
+                _apply_tag(raw_value)
 
     # RNBO exports may also publish UI hints as direct scalar children such as
     # `editor`, `display_name`, or `ui_role` rather than a JSON blob in `meta`.

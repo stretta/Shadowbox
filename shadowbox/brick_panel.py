@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 
 BRICK_PANEL_TRIGGER_PRESSES = 4
+BRICK_PANEL_BASE_FPS = 20.0
 
 
 @dataclass
@@ -80,7 +81,7 @@ class BrickPanelGame:
         if not self.launched:
             self.launched = True
 
-    def update(self) -> None:
+    def update(self, frame_scale: float = 1.0) -> None:
         if self.game_over:
             return
         if not self.launched:
@@ -88,8 +89,9 @@ class BrickPanelGame:
             self.ball_y = self.paddle_y - 0.04
             return
 
-        next_x = self.ball_x + self.ball_dx
-        next_y = self.ball_y + self.ball_dy
+        frame_scale = max(0.0, float(frame_scale))
+        next_x = self.ball_x + (self.ball_dx * frame_scale)
+        next_y = self.ball_y + (self.ball_dy * frame_scale)
 
         if next_x - self.ball_radius <= 0.0:
             next_x = self.ball_radius
@@ -114,8 +116,8 @@ class BrickPanelGame:
             and self.paddle_left <= next_x <= self.paddle_right
         ):
             offset = (next_x - self.paddle_center) / max(0.001, self.paddle_width / 2.0)
-            self.ball_dx = max(-0.03, min(0.03, offset * 0.026))
-            self.ball_dy = -max(0.016, min(0.032, abs(self.ball_dy)))
+            self.ball_dx = max(-0.06, min(0.06, offset * 0.052))
+            self.ball_dy = -max(0.032, min(0.064, abs(self.ball_dy)))
             next_y = paddle_top - self.ball_radius
 
         if next_y - self.ball_radius >= 1.0:
@@ -132,11 +134,11 @@ class BrickPanelGame:
 
     def _reset_round(self) -> None:
         self.paddle_center = 0.5
-        self.paddle_width = max(0.12, 0.2 - ((self.level - 1) * 0.01))
+        self.paddle_width = max(0.072, (0.2 - ((self.level - 1) * 0.01)) * 0.6)
         self.ball_x = self.paddle_center
         self.ball_y = self.paddle_y - 0.04
-        self.ball_dx = 0.022 if self.level % 2 else -0.022
-        self.ball_dy = -min(0.034, 0.028 + ((self.level - 1) * 0.002))
+        self.ball_dx = 0.044 if self.level % 2 else -0.044
+        self.ball_dy = -min(0.068, (0.028 + ((self.level - 1) * 0.002)) * 2.0)
         self.launched = False
 
     def _reset_bricks(self) -> None:

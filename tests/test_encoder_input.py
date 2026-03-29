@@ -1,7 +1,9 @@
 import importlib
+import os
 import sys
 import types
 import unittest
+from unittest import mock
 
 
 class _FakeCallback:
@@ -77,11 +79,33 @@ class EncoderInputTests(unittest.TestCase):
         self.fake_pi.pin_values[5] = 0
         events = encoder.get_events()
         self.assertEqual([event.kind for event in events], ["long_press"])
-        self.assertEqual(self.fake_pi.glitch_filters[5], 8000)
+        self.assertEqual(self.fake_pi.glitch_filters[5], 0)
 
         encoder.close()
         self.assertTrue(all(callback.cancelled for callback in self.fake_pi.callbacks))
         self.assertTrue(self.fake_pi.stopped)
+
+    def test_rotation_events_are_raw_detents_without_global_acceleration(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "SHADOWBOX_ENCODER_ACCEL_FAST_SECONDS": "10",
+                "SHADOWBOX_ENCODER_ACCEL_FAST_MULTIPLIER": "7",
+                "SHADOWBOX_ENCODER_ACCEL_TURBO_SECONDS": "10",
+                "SHADOWBOX_ENCODER_ACCEL_TURBO_MULTIPLIER": "9",
+            },
+            clear=False,
+        ):
+            encoder = self.encoder_module.EncoderInput()
+        encoder._enc_accum = encoder.steps_per_detent - 1
+        encoder._last_move_sign = 1
+        self.fake_pi.pin_values[encoder.clk_pin] = 0
+        self.fake_pi.pin_values[encoder.dt_pin] = 1
+
+        encoder._on_ab(encoder.clk_pin, 0, 0)
+
+        events = encoder.get_events()
+        self.assertEqual([(event.kind, event.delta) for event in events], [("rotate", 1)])
 
 
 if __name__ == "__main__":

@@ -56,14 +56,10 @@ class EncoderInput:
         sw_pin: int | None = None,
         back_pin: int | None = None,
         steps_per_detent: int = 4,
-        ab_glitch_us: int = 200,
+        ab_glitch_us: int = 0,
         sw_glitch_us: int = 8000,
-        back_glitch_us: int | None = None,
+        back_glitch_us: int = 0,
         long_press_seconds: float = 0.6,
-        accel_fast_seconds: float = 0.035,
-        accel_fast_multiplier: int = 2,
-        accel_turbo_seconds: float = 0.018,
-        accel_turbo_multiplier: int = 3,
     ):
         self.clk_pin = _env_int("SHADOWBOX_ENCODER_CLK", 17 if clk_pin is None else clk_pin)
         self.dt_pin = _env_int("SHADOWBOX_ENCODER_DT", 27 if dt_pin is None else dt_pin)
@@ -76,23 +72,7 @@ class EncoderInput:
         sw_glitch_us = _env_int("SHADOWBOX_ENCODER_SW_GLITCH_US", sw_glitch_us)
         self.back_glitch_us = _env_int(
             "SHADOWBOX_BACK_BUTTON_GLITCH_US",
-            sw_glitch_us if back_glitch_us is None else back_glitch_us,
-        )
-        self.accel_fast_seconds = max(
-            0.0,
-            _env_float("SHADOWBOX_ENCODER_ACCEL_FAST_SECONDS", accel_fast_seconds),
-        )
-        self.accel_fast_multiplier = max(
-            1,
-            _env_int("SHADOWBOX_ENCODER_ACCEL_FAST_MULTIPLIER", accel_fast_multiplier),
-        )
-        self.accel_turbo_seconds = max(
-            0.0,
-            _env_float("SHADOWBOX_ENCODER_ACCEL_TURBO_SECONDS", accel_turbo_seconds),
-        )
-        self.accel_turbo_multiplier = max(
-            1,
-            _env_int("SHADOWBOX_ENCODER_ACCEL_TURBO_MULTIPLIER", accel_turbo_multiplier),
+            back_glitch_us,
         )
 
         self._events: list[EncoderEvent] = []
@@ -118,7 +98,6 @@ class EncoderInput:
         self._enc_state = self._read_ab()
         self._enc_accum = 0
         self._last_move_sign = 0
-        self._last_detent_at: float | None = None
 
         self._encoder_press_started_at: float | None = None
         self._encoder_long_press_fired = False
@@ -169,25 +148,11 @@ class EncoderInput:
 
         if self._enc_accum >= self.steps_per_detent:
             self._enc_accum -= self.steps_per_detent
-            self._events.append(EncoderEvent(kind="rotate", delta=self._scaled_rotate_delta(+1)))
+            self._events.append(EncoderEvent(kind="rotate", delta=+1))
 
         elif self._enc_accum <= -self.steps_per_detent:
             self._enc_accum += self.steps_per_detent
-            self._events.append(EncoderEvent(kind="rotate", delta=self._scaled_rotate_delta(-1)))
-
-    def _scaled_rotate_delta(self, direction: int) -> int:
-        now = time.monotonic()
-        multiplier = 1
-
-        if self._last_detent_at is not None:
-            elapsed = now - self._last_detent_at
-            if self.accel_turbo_seconds > 0 and elapsed <= self.accel_turbo_seconds:
-                multiplier = self.accel_turbo_multiplier
-            elif self.accel_fast_seconds > 0 and elapsed <= self.accel_fast_seconds:
-                multiplier = self.accel_fast_multiplier
-
-        self._last_detent_at = now
-        return direction * multiplier
+            self._events.append(EncoderEvent(kind="rotate", delta=-1))
 
     # --------------------------------------------------------
     # button polling

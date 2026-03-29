@@ -20,7 +20,7 @@ def _env_bool(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def load_display_from_env(default_kind: str = "ssd1309"):
+def load_display_from_env(default_kind: str = "st7789_raw"):
     kind = os.environ.get("SHADOWBOX_DISPLAY", default_kind).strip().lower()
     kwargs = {}
 
@@ -58,7 +58,7 @@ def load_display_from_env(default_kind: str = "ssd1309"):
             offset_top=_env_int("SHADOWBOX_ST7789_OFFSET_TOP", 0),
             logical_width=_env_int("SHADOWBOX_LOGICAL_WIDTH", 320),
             logical_height=_env_int("SHADOWBOX_LOGICAL_HEIGHT", 240),
-            invert_colors=_env_bool("SHADOWBOX_ST7789_INVERT", True),
+            invert_colors=_env_bool("SHADOWBOX_ST7789_INVERT", False),
         )
     elif kind == "waveshare_2inch":
         kwargs.update(

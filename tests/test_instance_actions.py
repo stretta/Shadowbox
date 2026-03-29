@@ -40,13 +40,23 @@ class _CaptureRenderer(ShadowboxRenderer):
         super().__init__(_FakeDisplay())
         self.last_items: list[str] | None = None
         self.last_selected_idx: int | None = None
+        self.last_current_indices: set[int] | None = None
+        self.last_item_weights: dict[int, str] | None = None
 
     def draw_header(self, title: str, busy: bool = False, ticks: int = 0) -> None:
         pass
 
-    def draw_string_list(self, items: list[str], selected_idx: int, current_indices: set[int] | None = None) -> None:
+    def draw_string_list(
+        self,
+        items: list[str],
+        selected_idx: int,
+        current_indices: set[int] | None = None,
+        item_weights: dict[int, str] | None = None,
+    ) -> None:
         self.last_items = items
         self.last_selected_idx = selected_idx
+        self.last_current_indices = current_indices
+        self.last_item_weights = item_weights
 
 
 class InstanceActionTests(unittest.TestCase):
@@ -95,6 +105,120 @@ class InstanceActionTests(unittest.TestCase):
         renderer.draw(ui)
         self.assertEqual(renderer.last_items, ["..", "no instances"])
         self.assertEqual(renderer.last_selected_idx, 0)
+
+    def test_used_routing_targets_excludes_selected_port_connections(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(
+            RNBOSnapshot(
+                instances=[
+                    {
+                        "id": "1",
+                        "label": "Synth A",
+                        "routing": {
+                            "audio": {
+                                "inputs": [
+                                    {
+                                        "name": "In 1",
+                                        "path": "/inst/1/in1",
+                                        "targets": ["system:capture_1", "system:capture_2"],
+                                        "connections": ["system:capture_1"],
+                                    }
+                                ],
+                                "outputs": [],
+                            }
+                        },
+                    },
+                    {
+                        "id": "2",
+                        "label": "Synth B",
+                        "routing": {
+                            "audio": {
+                                "inputs": [
+                                    {
+                                        "name": "In 1",
+                                        "path": "/inst/2/in1",
+                                        "targets": ["system:capture_1", "system:capture_2"],
+                                        "connections": ["system:capture_2"],
+                                    }
+                                ],
+                                "outputs": [],
+                            }
+                        },
+                    },
+                ],
+                patchers=[],
+                add_instance_path="",
+                remove_instance_path="",
+                system={},
+            )
+        )
+        ui.state.active_instance_id = "1"
+        ui.state.active_transport = "audio"
+        ui.state.active_routing_direction = "inputs"
+        ui.state.routing_port_cursor = 1
+
+        self.assertEqual(ui.current_routing_targets, ["system:capture_1"])
+        self.assertEqual(ui.used_routing_targets, {"system:capture_2"})
+
+    def test_routing_target_list_marks_used_destinations_italic(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(
+            RNBOSnapshot(
+                instances=[
+                    {
+                        "id": "1",
+                        "label": "Synth A",
+                        "routing": {
+                            "audio": {
+                                "inputs": [
+                                    {
+                                        "name": "In 1",
+                                        "path": "/inst/1/in1",
+                                        "targets": ["system:capture_1", "system:capture_2"],
+                                        "connections": ["system:capture_1"],
+                                    }
+                                ],
+                                "outputs": [],
+                            }
+                        },
+                    },
+                    {
+                        "id": "2",
+                        "label": "Synth B",
+                        "routing": {
+                            "audio": {
+                                "inputs": [
+                                    {
+                                        "name": "In 1",
+                                        "path": "/inst/2/in1",
+                                        "targets": ["system:capture_1", "system:capture_2"],
+                                        "connections": ["system:capture_2"],
+                                    }
+                                ],
+                                "outputs": [],
+                            }
+                        },
+                    },
+                ],
+                patchers=[],
+                add_instance_path="",
+                remove_instance_path="",
+                system={},
+            )
+        )
+        ui.state.active_instance_id = "1"
+        ui.state.ui_mode = "ROUTING_TARGETS"
+        ui.state.active_transport = "audio"
+        ui.state.active_routing_direction = "inputs"
+        ui.state.routing_port_cursor = 1
+        ui.state.routing_target_cursor = 2
+
+        renderer = _CaptureRenderer()
+        renderer.draw(ui)
+
+        self.assertEqual(renderer.last_items, ["..", "DISCONNECT", "system:capture_1", "system:capture_2"])
+        self.assertEqual(renderer.last_current_indices, {2})
+        self.assertEqual(renderer.last_item_weights, {3: "italic"})
 
 
 if __name__ == "__main__":

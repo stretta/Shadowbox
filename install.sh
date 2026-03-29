@@ -13,7 +13,7 @@ REPO_DIR="$(pwd)"
 RUN_USER="$(id -un)"
 VENV_PYTHON="${REPO_DIR}/.venv/bin/python"
 SERVICE_PATH="/etc/systemd/system/shadowbox.service"
-DISPLAY_KIND="${SHADOWBOX_DISPLAY:-ssd1309}"
+DISPLAY_KIND="${SHADOWBOX_DISPLAY:-st7789_raw}"
 
 echo "Shadowbox installer"
 echo "==================="

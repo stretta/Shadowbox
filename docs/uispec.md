@@ -174,7 +174,7 @@ Parameters come from the instance `params` branch.
 
 Parameter type and UI behavior are determined from published metadata and attributes.
 
-Supported editor types:
+Supported parameter presentations:
 - numeric
 - bool
 - enum
@@ -192,16 +192,18 @@ Recognized metadata categories:
 - Editor selection: `editor`
 - Display hints: `unit`, `units`, `display_precision`, `display_as`
 - Edit behavior: `edit_step`, `edit_as`, `bool`, `is_bool`, `boolean`
-- Runtime state wiring: `playhead_state`, `pitch_state`, `cents_state`
+- Runtime state wiring: `playhead_state`, `pitch_state`, `cents_state`, `ui_role`
 
 Metadata behavior rules:
-- `editor` selects a specialized editor when its value matches a supported editor type
+- `editor` selects a specialized editor only for supported custom screens such as `ttid`, `step16`, and `pitch_display`
 - `unit` and `units` provide a display suffix only
 - `display_precision` controls decimal formatting only and does not imply encoder step size
 - `edit_step` controls encoder increment only and does not imply display formatting
 - `display_as` and `edit_as` are semantic UI hints; for example, `int` means the value should be rendered or edited as integer-like even if the published transport value is float-like
-- Boolean hints in metadata may override heuristic type detection when the published RNBO type is not specific enough
-- If metadata is absent or malformed, Shadowbox falls back to type/range heuristics and generic editor behavior
+- Boolean hints in metadata explicitly opt a parameter into the bool editor
+- `ui_role` helps runtime state lookups match a published state value to a UI-specific role such as a custom editor feed
+- If metadata is absent or malformed, Shadowbox does not infer bool or integer intent from range or transport type; it falls back to numeric behavior, except that RNBO enum parameters still use the enum selector
+- Shadowbox can read metadata either from the parameter's `meta` node or from direct scalar child nodes published into the OSCQuery tree, such as `editor`, `display_name`, or `ui_role`
 
 Editor behavior:
 - Continuous numeric editors may update live while rotating
@@ -209,12 +211,12 @@ Editor behavior:
 - Long press in a deferred editor cancels and restores the original value
 - Some custom editors may commit changes immediately during editing
 - Long press in a live editor exits the editor and does not revert already committed changes
-- Bool parameters use a dedicated boolean editor
-- Enum parameters use a list selector, regardless of option count
+- Bool parameters use a dedicated boolean editor only when metadata explicitly marks them as bool
+- Enum parameters use a list selector when RNBO publishes an explicit enum value list
 - TTID uses a specialized editor only when the parameter metadata explicitly includes `editor: "ttid"`
 - `step16` uses a specialized live editor when the parameter metadata explicitly includes `editor: "step16"`; its default runtime state key is `step16_playhead` and may be overridden with `playhead_state`
 - `pitch_display` uses a specialized live viewer when the parameter metadata explicitly includes `editor: "pitch_display"`; its default runtime state keys are `pitch_name` and `pitch_cents` and may be overridden with `pitch_state` and `cents_state`
-- Numeric parameters may be presented as integer-style controls when metadata such as `display_precision: 0`, `edit_step: 1`, or `edit_as: "int"` is present, even if RNBO Runner publishes the raw value as float-like
+- Numeric parameters may be presented as integer-style controls only when metadata such as `display_as: "int"` or `edit_as: "int"` is present, even if RNBO Runner publishes the raw value as float-like
 
 8. Presets
 

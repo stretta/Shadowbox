@@ -19,6 +19,7 @@ from shadowbox.ui import (
     SYSTEM_AUDIO_ITEMS,
     display_as_int,
     display_precision,
+    edit_as_int,
 )
 from shadowbox.version import SHADOWBOX_BUILD_INFO, SHADOWBOX_VERSION
 
@@ -135,10 +136,15 @@ class ShadowboxRenderer:
             return weight
         upgrades = {
             "thin": "regular",
+            "thin-italic": "italic",
             "regular": "medium",
+            "italic": "medium-italic",
             "medium": "semibold",
+            "medium-italic": "semibold-italic",
             "semibold": "bold",
+            "semibold-italic": "bold-italic",
             "bold": "bold",
+            "bold-italic": "bold-italic",
         }
         return upgrades.get(weight, "medium")
 
@@ -232,7 +238,7 @@ class ShadowboxRenderer:
                 0,
                 getattr(self.display, "width", 320) - self.full_tft_text_x - self.full_tft_right_padding,
             )
-            sample_w, _ = self._measure_text("abcdefghijklmnopqrstuvwxyz", 2)
+            sample_w, _ = self._measure_text("abcdefghijklmnopqrstuvwxyz", 2, "regular")
             avg_char_w = max(1, sample_w // 26)
             return max(8, usable_width // avg_char_w)
         return max(8, getattr(self.display, "width", 128) // 6)
@@ -427,9 +433,15 @@ class ShadowboxRenderer:
             return
         self._text(row[: self.text_cols], 0, y, weight=left_weight)
 
-    def draw_string_list(self, items: list[str], selected_idx: int, current_indices: set[int] | None = None) -> None:
+    def draw_string_list(
+        self,
+        items: list[str],
+        selected_idx: int,
+        current_indices: set[int] | None = None,
+        item_weights: dict[int, str] | None = None,
+    ) -> None:
         if self.is_tft:
-            self._draw_string_list_tft(items, selected_idx, current_indices=current_indices)
+            self._draw_string_list_tft(items, selected_idx, current_indices=current_indices, item_weights=item_weights)
             return
         indices, selected_row, rows = self.list_window(selected_idx, len(items))
         for row_idx, item_idx in enumerate(indices):
@@ -438,9 +450,16 @@ class ShadowboxRenderer:
                 row_idx == selected_row,
                 item_idx in (current_indices or set()),
                 items[item_idx],
+                text_weight=(item_weights or {}).get(item_idx),
             )
 
-    def _draw_string_list_tft(self, items: list[str], selected_idx: int, current_indices: set[int] | None = None) -> None:
+    def _draw_string_list_tft(
+        self,
+        items: list[str],
+        selected_idx: int,
+        current_indices: set[int] | None = None,
+        item_weights: dict[int, str] | None = None,
+    ) -> None:
         panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
         self._draw_panel(panel_x, panel_y, panel_w, panel_h, None)
 
@@ -467,7 +486,7 @@ class ShadowboxRenderer:
             current = item_idx in (current_indices or set())
             prefix = ">" if selected else " "
             line_limit = self.text_cols - 3 if self.is_full_tft else 50
-            weight = self._current_row_weight(current=current)
+            weight = self._current_row_weight((item_weights or {}).get(item_idx), current=current)
             if self.is_full_tft:
                 self._draw_full_tft_row(y, prefix, shorten(str(items[item_idx]), line_limit), selected=selected, text_weight=weight)
             else:
@@ -654,16 +673,34 @@ class ShadowboxRenderer:
         current_indices = {1} if not ui.current_routing_targets else {
             idx + 2 for idx, item in enumerate(ui.active_routing_targets) if item in ui.current_routing_targets
         }
+        item_weights = {
+            idx + 2: "italic"
+            for idx, item in enumerate(ui.active_routing_targets)
+            if item in ui.used_routing_targets
+        }
         if self.is_tft:
-            self._draw_routing_targets_tft(port, labels, selected_idx, current_indices=current_indices)
+            self._draw_routing_targets_tft(
+                port,
+                labels,
+                selected_idx,
+                current_indices=current_indices,
+                item_weights=item_weights,
+            )
             return
-        self.draw_string_list(labels, selected_idx, current_indices=current_indices)
+        self.draw_string_list(labels, selected_idx, current_indices=current_indices, item_weights=item_weights)
         if port and self.is_tall:
             current = port.get("connections", [])
             current_text = "none" if not current else shorten(format_display_value(current), self.title_cols)
             self.text_center(current_text, self.content_rows[-1] + 2 if self.is_tft else 56)
 
-    def _draw_routing_targets_tft(self, port: dict | None, labels: list[str], selected_idx: int, current_indices: set[int] | None = None) -> None:
+    def _draw_routing_targets_tft(
+        self,
+        port: dict | None,
+        labels: list[str],
+        selected_idx: int,
+        current_indices: set[int] | None = None,
+        item_weights: dict[int, str] | None = None,
+    ) -> None:
         panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
         self._draw_panel(panel_x, panel_y, panel_w, panel_h, None)
 
@@ -691,7 +728,7 @@ class ShadowboxRenderer:
                 current = item_idx in (current_indices or set())
                 prefix = ">" if selected else " "
                 line_limit = self.text_cols - 3 if self.is_full_tft else 50
-                weight = self._current_row_weight(current=current)
+                weight = self._current_row_weight((item_weights or {}).get(item_idx), current=current)
                 if self.is_full_tft:
                     self._draw_full_tft_row(y, prefix, shorten(str(labels[item_idx]), line_limit), selected=selected, text_weight=weight)
                 else:
@@ -724,18 +761,20 @@ class ShadowboxRenderer:
                     return meta_value
                 if isinstance(meta_value, str) and meta_value.strip().lower() in ("1", "true", "yes", "bool", "boolean"):
                     return True
-        if param.get("type", "") in ("T", "F"):
-            return True
-        return param.get("min") == 0 and param.get("max") == 1 or isinstance(value, bool)
+        return False
 
     def _is_enum_param(self, param: dict) -> bool:
         return isinstance(param.get("vals"), list) and len(param.get("vals")) > 0
 
     def _is_small_int_param(self, param: dict) -> bool:
-        ptype = param.get("type", "")
         pmin = param.get("min")
         pmax = param.get("max")
-        return ptype in ("i", "h", "I", "c") and pmin is not None and pmax is not None and (pmax - pmin) <= 16
+        return (
+            edit_as_int(param)
+            and pmin is not None
+            and pmax is not None
+            and (pmax - pmin) <= 16
+        )
 
     def _fill_rect(self, x: int, y: int, w: int, h: int, on: bool = True) -> None:
         for yy in range(y, y + h):

@@ -66,6 +66,17 @@ class BrickPanelTests(unittest.TestCase):
 
         self.assertEqual(ui.state.ui_mode, "ABOUT")
 
+    def test_only_brick_panel_uses_turbo_rendering_for_now(self) -> None:
+        ui = ShadowboxUI()
+
+        self.assertFalse(ui.uses_turbo_rendering)
+
+        ui.state.ui_mode = "BRICK_PANEL"
+        self.assertTrue(ui.uses_turbo_rendering)
+
+        ui.state.ui_mode = "ABOUT"
+        self.assertFalse(ui.uses_turbo_rendering)
+
     def test_press_launches_ball_and_brick_hit_scores(self) -> None:
         game = BrickPanelGame()
         game.press()
@@ -77,6 +88,27 @@ class BrickPanelTests(unittest.TestCase):
 
         self.assertTrue(game.launched)
         self.assertGreater(game.score, 0)
+
+    def test_update_frame_scale_preserves_expected_motion(self) -> None:
+        game = BrickPanelGame()
+        game.press()
+
+        start_x = game.ball_x
+        start_y = game.ball_y
+        dx = game.ball_dx
+        dy = game.ball_dy
+
+        game.update(frame_scale=0.5)
+
+        self.assertAlmostEqual(game.ball_x, start_x + (dx * 0.5))
+        self.assertAlmostEqual(game.ball_y, start_y + (dy * 0.5))
+
+    def test_reset_round_uses_smaller_paddle_and_faster_ball(self) -> None:
+        game = BrickPanelGame()
+
+        self.assertAlmostEqual(game.paddle_width, 0.12)
+        self.assertAlmostEqual(abs(game.ball_dx), 0.044)
+        self.assertAlmostEqual(abs(game.ball_dy), 0.056)
 
     def test_renderer_draws_brick_panel_mode(self) -> None:
         ui = ShadowboxUI()

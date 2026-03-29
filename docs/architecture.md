@@ -28,6 +28,7 @@ Module responsibilities:
 - Primary state machine
 - Owns navigation, selection state, editor modes, and action emission
 - Builds menus from discovered capabilities instead of hardcoded backend assumptions
+- Declares whether the current screen should opt into turbo rendering for animation-heavy views
 - Distinguishes:
   - list navigation
   - modal editors
@@ -51,6 +52,7 @@ Module responsibilities:
 - Wires hardware input, UI state machine, renderer, and RNBO client together
 - Executes UI actions against RNBO
 - Owns refresh timing, idle dim/sleep behavior, post-action refresh/restart flows, and live OSC state listener registration
+- Applies a shared base render cadence and a higher turbo cadence for screens that explicitly opt in through `ui.py`
 
 Data flow:
 1. `rnbo.py` reads OSCQuery and produces a snapshot

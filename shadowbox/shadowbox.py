@@ -20,6 +20,8 @@ from shadowbox.renderer import create_renderer
 
 FPS = 20
 FRAME_DT = 1.0 / FPS
+TURBO_FPS = 40
+TURBO_FRAME_DT = 1.0 / TURBO_FPS
 REFRESH_SECONDS = 3.0
 STARTUP_MIN_SECONDS = 1.2
 STARTUP_DISCOVERY_TIMEOUT = 15.0
@@ -60,6 +62,8 @@ DIM_TIMEOUT = max(0.0, _env_float("SHADOWBOX_DIM_TIMEOUT", DIM_TIMEOUT))
 SLEEP_TIMEOUT = max(DIM_TIMEOUT, _env_float("SHADOWBOX_SLEEP_TIMEOUT", SLEEP_TIMEOUT))
 BRIGHTNESS_NORMAL = max(0, min(255, _env_int("SHADOWBOX_BRIGHTNESS_NORMAL", BRIGHTNESS_NORMAL)))
 BRIGHTNESS_DIM = max(0, min(BRIGHTNESS_NORMAL, _env_int("SHADOWBOX_BRIGHTNESS_DIM", BRIGHTNESS_DIM)))
+TURBO_FPS = max(1, _env_int("SHADOWBOX_TURBO_FPS", _env_int("SHADOWBOX_BRICK_PANEL_FPS", TURBO_FPS)))
+TURBO_FRAME_DT = 1.0 / TURBO_FPS
 
 
 def _is_tft_display(display) -> bool:
@@ -324,7 +328,7 @@ def _assign_next_unused_outputs(ui, rnbo, instance_id: str) -> bool:
 
 
 def main():
-    display = load_display_from_env(default_kind="ssd1309")
+    display = load_display_from_env(default_kind="st7789_raw")
     brightness_normal = BRIGHTNESS_NORMAL
     brightness_dim = BRIGHTNESS_DIM
     if _is_tft_display(display) and "SHADOWBOX_BRIGHTNESS_NORMAL" not in os.environ:
@@ -592,10 +596,13 @@ def main():
                 display.set_contrast(brightness_dim)
                 is_dimmed = True
 
-            # Draw at fixed-ish frame rate, but skip while sleeping
-            if (not is_sleeping) and (now - last_frame) >= FRAME_DT:
+            # Draw at fixed-ish frame rate, but allow selected screens to opt into a faster animation cadence.
+            is_turbo_frame = ui.uses_turbo_rendering
+            target_frame_dt = TURBO_FRAME_DT if is_turbo_frame else FRAME_DT
+            frame_scale = target_frame_dt / FRAME_DT if is_turbo_frame else 1.0
+            if (not is_sleeping) and (now - last_frame) >= target_frame_dt:
                 last_frame = now
-                ui.advance_frame()
+                ui.advance_frame(frame_scale=frame_scale)
                 renderer.draw(ui)
 
             sleep(0.001)

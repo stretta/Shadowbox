@@ -10,9 +10,9 @@ SW = int(os.environ.get("SHADOWBOX_ENCODER_SW", "22"), 0)
 BACK = int(os.environ.get("SHADOWBOX_BACK_BUTTON_PIN", "0"), 0)
 
 STEPS_PER_DETENT = int(os.environ.get("SHADOWBOX_ENCODER_STEPS_PER_DETENT", "4"), 0)
-AB_GLITCH_US = int(os.environ.get("SHADOWBOX_ENCODER_AB_GLITCH_US", "200"), 0)
+AB_GLITCH_US = int(os.environ.get("SHADOWBOX_ENCODER_AB_GLITCH_US", "0"), 0)
 SW_GLITCH_US = int(os.environ.get("SHADOWBOX_ENCODER_SW_GLITCH_US", "8000"), 0)
-ACCEL_FAST_SECONDS = float(os.environ.get("SHADOWBOX_ENCODER_ACCEL_FAST_SECONDS", "0.035"))
+ACCEL_FAST_SECONDS = float(os.environ.get("SHADOWBOX_ENCODER_ACCEL_FAST_SECONDS", "0.35"))
 ACCEL_FAST_MULTIPLIER = int(os.environ.get("SHADOWBOX_ENCODER_ACCEL_FAST_MULTIPLIER", "2"), 0)
 ACCEL_TURBO_SECONDS = float(os.environ.get("SHADOWBOX_ENCODER_ACCEL_TURBO_SECONDS", "0.018"))
 ACCEL_TURBO_MULTIPLIER = int(os.environ.get("SHADOWBOX_ENCODER_ACCEL_TURBO_MULTIPLIER", "3"), 0)
@@ -43,7 +43,7 @@ pi.set_glitch_filter(CLK, AB_GLITCH_US)
 pi.set_glitch_filter(DT, AB_GLITCH_US)
 pi.set_glitch_filter(SW, SW_GLITCH_US)
 if BACK > 0:
-    pi.set_glitch_filter(BACK, int(os.environ.get("SHADOWBOX_BACK_BUTTON_GLITCH_US", str(SW_GLITCH_US)), 0))
+    pi.set_glitch_filter(BACK, int(os.environ.get("SHADOWBOX_BACK_BUTTON_GLITCH_US", "0"), 0))
 
 
 def read_ab():

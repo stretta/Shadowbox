@@ -53,6 +53,7 @@ Common metadata keys:
 - `edit_as`
 - `bool`, `is_bool`, `boolean`
 - `playhead_state`, `pitch_state`, `cents_state`
+- `ui_role`
 
 Custom editors are selected through the `editor` metadata key.
 
@@ -61,11 +62,11 @@ Current specialized editors:
 - `step16` via `{"editor":"step16"}`
 - `pitch_display` via `{"editor":"pitch_display"}`
 
-If metadata is missing or malformed, Shadowbox falls back to generic display and editor heuristics based on the published type and range.
+If metadata is missing or malformed, Shadowbox falls back to numeric behavior. The only non-metadata exception is enums published explicitly by RNBO as a value list.
 
-In practice, the metadata must appear in the published OSCQuery tree so that `rnbo.py` can parse it from the parameter's `meta` node.
+In practice, the metadata must appear in the published OSCQuery tree so that `rnbo.py` can parse it from the parameter's `meta` node. Shadowbox also accepts direct scalar child nodes for some hints, such as `editor`, `display_name`, and `ui_role`, when RNBO exports them separately instead of bundling them into `meta`.
 
-One practical use of this contract is recovering integer-style UI behavior from float-like RNBO Runner exports. For example, metadata such as `{"display_precision":0,"edit_step":1,"edit_as":"int"}` lets Shadowbox present and edit a value as integer-like even when the transport value is published as a float.
+One practical use of this contract is recovering integer-style UI behavior from float-like RNBO Runner exports. For example, metadata such as `{"display_precision":0,"edit_step":1,"edit_as":"int","display_as":"int"}` lets Shadowbox present and edit a value as integer-like even when the transport value is published as a float.
 
 4. Step16 editor contract
 

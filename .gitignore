@@ -9,3 +9,4 @@ __MACOSX
 env/
 
 shadowbox_state.json
+agent_instructions.md
