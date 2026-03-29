@@ -261,6 +261,24 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+Install test dependencies:
+
+```
+pip install -r requirements-dev.txt
+```
+
+Run the test suite:
+
+```
+python -m pytest
+```
+
+Run a focused test file:
+
+```
+python -m pytest tests/test_tft_text.py
+```
+
 Run Shadowbox directly:
 
 ```

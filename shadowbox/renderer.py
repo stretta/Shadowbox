@@ -1110,7 +1110,6 @@ class ShadowboxRenderer:
                 origin_x = 20
                 block_h = 144
                 top = self.edit_content_top(block_h)
-                self._draw_edit_caption("step pattern", top)
                 origin_y = top + 12
                 cell_w = 30
                 cell_h = 48
@@ -1120,7 +1119,6 @@ class ShadowboxRenderer:
                 origin_x = 8
                 block_h = 64
                 top = self.edit_content_top(block_h)
-                self._draw_edit_caption("step pattern", top)
                 origin_y = top + 8
                 cell_w = 12
                 cell_h = 16
