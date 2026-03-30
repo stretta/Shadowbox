@@ -13,7 +13,7 @@ The UI is organized around RNBO instances.
 2. Source of Truth
 
 - Instance-scoped runtime data comes from OSCQuery
-- Shadowbox may store local UI state such as cursor position or startup preferences
+- Shadowbox may store limited local UI state such as cursor position or saved audio-device selection
 - Shadowbox must not invent patch, graph, preset, or routing structures that are not published
 - `SYSTEM` may expose a small curated set of host-level status or maintenance actions that are not owned by any instance and may come from local OS/integration data instead of OSCQuery
 - Non-OSCQuery `SYSTEM` features must be explicit, minimal, and documented; they must not be generalized into arbitrary host inspection
@@ -60,7 +60,6 @@ SYSTEM
 STATUS
 AUDIO
 NETWORK
-STARTUP
 MAINT
 
 Rules:
@@ -270,7 +269,6 @@ Initial system areas:
 - status
 - audio device selection
 - network status
-- startup behavior
 - maintenance actions
 
 Rules:

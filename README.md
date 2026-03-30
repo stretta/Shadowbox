@@ -10,7 +10,7 @@ It provides:
 - Preset loading
 - Audio and MIDI routing
 - Basic system management
-- Startup audio-device recall
+- Saved audio-device selection
 - Startup discovery/status screen
 - Display interface for SSD1306, SSD1309, generic ST7789, and Waveshare 2-inch ST7789V hardware
 - Rotary encoder navigation
@@ -72,8 +72,7 @@ https://www.adafruit.com/product/4484
 - System status display
 - Audio device switching
 - JACK restart
-- Startup configuration
-- Saved UI state in `~/rnbo-ui/shadowbox_state.json`
+- Saved top-level cursor and audio-device selection in `~/rnbo-ui/shadowbox_state.json`
 
 ---
 

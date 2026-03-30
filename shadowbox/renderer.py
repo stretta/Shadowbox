@@ -1358,7 +1358,6 @@ class ShadowboxRenderer:
                     ("XRUNS", status.get("xruns", "-")),
                     ("RNBO", status.get("runner_version", "-")),
                     ("SET", ui.state.system.get("set_name", "-")),
-                    ("STARTUP", "ON" if ui.state.startup_enabled else "OFF"),
                 ]
             )
             return
@@ -1411,24 +1410,6 @@ class ShadowboxRenderer:
         rows = self.content_rows
         self.draw_value_row(rows[0], False, "ip", ip)
         self.draw_value_row(rows[1], False, "osc", RNBO_PORT)
-
-    def draw_startup(self, ui) -> None:
-        if self.is_tft:
-            panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
-            self._draw_panel(panel_x, panel_y, panel_w, panel_h, None)
-            if self.is_full_tft:
-                self.text_center("startup behavior", panel_y + 34)
-                self.text_center_scaled("ON" if ui.state.startup_enabled else "OFF", panel_y + 76, 4)
-                self.text_center("press = toggle", panel_y + 156)
-            else:
-                self.text_center("startup behavior", 24)
-                self.text_center_scaled("ON" if ui.state.startup_enabled else "OFF", 44, 2)
-                self.text_center("press = toggle", 74)
-            return
-        rows = self.content_rows
-        self.draw_value_row(rows[1], False, "startup", "ON" if ui.state.startup_enabled else "OFF")
-        if self.is_tall:
-            self.text_center("press = toggle", 56)
 
     def draw_about(self) -> None:
         version_text = SHADOWBOX_VERSION
@@ -1618,7 +1599,6 @@ class ShadowboxRenderer:
             "SYSTEM_AUDIO_BUFFER": "BUFFER",
             "STATUS": "STATUS",
             "NETWORK": "NETWORK",
-            "STARTUP": "STARTUP",
             "ABOUT": "ABOUT",
             "BRICK_PANEL": "BRICK PANEL",
             "MAINT": "MAINT",
@@ -1675,8 +1655,6 @@ class ShadowboxRenderer:
             self.draw_system_audio_buffer(ui)
         elif state.ui_mode == "NETWORK":
             self.draw_network()
-        elif state.ui_mode == "STARTUP":
-            self.draw_startup(ui)
         elif state.ui_mode == "ABOUT":
             self.draw_about()
         elif state.ui_mode == "BRICK_PANEL":

@@ -102,7 +102,6 @@ class UIState:
     activity_ticks: int = 0
 
     saved_audio_card: str = ""
-    startup_enabled: bool = False
     current_presets: dict[str, str] = field(default_factory=dict)
 
 
@@ -358,14 +357,12 @@ class ShadowboxUI:
         saved = self._saved_state_cache
         self.state.top_index = clamp_index(int(saved.get("top_index", 0)), len(self.top_level_items))
         self.state.saved_audio_card = str(saved.get("saved_audio_card", ""))
-        self.state.startup_enabled = bool(saved.get("startup_enabled", False))
 
     def save_state(self) -> None:
         save_state_file(
             {
                 "top_index": self.state.top_index,
                 "saved_audio_card": self.current_audio_card,
-                "startup_enabled": self.state.startup_enabled,
             }
         )
 
@@ -519,7 +516,7 @@ class ShadowboxUI:
 
     @property
     def system_menu_items(self) -> list[str]:
-        items = ["STATUS", "AUDIO", "NETWORK", "STARTUP", "ABOUT"]
+        items = ["STATUS", "AUDIO", "NETWORK", "ABOUT"]
         if self.maint_menu_items:
             items.append("MAINT")
         return items
@@ -913,9 +910,6 @@ class ShadowboxUI:
             self.state.sample_rate_cursor = self._cycle(self.state.sample_rate_cursor, len(self.sample_rate_options) + 1, step)
         elif self.state.ui_mode == "SYSTEM_AUDIO_BUFFER":
             self.state.buffer_size_cursor = self._cycle(self.state.buffer_size_cursor, len(self.buffer_size_options) + 1, step)
-        elif self.state.ui_mode == "STARTUP":
-            self.state.startup_enabled = not self.state.startup_enabled
-            self.queue_action(UIAction(kind="save_state"))
         elif self.state.ui_mode == "EDIT":
             param = self.selected_param
             if param is None:
@@ -1200,10 +1194,6 @@ class ShadowboxUI:
                 value = self.buffer_size_options[self.state.buffer_size_cursor - 1]
                 self.queue_action(UIAction(kind="set_jack_config", path=path, value=value))
 
-        elif self.state.ui_mode == "STARTUP":
-            self.state.startup_enabled = not self.state.startup_enabled
-            self.queue_action(UIAction(kind="save_state"))
-
         elif self.state.ui_mode == "MAINT":
             if self.state.maint_cursor == 0:
                 self.state.ui_mode = "SYSTEM_MENU"
@@ -1307,7 +1297,7 @@ class ShadowboxUI:
             self.state.ui_mode = "TOP"
         elif self.state.ui_mode == "REMOVE_INSTANCE_CONFIRM":
             self.state.ui_mode = "REMOVE_INSTANCE_PICKER" if self.state.remove_instance_origin == "instance_list" else "INSTANCE_MENU"
-        elif self.state.ui_mode in ("STATUS", "NETWORK", "STARTUP", "ABOUT", "MAINT"):
+        elif self.state.ui_mode in ("STATUS", "NETWORK", "ABOUT", "MAINT"):
             self._about_press_count = 0
             self.state.ui_mode = "SYSTEM_MENU"
         elif self.state.ui_mode in ("SYSTEM_AUDIO_DEVICE", "SYSTEM_AUDIO_RATE", "SYSTEM_AUDIO_BUFFER"):

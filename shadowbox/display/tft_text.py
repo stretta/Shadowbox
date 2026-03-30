@@ -21,64 +21,64 @@ def _font_file_candidates(*names: str) -> list[Path | str]:
 
 _FONT_CANDIDATES = {
     "thin": [
-        *_font_file_candidates("IBMPlexSansCondensed-Light.ttf", "IBMPlexSansCondensed-Regular.ttf"),
         *_font_file_candidates("IBMPlexSans-Light.ttf", "IBMPlexSans-Regular.ttf"),
+        *_font_file_candidates("IBMPlexSansCondensed-Light.ttf", "IBMPlexSansCondensed-Regular.ttf"),
         "DejaVuSans.ttf",
     ],
     "thin-italic": [
-        *_font_file_candidates("IBMPlexSansCondensed-LightItalic.ttf", "IBMPlexSansCondensed-Italic.ttf"),
         *_font_file_candidates("IBMPlexSans-LightItalic.ttf", "IBMPlexSans-Italic.ttf"),
+        *_font_file_candidates("IBMPlexSansCondensed-LightItalic.ttf", "IBMPlexSansCondensed-Italic.ttf"),
         "DejaVuSans-Oblique.ttf",
         "DejaVuSans.ttf",
     ],
     "regular": [
-        *_font_file_candidates("IBMPlexSansCondensed-Regular.ttf"),
         *_font_file_candidates("IBMPlexSans-Regular.ttf"),
+        *_font_file_candidates("IBMPlexSansCondensed-Regular.ttf"),
         "DejaVuSans.ttf",
     ],
     "italic": [
-        *_font_file_candidates("IBMPlexSansCondensed-Italic.ttf", "IBMPlexSansCondensed-Regular.ttf"),
         *_font_file_candidates("IBMPlexSans-Italic.ttf", "IBMPlexSans-Regular.ttf"),
+        *_font_file_candidates("IBMPlexSansCondensed-Italic.ttf", "IBMPlexSansCondensed-Regular.ttf"),
         "DejaVuSans-Oblique.ttf",
         "DejaVuSans.ttf",
     ],
     "medium": [
-        *_font_file_candidates("IBMPlexSansCondensed-Medium.ttf", "IBMPlexSansCondensed-Regular.ttf"),
         *_font_file_candidates("IBMPlexSans-Medium.ttf"),
+        *_font_file_candidates("IBMPlexSansCondensed-Medium.ttf", "IBMPlexSansCondensed-Regular.ttf"),
         "DejaVuSans-Bold.ttf",
         "DejaVuSans.ttf",
     ],
     "medium-italic": [
-        *_font_file_candidates("IBMPlexSansCondensed-MediumItalic.ttf", "IBMPlexSansCondensed-Italic.ttf"),
         *_font_file_candidates("IBMPlexSans-MediumItalic.ttf", "IBMPlexSans-Italic.ttf"),
+        *_font_file_candidates("IBMPlexSansCondensed-MediumItalic.ttf", "IBMPlexSansCondensed-Italic.ttf"),
         "DejaVuSans-BoldOblique.ttf",
         "DejaVuSans-Oblique.ttf",
         "DejaVuSans-Bold.ttf",
         "DejaVuSans.ttf",
     ],
     "semibold": [
-        *_font_file_candidates("IBMPlexSansCondensed-SemiBold.ttf", "IBMPlexSansCondensed-Regular.ttf"),
         *_font_file_candidates("IBMPlexSans-SemiBold.ttf"),
+        *_font_file_candidates("IBMPlexSansCondensed-SemiBold.ttf", "IBMPlexSansCondensed-Regular.ttf"),
         "DejaVuSans-Bold.ttf",
         "DejaVuSans.ttf",
     ],
     "semibold-italic": [
-        *_font_file_candidates("IBMPlexSansCondensed-SemiBoldItalic.ttf", "IBMPlexSansCondensed-Italic.ttf"),
         *_font_file_candidates("IBMPlexSans-SemiBoldItalic.ttf", "IBMPlexSans-BoldItalic.ttf"),
+        *_font_file_candidates("IBMPlexSansCondensed-SemiBoldItalic.ttf", "IBMPlexSansCondensed-Italic.ttf"),
         "DejaVuSans-BoldOblique.ttf",
         "DejaVuSans-Oblique.ttf",
         "DejaVuSans-Bold.ttf",
         "DejaVuSans.ttf",
     ],
     "bold": [
-        *_font_file_candidates("IBMPlexSansCondensed-Bold.ttf", "IBMPlexSansCondensed-SemiBold.ttf"),
         *_font_file_candidates("IBMPlexSans-Bold.ttf", "IBMPlexSans-SemiBold.ttf"),
+        *_font_file_candidates("IBMPlexSansCondensed-Bold.ttf", "IBMPlexSansCondensed-SemiBold.ttf"),
         "DejaVuSans-Bold.ttf",
         "DejaVuSans.ttf",
     ],
     "bold-italic": [
-        *_font_file_candidates("IBMPlexSansCondensed-BoldItalic.ttf", "IBMPlexSansCondensed-SemiBoldItalic.ttf"),
         *_font_file_candidates("IBMPlexSans-BoldItalic.ttf", "IBMPlexSans-SemiBoldItalic.ttf"),
+        *_font_file_candidates("IBMPlexSansCondensed-BoldItalic.ttf", "IBMPlexSansCondensed-SemiBoldItalic.ttf"),
         "DejaVuSans-BoldOblique.ttf",
         "DejaVuSans-Oblique.ttf",
         "DejaVuSans-Bold.ttf",
@@ -205,7 +205,7 @@ def load_font(weight: str, scale: int) -> ImageFont.FreeTypeFont | ImageFont.Ima
             continue
     if normalized_weight not in _WARNED_FALLBACKS:
         warnings.warn(
-            f"Shadowbox could not load IBM Plex Sans Condensed for '{normalized_weight}'. Falling back to Pillow default font.",
+            f"Shadowbox could not load IBM Plex Sans for '{normalized_weight}'. Falling back to Pillow default font.",
             RuntimeWarning,
             stacklevel=2,
         )

@@ -57,10 +57,10 @@ class TftTextTests(unittest.TestCase):
         self.assertEqual(_normalize_weight_name("medium_condensed"), "condensed-medium")
         self.assertEqual(_normalize_weight_name("condensed semibold"), "condensed-semibold")
 
-    def test_default_weights_prefer_condensed_family(self) -> None:
-        self.assertEqual(Path(_FONT_CANDIDATES["regular"][0]).name, "IBMPlexSansCondensed-Regular.ttf")
-        self.assertEqual(Path(_FONT_CANDIDATES["medium"][0]).name, "IBMPlexSansCondensed-Medium.ttf")
-        self.assertEqual(Path(_FONT_CANDIDATES["bold"][0]).name, "IBMPlexSansCondensed-Bold.ttf")
+    def test_default_weights_prefer_standard_family(self) -> None:
+        self.assertEqual(Path(_FONT_CANDIDATES["regular"][0]).name, "IBMPlexSans-Regular.ttf")
+        self.assertEqual(Path(_FONT_CANDIDATES["medium"][0]).name, "IBMPlexSans-Medium.ttf")
+        self.assertEqual(Path(_FONT_CANDIDATES["bold"][0]).name, "IBMPlexSans-Bold.ttf")
 
 
 if __name__ == "__main__":
