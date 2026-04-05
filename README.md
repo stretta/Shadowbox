@@ -211,7 +211,10 @@ If necessary upgrade the runner first:
 
 ```
 sudo apt install rnbooscquery=1.4.3
+sudo apt-mark hold rnbooscquery
 ```
+
+This keeps `apt` from replacing the pinned `rnbooscquery` version during a later upgrade.
 
 Then install the panel:
 
