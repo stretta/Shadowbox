@@ -245,6 +245,7 @@ class ParamMetadataTests(unittest.TestCase):
                                         "sets": {
                                             "CONTENTS": {
                                                 "save": {"FULL_PATH": "/rnbo/inst/control/sets/save"},
+                                                "rename": {"FULL_PATH": "/rnbo/inst/control/sets/rename"},
                                                 "load": {
                                                     "FULL_PATH": "/rnbo/inst/control/sets/load",
                                                     "RANGE": [{"VALS": ["Alpha", "Bravo"]}],
@@ -284,6 +285,7 @@ class ParamMetadataTests(unittest.TestCase):
         self.assertEqual(sets["current_name"], "Bravo")
         self.assertTrue(sets["dirty"])
         self.assertEqual(sets["save_path"], "/rnbo/inst/control/sets/save")
+        self.assertEqual(sets["rename_path"], "/rnbo/inst/control/sets/rename")
         self.assertEqual(sets["load_path"], "/rnbo/inst/control/sets/load")
         self.assertEqual(sets["reload_path"], "/rnbo/inst/control/sets/reload")
         self.assertEqual(sets["initial_path"], "/rnbo/inst/control/sets/initial")
@@ -291,6 +293,54 @@ class ParamMetadataTests(unittest.TestCase):
         self.assertEqual(sets["available_sets"], ["Alpha", "Bravo"])
         self.assertEqual(sets["auto_start_last_path"], "/rnbo/inst/config/auto_start_last")
         self.assertTrue(sets["auto_start_last"])
+
+    def test_discover_instances_reads_preset_save_and_rename_capabilities(self) -> None:
+        tree = {
+            "CONTENTS": {
+                "rnbo": {
+                    "CONTENTS": {
+                        "jack": {
+                            "CONTENTS": {
+                                "info": {
+                                    "CONTENTS": {
+                                        "ports": {
+                                            "CONTENTS": {
+                                                "audio": {"CONTENTS": {"sources": {"VALUE": []}, "sinks": {"VALUE": []}}},
+                                                "midi": {"CONTENTS": {"sources": {"VALUE": []}, "sinks": {"VALUE": []}}},
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "inst": {
+                            "CONTENTS": {
+                                "1": {
+                                    "CONTENTS": {
+                                        "name": {"VALUE": "Synth A"},
+                                        "presets": {
+                                            "CONTENTS": {
+                                                "entries": {"VALUE": ["Init", "Bass"]},
+                                                "load": {"FULL_PATH": "/rnbo/inst/1/presets/load"},
+                                                "save": {"FULL_PATH": "/rnbo/inst/1/presets/save"},
+                                                "rename": {"FULL_PATH": "/rnbo/inst/1/presets/rename"},
+                                                "current": {"CONTENTS": {"name": {"VALUE": "Bass"}}},
+                                            }
+                                        },
+                                    }
+                                }
+                            }
+                        },
+                    }
+                }
+            }
+        }
+
+        instances = discover_instances(tree)
+
+        self.assertEqual(instances[0]["preset_save_path"], "/rnbo/inst/1/presets/save")
+        self.assertEqual(instances[0]["preset_rename_path"], "/rnbo/inst/1/presets/rename")
+        self.assertEqual(instances[0]["current_preset_name"], "Bass")
 
     def test_discover_system_includes_set_name_and_sets_section(self) -> None:
         tree = {
