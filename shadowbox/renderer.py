@@ -14,9 +14,13 @@ from shadowbox.editors.step16 import build_cells, is_step16_param
 from shadowbox.editors.ttid import get_root_names, is_pc_on, is_ttid_param, note_name
 from shadowbox.rnbo import RNBO_PORT
 from shadowbox.ui import (
+    MenuRow,
+    NAME_EDITOR_CHAR_OPTIONS,
+    NAME_INLINE_DELETE_LABEL,
     REMOVE_INSTANCE_CONFIRM_ITEMS,
     ROUTING_GROUP_ITEMS,
     SYSTEM_AUDIO_ITEMS,
+    ValueRow,
     display_as_int,
     display_precision,
     edit_as_int,
@@ -330,6 +334,12 @@ class ShadowboxRenderer:
             self._text(text, x, y, scale, weight)
             x += self._measure_text(text, scale, weight)[0]
 
+    def _draw_centered_text(self, text: str, y: int, scale: int = 1, weight: str = "regular") -> None:
+        text = str(text)
+        scale = max(1, int(scale))
+        x = max(0, (self.display.width - self._measure_text(text, scale, weight)[0]) // 2)
+        self._text(text, x, y, scale, weight)
+
     def _measure_shadowbox_logo(self, scale: int) -> tuple[int, int, int]:
         left_w, left_h = self._measure_text("SHADOW", scale, "thin")
         right_w, right_h = self._measure_text("BOX", scale, "bold")
@@ -414,6 +424,64 @@ class ShadowboxRenderer:
             return rows or [start]
         return [14, 22, 30, 38, 46, 54, 62, 70, 78, 86, 94, 102, 110]
 
+    def _inline_name_window(self, ui, max_chars: int) -> str:
+        text = str(ui.inline_name_text)
+        max_chars = max(3, int(max_chars))
+        if len(text) <= max_chars:
+            return text
+        focus_idx = text.find("[")
+        if focus_idx < 0:
+            return shorten(text, max_chars)
+        start = max(0, min(focus_idx - (max_chars // 2), len(text) - max_chars))
+        end = start + max_chars
+        window = text[start:end]
+        if start > 0 and len(window) >= 3:
+            window = "..." + window[3:]
+        if end < len(text) and len(window) >= 3:
+            window = window[:-3] + "..."
+        return window
+
+    def _inline_mode_segments(self, edit_mode: bool) -> list[tuple[str, int, str]]:
+        scale = 2 if self.is_full_tft else 1
+        inactive = "thin" if self.is_full_tft else "regular"
+        active = "bold"
+        if edit_mode:
+            return [
+                ("MOVE", scale, inactive),
+                ("   ", scale, "regular"),
+                ("[EDIT]", scale, active),
+            ]
+        return [
+            ("[MOVE]", scale, active),
+            ("   ", scale, "regular"),
+            ("EDIT", scale, inactive),
+        ]
+
+    def _inline_char_strip_text(self, ui, max_visible: int) -> str:
+        visible = max(3, int(max_visible))
+        option_count = len(NAME_EDITOR_CHAR_OPTIONS) + 1
+        focus_idx = max(0, min(ui.state.name_inline_preview_index, option_count - 1))
+        start = max(0, min(focus_idx - (visible // 2), option_count - visible))
+        end = min(option_count, start + visible)
+        labels: list[str] = []
+        delete_visible = end > len(NAME_EDITOR_CHAR_OPTIONS)
+        for idx in range(start, end):
+            if idx == len(NAME_EDITOR_CHAR_OPTIONS):
+                labels.append("|")
+            if idx >= len(NAME_EDITOR_CHAR_OPTIONS):
+                label = NAME_INLINE_DELETE_LABEL
+            else:
+                value = NAME_EDITOR_CHAR_OPTIONS[idx][1]
+                label = "_" if value == " " else value
+            labels.append(f"[{label}]" if idx == focus_idx else label)
+        if start > 0:
+            labels.insert(0, "...")
+        if end < option_count:
+            labels.append("...")
+        elif delete_visible:
+            labels.append("|")
+        return " ".join(labels)
+
     def list_window(self, selected_idx: int, total: int):
         rows = self.content_rows
         visible = len(rows)
@@ -448,12 +516,20 @@ class ShadowboxRenderer:
         x = 6 if self.is_tft else 0
         self._text(text if not self.is_tft else f"{'>' if selected else ' '} {shorten(label, 50)}"[: self.text_cols], x, y, weight=weight)
 
-    def draw_value_row(self, y: int, selected: bool, name: str, value: Any, current: bool = False) -> None:
+    def draw_value_row(
+        self,
+        y: int,
+        selected: bool,
+        name: str,
+        value: Any,
+        current: bool = False,
+        emphasis: str | None = None,
+    ) -> None:
         prefix = self._oled_row_prefix(selected, current)
         left = shorten(shorten_param_name(name), self.value_name_cols)
         right = shorten(format_display_value(value), self.value_cols)
         row = f"{prefix}{left:<{self.value_name_cols}} {right:>{self.value_cols}}"
-        left_weight = self._current_row_weight(current=current)
+        left_weight = self._current_row_weight(emphasis, current=current)
         if self.is_full_tft:
             self._draw_full_tft_row(y, ">" if selected else " ", left, right, selected, text_weight=left_weight)
             return
@@ -529,6 +605,36 @@ class ShadowboxRenderer:
             else:
                 self._text(f"{prefix} {shorten(str(items[item_idx]), line_limit)}"[: self.text_cols], 6, y, weight=weight)
 
+    def _row_base_weight(self, row: MenuRow | ValueRow) -> str | None:
+        if getattr(row, "action", False) and row.emphasis == "italic":
+            return "semibold-italic"
+        if getattr(row, "action", False):
+            return "semibold"
+        if row.emphasis:
+            return row.emphasis
+        return None
+
+    def draw_menu_rows(self, rows: list[MenuRow], selected_idx: int) -> None:
+        items = [row.label for row in rows]
+        current_indices = {idx for idx, row in enumerate(rows) if row.current}
+        item_weights = {
+            idx: weight
+            for idx, row in enumerate(rows)
+            if (weight := self._row_base_weight(row))
+        }
+        self.draw_string_list(items, selected_idx, current_indices=current_indices, item_weights=item_weights or None)
+
+    def draw_value_rows(self, rows: list[ValueRow]) -> None:
+        for y, row in zip(self.content_rows, rows):
+            self.draw_value_row(
+                y,
+                False,
+                row.label,
+                row.value,
+                current=row.current,
+                emphasis=self._row_base_weight(row),
+            )
+
     def draw_param_list(self, params: list[dict], selected_idx: int) -> None:
         if self.is_tft:
             self._draw_param_list_tft(params, selected_idx)
@@ -599,18 +705,9 @@ class ShadowboxRenderer:
         self.draw_string_list([".."] + [str(item.get("name", "")) for item in presets], selected_idx, current_indices=current_indices)
 
     def draw_instance_list(self, ui) -> None:
-        items = [".."] + [str(item.get("label", "")) for item in ui.state.instances]
-        action_start = len(items)
-        if ui.can_add_instance:
-            items.append("ADD INSTANCE")
-        if ui.can_remove_instances:
-            items.append("REMOVE INSTANCE")
-        if self.is_tft:
-            self._draw_instance_list_tft(items, ui.state.instance_cursor, action_start)
-            return
-        self.draw_string_list(items, ui.state.instance_cursor)
+        self.draw_menu_rows(ui.instance_rows, ui.state.instance_cursor)
 
-    def _draw_instance_list_tft(self, items: list[str], selected_idx: int, action_start: int) -> None:
+    def _draw_instance_list_tft(self, items: list[str], selected_idx: int, action_start: int, current_indices: set[int] | None = None) -> None:
         panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
         self._draw_panel(panel_x, panel_y, panel_w, panel_h, None)
 
@@ -634,7 +731,8 @@ class ShadowboxRenderer:
             selected = row_idx == selected_row
             label = str(items[item_idx])
             prefix = ">" if selected else " "
-            text_weight = "semibold" if item_idx >= action_start else None
+            base_weight = "semibold" if item_idx >= action_start else None
+            text_weight = self._current_row_weight(base_weight, current=item_idx in (current_indices or set()))
             if self.is_full_tft:
                 self._draw_full_tft_row(y, prefix, label, selected=selected, text_weight=text_weight)
             else:
@@ -651,7 +749,7 @@ class ShadowboxRenderer:
 
     def draw_routing_list(self, ports: list[dict], selected_idx: int) -> None:
         if self.is_tft:
-            self._draw_routing_list_tft(ports, selected_idx)
+            self._draw_routing_list_tft(ports, selected_idx, current_indices=self._ui.routing_port_current_indices if hasattr(self, "_ui") else None)
             return
         indices, selected_row, rows = self.list_window(selected_idx, len(ports) + 1)
         for row_idx, item_idx in enumerate(indices):
@@ -660,9 +758,15 @@ class ShadowboxRenderer:
             else:
                 port = ports[item_idx - 1]
                 value = port.get("connections", [])
-                self.draw_value_row(rows[row_idx], row_idx == selected_row, routing_port_display_name(port), value)
+                self.draw_value_row(
+                    rows[row_idx],
+                    row_idx == selected_row,
+                    routing_port_display_name(port),
+                    value,
+                    current=item_idx in (self._ui.routing_port_current_indices if hasattr(self, "_ui") else set()),
+                )
 
-    def _draw_routing_list_tft(self, ports: list[dict], selected_idx: int) -> None:
+    def _draw_routing_list_tft(self, ports: list[dict], selected_idx: int, current_indices: set[int] | None = None) -> None:
         items = [None] + list(ports)
         panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
         self._draw_panel(panel_x, panel_y, panel_w, panel_h, None)
@@ -696,24 +800,23 @@ class ShadowboxRenderer:
             port = items[item_idx]
             left = shorten(shorten_param_name(routing_port_display_name(port)), left_cols)
             right = shorten(format_display_value(port.get("connections", [])), right_cols)
+            text_weight = self._current_row_weight(current=item_idx in (current_indices or set()))
             if self.is_full_tft:
-                self._draw_full_tft_row(y, ">" if selected else " ", left, right, selected)
+                self._draw_full_tft_row(y, ">" if selected else " ", left, right, selected, text_weight=text_weight)
             else:
                 if selected:
                     self.display.rect(2, y - 2, max(0, self.display.width - 4), 8, True, False)
                 row = f"{'> ' if selected else '  '}{left:<{left_cols}} {right:>{right_cols}}"[: self.text_cols]
-                self._text(row, 6, y)
+                self._text(row, 6, y, weight=text_weight)
 
     def draw_routing_targets(self, ui, selected_idx: int) -> None:
         port = ui.selected_routing_port
-        labels = ["..", "DISCONNECT"] + ui.active_routing_targets
-        current_indices = {1} if not ui.current_routing_targets else {
-            idx + 2 for idx, item in enumerate(ui.active_routing_targets) if item in ui.current_routing_targets
-        }
+        labels = [row.label for row in ui.routing_target_rows]
+        current_indices = {idx for idx, row in enumerate(ui.routing_target_rows) if row.current}
         item_weights = {
-            idx + 2: "italic"
-            for idx, item in enumerate(ui.active_routing_targets)
-            if item in ui.used_routing_targets
+            idx: weight
+            for idx, row in enumerate(ui.routing_target_rows)
+            if (weight := self._row_base_weight(row))
         }
         if self.is_tft:
             self._draw_routing_targets_tft(
@@ -721,10 +824,10 @@ class ShadowboxRenderer:
                 labels,
                 selected_idx,
                 current_indices=current_indices,
-                item_weights=item_weights,
+                item_weights=item_weights or None,
             )
             return
-        self.draw_string_list(labels, selected_idx, current_indices=current_indices, item_weights=item_weights)
+        self.draw_string_list(labels, selected_idx, current_indices=current_indices, item_weights=item_weights or None)
         if port and self.is_tall:
             current = port.get("connections", [])
             current_text = "none" if not current else shorten(format_display_value(current), self.title_cols)
@@ -1413,12 +1516,7 @@ class ShadowboxRenderer:
                 ]
             )
             return
-        rows = self.content_rows
-        self.draw_value_row(rows[0], False, "inst", len(ui.state.instances))
-        self.draw_value_row(rows[1], False, "cpu", "-" if ui.state.system.get("status", {}).get("cpu_load") is None else f"{ui.state.system['status']['cpu_load']:.1f}")
-        self.draw_value_row(rows[2], False, "xruns", ui.state.system.get("status", {}).get("xruns", "-"))
-        if self.is_tall:
-            self.draw_value_row(rows[3], False, "rnbo", ui.state.system.get("status", {}).get("runner_version", "-"))
+        self.draw_value_rows(ui.status_value_rows)
 
     def draw_system_audio(self, ui) -> None:
         self.draw_string_list([".."] + SYSTEM_AUDIO_ITEMS, ui.state.system_audio_cursor)
@@ -1434,11 +1532,7 @@ class ShadowboxRenderer:
                 ]
             )
             return
-        rows = self.content_rows
-        self.draw_value_row(rows[0], False, "set", ui.current_set_name)
-        self.draw_value_row(rows[1], False, "dirty", dirty_text)
-        if self.is_tall:
-            self.draw_value_row(rows[2], False, "saved", len(ui.available_set_names))
+        self.draw_value_rows(ui.graph_status_value_rows)
 
     def draw_graph_startup(self, ui) -> None:
         sets = ui.state.system.get("sets", {})
@@ -1453,29 +1547,16 @@ class ShadowboxRenderer:
                 ]
             )
             return
-        rows = self.content_rows
-        self.draw_value_row(rows[0], False, "startup", ui.startup_graph_label)
-        self.draw_value_row(rows[1], False, "auto", auto_last.lower())
-        if self.is_tall:
-            self.draw_value_row(rows[2], False, "initial", initial)
+        self.draw_value_rows(ui.graph_startup_value_rows)
 
     def draw_system_audio_device(self, ui) -> None:
-        current_indices = {
-            idx + 1 for idx, item in enumerate(ui.audio_options) if str(item) == str(ui.current_audio_card)
-        }
-        self.draw_string_list([".."] + [str(item) for item in ui.audio_options], ui.state.audio_device_cursor, current_indices=current_indices)
+        self.draw_menu_rows(ui.audio_device_rows, ui.state.audio_device_cursor)
 
     def draw_system_audio_rate(self, ui) -> None:
-        current_indices = {
-            idx + 1 for idx, item in enumerate(ui.sample_rate_options) if item == ui.current_sample_rate
-        }
-        self.draw_string_list([".."] + [str(item) for item in ui.sample_rate_options], ui.state.sample_rate_cursor, current_indices=current_indices)
+        self.draw_menu_rows(ui.sample_rate_rows, ui.state.sample_rate_cursor)
 
     def draw_system_audio_buffer(self, ui) -> None:
-        current_indices = {
-            idx + 1 for idx, item in enumerate(ui.buffer_size_options) if item == ui.current_buffer_size
-        }
-        self.draw_string_list([".."] + [str(item) for item in ui.buffer_size_options], ui.state.buffer_size_cursor, current_indices=current_indices)
+        self.draw_menu_rows(ui.buffer_size_rows, ui.state.buffer_size_cursor)
 
     def draw_network(self) -> None:
         try:
@@ -1498,6 +1579,56 @@ class ShadowboxRenderer:
         rows = self.content_rows
         self.draw_value_row(rows[0], False, "ip", ip)
         self.draw_value_row(rows[1], False, "osc", RNBO_PORT)
+
+    def draw_name_inline_editor(self, ui) -> None:
+        if self.is_tft:
+            panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
+            self._draw_panel(panel_x, panel_y, panel_w, panel_h, None)
+            if self.is_full_tft:
+                name_y = panel_y + 12
+                mode_y = name_y + self._line_height(2, "semibold") + 10
+                strip_y = mode_y + self._line_height(2, "bold") + 12
+                hint_y = panel_y + panel_h - self._line_height(1, "regular") - 10
+                name_text = self._inline_name_window(ui, 18)
+                self._draw_centered_text(name_text, name_y, 2, "semibold")
+                self._draw_centered_segments(self._inline_mode_segments(ui.state.name_inline_edit_mode), mode_y)
+                if ui.state.name_inline_edit_mode:
+                    char_strip = self._inline_char_strip_text(ui, 9)
+                    self._draw_centered_text(self._truncate_to_width(char_strip, max(0, panel_w - 16), 1, "medium"), strip_y, 1, "medium")
+                    hint_text = "Rotate to choose character  PRESS=SET  HOLD=BACK"
+                else:
+                    hint_text = "Rotate to move cursor  PRESS=EDIT  HOLD=BACK"
+                self._draw_centered_text(self._truncate_to_width(hint_text, max(0, panel_w - 16), 1), hint_y, 1, "regular")
+                return
+            rows = self._panel_list_rows(panel_y, panel_h)
+            if rows:
+                name_text = self._inline_name_window(ui, 14)
+                self._draw_centered_text(name_text, rows[0], 2, "medium")
+            if len(rows) > 2:
+                self._draw_centered_segments(self._inline_mode_segments(ui.state.name_inline_edit_mode), rows[2])
+            if ui.state.name_inline_edit_mode and len(rows) > 4:
+                char_strip = self._inline_char_strip_text(ui, 7)
+                self._draw_centered_text(self._truncate_to_width(char_strip, max(0, panel_w - 12), 1, "medium"), rows[4], 1, "medium")
+            if len(rows) > 6:
+                hint_text = "Rotate chooses char" if ui.state.name_inline_edit_mode else "Rotate moves cursor"
+                action_text = "PRESS=SET  HOLD=BACK" if ui.state.name_inline_edit_mode else "PRESS=EDIT  HOLD=BACK"
+                self._draw_centered_text(hint_text, rows[6], 1, "regular")
+                if len(rows) > 7:
+                    self._draw_centered_text(action_text, rows[7], 1, "regular")
+            return
+        rows = self.content_rows
+        name_text = self._inline_name_window(ui, self.text_cols - 1)
+        self._draw_centered_text(name_text, rows[0], 1, "medium")
+        if len(rows) > 1:
+            self._draw_centered_segments(self._inline_mode_segments(ui.state.name_inline_edit_mode), rows[1])
+        if ui.state.name_inline_edit_mode and len(rows) > 2:
+            char_strip = self._inline_char_strip_text(ui, 7)
+            self._draw_centered_text(shorten(char_strip, self.text_cols), rows[2], 1, "regular")
+        elif len(rows) > 2:
+            self._draw_centered_text(shorten("rotate moves cursor", self.text_cols), rows[2], 1, "regular")
+        if self.is_tall and len(rows) > 3:
+            hint = "press=set hold=back" if ui.state.name_inline_edit_mode else "press=edit hold=back"
+            self._draw_centered_text(shorten(hint, self.text_cols), rows[3], 1, "regular")
 
     def draw_about(self) -> None:
         version_text = SHADOWBOX_VERSION
@@ -1674,6 +1805,7 @@ class ShadowboxRenderer:
 
     def draw(self, ui) -> None:
         state = ui.state
+        self._ui = ui
         self.display.clear()
 
         header = {
@@ -1683,6 +1815,10 @@ class ShadowboxRenderer:
             "GRAPH_SET_LIST": "LOAD SET",
             "GRAPH_STARTUP": "STARTUP",
             "GRAPH_STARTUP_SET_LIST": "STARTUP SET",
+            "NAME_EDITOR": ui.name_editor_title,
+            "NAME_OVERWRITE_CONFIRM": "OVERWRITE?",
+            "NAME_ERROR": ui.name_error_title,
+            "NAME_INLINE_EDITOR": "EDIT NAME",
             "INSTANCE_LIST": "INSTANCES",
             "PATCHER_PICKER": "ADD INSTANCE" if state.patcher_picker_context == "add" else "REPLACE",
             "INSTANCE_MENU": ui.active_instance.get("label", "INSTANCE") if ui.active_instance else "INSTANCE",
@@ -1721,15 +1857,19 @@ class ShadowboxRenderer:
         elif state.ui_mode == "GRAPH_STATUS":
             self.draw_graph_status(ui)
         elif state.ui_mode == "GRAPH_SET_LIST":
-            self.draw_string_list([".."] + ui.available_set_names if ui.available_set_names else ["..", "no saved graphs"], state.graph_set_cursor)
+            self.draw_menu_rows(ui.graph_set_rows, state.graph_set_cursor)
         elif state.ui_mode == "GRAPH_STARTUP":
-            self.draw_string_list(
-                [".."] + ui.graph_startup_menu_items if ui.graph_startup_menu_items else ["..", "no startup options"],
-                state.graph_startup_cursor,
-                current_indices=ui.graph_startup_current_indices,
-            )
+            self.draw_menu_rows(ui.graph_startup_rows, state.graph_startup_cursor)
         elif state.ui_mode == "GRAPH_STARTUP_SET_LIST":
             self.draw_string_list([".."] + ui.available_set_names if ui.available_set_names else ["..", "no saved graphs"], state.graph_startup_set_cursor)
+        elif state.ui_mode == "NAME_EDITOR":
+            self.draw_string_list(ui.name_editor_items, state.name_editor_cursor)
+        elif state.ui_mode == "NAME_OVERWRITE_CONFIRM":
+            self.draw_string_list(ui.overwrite_confirm_items, state.name_overwrite_cursor)
+        elif state.ui_mode == "NAME_ERROR":
+            self.draw_string_list(ui.name_error_items, state.name_overwrite_cursor)
+        elif state.ui_mode == "NAME_INLINE_EDITOR":
+            self.draw_name_inline_editor(ui)
         elif state.ui_mode == "INSTANCE_LIST":
             self.draw_instance_list(ui)
         elif state.ui_mode == "REMOVE_INSTANCE_PICKER":
@@ -1746,7 +1886,7 @@ class ShadowboxRenderer:
         elif state.ui_mode == "REMOVE_INSTANCE_CONFIRM":
             self.draw_string_list(REMOVE_INSTANCE_CONFIRM_ITEMS, state.remove_instance_confirm_cursor)
         elif state.ui_mode == "PRESET_LIST":
-            self.draw_preset_list(ui, ui.active_presets, state.preset_cursor) if ui.active_presets else self.draw_string_list(["..", "no presets"], state.preset_cursor)
+            self.draw_menu_rows(ui.preset_rows, state.preset_cursor)
         elif state.ui_mode == "PARAM_LIST":
             self.draw_param_list(ui.active_params, state.param_cursor) if ui.active_params else self.draw_string_list(["..", "no params"], state.param_cursor)
         elif state.ui_mode == "ENUM_LIST":

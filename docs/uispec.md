@@ -417,6 +417,12 @@ Display rendering rules:
 - TFT rendering may use richer typography, banners, spacing, and other display-specific visual treatment
 - Display-specific styling must not change the underlying navigation model or screen meaning
 - Where a menu has both a cursor position and a current state, the cursor and current state must remain visually distinct
+- Menu rows should follow one shared semantic styling model:
+- selected row = cursor/highlight only
+- current row = bold or semibold
+- secondary state such as occupied/shared/dirty = italic
+- current plus secondary state = bold italic
+- action rows such as save/rename may use a distinct action weight, but they must not be styled as current unless they actually represent the current live choice
 
 13. Constraints
 

@@ -251,6 +251,26 @@ def _discover_instance_presets(instance_root: dict) -> list[dict]:
     return presets
 
 
+def _discover_instance_preset_capabilities(instance_root: dict) -> dict[str, str]:
+    presets_root = safe_get(instance_root, ["presets", "CONTENTS"], {})
+    if not isinstance(presets_root, dict):
+        return {
+            "save_path": "",
+            "rename_path": "",
+            "current_name": "",
+        }
+
+    current_name = safe_get(presets_root, ["current", "CONTENTS", "name", "VALUE"], "")
+    if not current_name:
+        current_name = safe_get(presets_root, ["current", "VALUE"], "")
+
+    return {
+        "save_path": str(safe_get(presets_root, ["save", "FULL_PATH"], "") or ""),
+        "rename_path": str(safe_get(presets_root, ["rename", "FULL_PATH"], "") or ""),
+        "current_name": str(current_name or ""),
+    }
+
+
 def _discover_instance_state(instance_root: dict) -> list[dict]:
     results: list[dict] = []
     seen_paths: set[str] = set()
@@ -395,6 +415,7 @@ def discover_sets(tree: dict) -> dict:
             "current_name": "",
             "dirty": False,
             "save_path": "",
+            "rename_path": "",
             "load_path": "",
             "reload_path": "",
             "initial_path": "",
@@ -421,6 +442,7 @@ def discover_sets(tree: dict) -> dict:
         "current_name": str(current_name) if current_name is not None else "",
         "dirty": bool(dirty),
         "save_path": str(safe_get(sets_root, ["save", "FULL_PATH"], "") or ""),
+        "rename_path": str(safe_get(sets_root, ["rename", "FULL_PATH"], "") or ""),
         "load_path": str(safe_get(load_node, ["FULL_PATH"], "") or ""),
         "reload_path": str(safe_get(sets_root, ["reload", "FULL_PATH"], "") or ""),
         "initial_path": str(safe_get(sets_root, ["initial", "FULL_PATH"], "") or ""),
@@ -448,6 +470,7 @@ def discover_instances(tree: dict) -> list[dict]:
         contents = instance_node.get("CONTENTS", {})
         if not isinstance(contents, dict):
             continue
+        preset_capabilities = _discover_instance_preset_capabilities(contents)
 
         instances.append(
             {
@@ -457,6 +480,9 @@ def discover_instances(tree: dict) -> list[dict]:
                 "params": _discover_instance_params(contents),
                 "state": _discover_instance_state(contents),
                 "presets": _discover_instance_presets(contents),
+                "preset_save_path": preset_capabilities["save_path"],
+                "preset_rename_path": preset_capabilities["rename_path"],
+                "current_preset_name": preset_capabilities["current_name"],
                 "routing": _discover_instance_routing(contents, system_ports),
             }
         )

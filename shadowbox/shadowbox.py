@@ -485,6 +485,36 @@ def main():
                         ui.state.graph_menu_cursor = 1
                         ui.set_busy(False)
 
+                elif action.kind == "rename_set":
+                    if action.path is not None:
+                        ui.set_busy(True, "rename")
+                        rnbo.send_value(action.path, action.value)
+                        sleep(0.2)
+                        ui.apply_runner_snapshot(rnbo.discover())
+                        ui.state.ui_mode = "GRAPH_STATUS"
+                        ui.state.graph_menu_cursor = 1
+                        ui.set_busy(False)
+
+                elif action.kind == "save_preset":
+                    if action.path is not None:
+                        ui.set_busy(True, "save")
+                        rnbo.send_value(action.path, action.value)
+                        sleep(0.2)
+                        ui.apply_runner_snapshot(rnbo.discover())
+                        ui.state.ui_mode = "PRESET_LIST"
+                        ui.state.preset_cursor = ui.preset_initial_cursor()
+                        ui.set_busy(False)
+
+                elif action.kind == "rename_preset":
+                    if action.path is not None:
+                        ui.set_busy(True, "rename")
+                        rnbo.send_value(action.path, action.value)
+                        sleep(0.2)
+                        ui.apply_runner_snapshot(rnbo.discover())
+                        ui.state.ui_mode = "PRESET_LIST"
+                        ui.state.preset_cursor = ui.preset_initial_cursor()
+                        ui.set_busy(False)
+
                 elif action.kind == "set_graph_startup":
                     updates = action.value if isinstance(action.value, list) else []
                     if updates:

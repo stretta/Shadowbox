@@ -45,6 +45,22 @@ SYSTEM_AUDIO_ITEMS = ["DEVICE", "SAMPLE RATE", "BUFFER SIZE"]
 REMOVE_INSTANCE_CONFIRM_ITEMS = ["..", "REMOVE"]
 MAINT_ITEMS_REFRESH = "REFRESH"
 MAINT_ITEMS_RESTART_JACK = "RESTART JACK"
+NAME_EDITOR_EDIT = "EDIT NAME"
+NAME_EDITOR_GENERATE = "GENERATE NAME"
+NAME_EDITOR_ADD_DATE = "ADD DATE"
+NAME_EDITOR_DELETE = "DELETE CHAR"
+NAME_EDITOR_CLEAR = "CLEAR NAME"
+NAME_EDITOR_SAVE = "SAVE"
+NAME_EDITOR_CANCEL = "CANCEL"
+NAME_OVERWRITE_CONFIRM_ITEMS = ["..", "OVERWRITE"]
+NAME_ERROR_DISMISS = "EDIT NAME"
+NAME_EDITOR_MAX_LEN = 24
+NAME_EDITOR_CHAR_OPTIONS: list[tuple[str, str]] = [
+    ("SPACE", " "),
+    ("-", "-"),
+    ("_", "_"),
+] + [(char, char) for char in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"]
+NAME_INLINE_DELETE_LABEL = "DEL"
 
 
 @dataclass
@@ -101,6 +117,17 @@ class UIState:
     edit_ttid_scale_names: list[str] = field(default_factory=list)
     edit_ttid_scale_index: int = 0
     edit_step16_focus: int = 0
+    name_editor_context: str = ""
+    name_editor_return_mode: str = ""
+    name_editor_path: str = ""
+    name_editor_draft: str = ""
+    name_editor_target_name: str = ""
+    name_editor_cursor: int = 1
+    name_inline_cursor: int = 0
+    name_inline_edit_mode: bool = False
+    name_inline_preview_index: int = 0
+    name_overwrite_cursor: int = 1
+    name_error_message: str = ""
 
     busy: bool = False
     busy_reason: str = ""
@@ -314,6 +341,22 @@ class UIEvent:
     delta: int = 0
 
 
+@dataclass
+class MenuRow:
+    label: str
+    current: bool = False
+    emphasis: str = ""
+    action: bool = False
+
+
+@dataclass
+class ValueRow:
+    label: str
+    value: Any
+    current: bool = False
+    emphasis: str = ""
+
+
 class ShadowboxUI:
     def __init__(self, rnbo=None):
         self.rnbo = rnbo
@@ -408,6 +451,17 @@ class ShadowboxUI:
         self.state.edit_ttid_scale_names = []
         self.state.edit_ttid_scale_index = 0
         self.state.edit_step16_focus = 0
+        self.state.name_editor_context = ""
+        self.state.name_editor_return_mode = ""
+        self.state.name_editor_path = ""
+        self.state.name_editor_draft = ""
+        self.state.name_editor_target_name = ""
+        self.state.name_editor_cursor = 1
+        self.state.name_inline_cursor = 0
+        self.state.name_inline_edit_mode = False
+        self.state.name_inline_preview_index = 0
+        self.state.name_overwrite_cursor = 1
+        self.state.name_error_message = ""
         self._edit_original_value = None
         self._about_press_count = 0
         self._reset_float_edit_acceleration()
@@ -451,7 +505,7 @@ class ShadowboxUI:
         self.state.remove_instance_picker_cursor = clamp_index(self.state.remove_instance_picker_cursor, len(self.state.instances) + 1)
 
         self.state.param_cursor = clamp_index(self.state.param_cursor, len(self.active_params) + 1)
-        self.state.preset_cursor = clamp_index(self.state.preset_cursor, len(self.active_presets) + 1)
+        self.state.preset_cursor = clamp_index(self.state.preset_cursor, len(self.preset_menu_items))
         self.state.maint_cursor = clamp_index(self.state.maint_cursor, len(self.maint_menu_items) + 1)
         self.state.routing_port_cursor = clamp_index(self.state.routing_port_cursor, len(self.active_routing_ports) + 1)
         self.state.routing_target_cursor = clamp_index(self.state.routing_target_cursor, len(self.active_routing_targets) + 2)
@@ -539,6 +593,8 @@ class ShadowboxUI:
         items = ["CURRENT GRAPH", "LOAD SET"]
         if self.graph_save_path:
             items.append("SAVE SET")
+        if self.graph_rename_path and self.current_set_name != "(untitled)":
+            items.append("RENAME SET")
         items.append("STARTUP")
         return items
 
@@ -547,6 +603,41 @@ class ShadowboxUI:
         sets = self.state.system.get("sets", {})
         names = sets.get("available_sets", []) if isinstance(sets, dict) else []
         return [str(item) for item in names if str(item)]
+
+    @property
+    def graph_set_current_indices(self) -> set[int]:
+        current_name = self.current_set_name
+        return {
+            idx + 1
+            for idx, item in enumerate(self.available_set_names)
+            if str(item) == current_name
+        }
+
+    @property
+    def graph_set_item_weights(self) -> dict[int, str]:
+        if not self.current_set_dirty:
+            return {}
+        return {
+            idx: "italic"
+            for idx in self.graph_set_current_indices
+        }
+
+    @property
+    def graph_set_rows(self) -> list[MenuRow]:
+        rows = [MenuRow("..")]
+        current_indices = self.graph_set_current_indices
+        dirty_weights = self.graph_set_item_weights
+        for idx, item in enumerate(self.available_set_names, start=1):
+            rows.append(
+                MenuRow(
+                    str(item),
+                    current=idx in current_indices,
+                    emphasis="italic" if dirty_weights.get(idx) == "italic" else "",
+                )
+            )
+        if len(rows) == 1:
+            rows.append(MenuRow("no saved graphs"))
+        return rows
 
     @property
     def current_set_name(self) -> str:
@@ -587,6 +678,13 @@ class ShadowboxUI:
         return str(sets.get("save_path", "") or "")
 
     @property
+    def graph_rename_path(self) -> str:
+        sets = self.state.system.get("sets", {})
+        if not isinstance(sets, dict):
+            return ""
+        return str(sets.get("rename_path", "") or "")
+
+    @property
     def graph_startup_auto_last_path(self) -> str:
         sets = self.state.system.get("sets", {})
         if not isinstance(sets, dict):
@@ -624,6 +722,63 @@ class ShadowboxUI:
                 indices.add(idx)
         return indices
 
+    @property
+    def graph_startup_rows(self) -> list[MenuRow]:
+        rows = [MenuRow("..")]
+        items = self.graph_startup_menu_items
+        if not items:
+            rows.append(MenuRow("no startup options"))
+            return rows
+        current_indices = self.graph_startup_current_indices
+        for idx, item in enumerate(items, start=1):
+            rows.append(MenuRow(str(item), current=idx in current_indices))
+        return rows
+
+    @property
+    def graph_status_value_rows(self) -> list[ValueRow]:
+        rows = [
+            ValueRow("set", self.current_set_name, current=True, emphasis="italic" if self.current_set_dirty else ""),
+            ValueRow("dirty", "YES" if self.current_set_dirty else "NO", current=self.current_set_dirty),
+        ]
+        if self.available_set_names or True:
+            rows.append(ValueRow("saved", len(self.available_set_names)))
+        return rows
+
+    @property
+    def graph_startup_value_rows(self) -> list[ValueRow]:
+        sets = self.state.system.get("sets", {})
+        auto_last = "ON" if sets.get("auto_start_last") is True else "OFF"
+        initial = str(sets.get("initial_value", "") or "-")
+        startup_label = self.startup_graph_label
+        rows = [
+            ValueRow("startup", startup_label, current=True),
+            ValueRow("auto", auto_last.lower(), current=startup_label == "LAST"),
+        ]
+        if startup_label not in {"LAST", "OFF"}:
+            rows.append(ValueRow("initial", initial, current=True))
+        else:
+            rows.append(ValueRow("initial", initial))
+        return rows
+
+    @property
+    def status_value_rows(self) -> list[ValueRow]:
+        status = self.state.system.get("status", {})
+        rows = [
+            ValueRow("inst", len(self.state.instances)),
+            ValueRow("cpu", "-" if status.get("cpu_load") is None else f"{status['cpu_load']:.1f}"),
+            ValueRow("xruns", status.get("xruns", "-"), current=bool(status.get("xruns"))),
+        ]
+        if self.is_runner_version_available:
+            rows.append(ValueRow("rnbo", status.get("runner_version", "-")))
+        return rows
+
+    @property
+    def network_value_rows(self) -> list[ValueRow]:
+        return [
+            ValueRow("ip", self.network_ip_address),
+            ValueRow("osc", self.network_osc_port),
+        ]
+
     def suggested_set_save_name(self) -> str:
         base_name = self.current_set_name
         if base_name == "(untitled)":
@@ -633,6 +788,241 @@ class ShadowboxUI:
             slug = "graph"
         timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
         return f"{slug}-{timestamp}"
+
+    def suggested_preset_save_name(self) -> str:
+        base_name = self.current_preset_name
+        if not base_name and self.active_instance:
+            base_name = str(self.active_instance.get("label", "") or "")
+        if not base_name:
+            base_name = "preset"
+        slug = re.sub(r"-{2,}", "-", re.sub(r"[^A-Za-z0-9]+", "-", base_name.strip().lower())).strip("-")
+        if not slug:
+            slug = "preset"
+        timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+        return f"{slug}-{timestamp}"
+
+    def append_date_token(self, value: str, include_time: bool = False) -> str:
+        token = time.strftime("%Y%m%d-%H%M%S" if include_time else "%Y%m%d", time.localtime())
+        base = str(value or "").strip()
+        if not base:
+            return token[:NAME_EDITOR_MAX_LEN]
+        base = base.rstrip(" -_")
+        combined = f"{base}-{token}" if base else token
+        if len(combined) <= NAME_EDITOR_MAX_LEN:
+            return combined
+        suffix = f"-{token}"
+        keep = max(0, NAME_EDITOR_MAX_LEN - len(suffix))
+        trimmed = base[:keep].rstrip(" -_")
+        return f"{trimmed}{suffix}" if trimmed else token[:NAME_EDITOR_MAX_LEN]
+
+    def normalize_name_draft(self, value: str) -> str:
+        text = re.sub(r"\s+", " ", str(value or "")).strip()
+        return text[:NAME_EDITOR_MAX_LEN]
+
+    @property
+    def name_editor_actions(self) -> list[str]:
+        return [
+            self.name_editor_confirm_label,
+            NAME_EDITOR_GENERATE,
+            NAME_EDITOR_ADD_DATE,
+            NAME_EDITOR_EDIT,
+            NAME_EDITOR_CLEAR,
+            NAME_EDITOR_DELETE,
+            NAME_EDITOR_CANCEL,
+        ]
+
+    @property
+    def name_editor_items(self) -> list[str]:
+        draft = self.state.name_editor_draft if self.state.name_editor_draft else "(empty)"
+        return [f"NAME: {draft}"] + self.name_editor_actions
+
+    @property
+    def name_editor_title(self) -> str:
+        if self.state.name_editor_context == "save_set":
+            return "SAVE SET"
+        if self.state.name_editor_context == "rename_set":
+            return "RENAME SET"
+        if self.state.name_editor_context == "save_preset":
+            return "SAVE PRESET"
+        if self.state.name_editor_context == "rename_preset":
+            return "RENAME PRESET"
+        return "NAME"
+
+    @property
+    def name_editor_confirm_label(self) -> str:
+        if self.state.name_editor_context in {"rename_set", "rename_preset"}:
+            return "RENAME"
+        return NAME_EDITOR_SAVE
+
+    def _begin_name_editor(self, context: str, path: str, initial_draft: str, return_mode: str) -> None:
+        self.state.name_editor_context = context
+        self.state.name_editor_path = str(path or "")
+        self.state.name_editor_return_mode = return_mode
+        self.state.name_editor_draft = self.normalize_name_draft(initial_draft)
+        self.state.name_editor_target_name = ""
+        self.state.name_editor_cursor = 1
+        self.state.name_inline_cursor = max(0, len(self.state.name_editor_draft) - 1)
+        self.state.name_inline_edit_mode = False
+        self.state.name_inline_preview_index = 0
+        self.state.name_overwrite_cursor = 1
+        self.state.name_error_message = ""
+        self.state.ui_mode = "NAME_EDITOR"
+
+    def _begin_rename_name_editor(self, context: str, path: str, current_name: str, return_mode: str) -> None:
+        self._begin_name_editor(context=context, path=path, initial_draft=current_name, return_mode=return_mode)
+        self.state.name_editor_target_name = self.normalize_name_draft(current_name)
+
+    def _cancel_name_editor(self) -> None:
+        self.state.ui_mode = self.state.name_editor_return_mode or "GRAPH_MENU"
+        self.state.name_editor_cursor = 1
+        self.state.name_inline_edit_mode = False
+        self.state.name_overwrite_cursor = 1
+        self.state.name_error_message = ""
+
+    def _char_option_index(self, char: str) -> int:
+        for idx, (_, value) in enumerate(NAME_EDITOR_CHAR_OPTIONS):
+            if value == char:
+                return idx
+        return 0
+
+    @property
+    def inline_name_option_count(self) -> int:
+        return len(NAME_EDITOR_CHAR_OPTIONS) + 1
+
+    @property
+    def inline_name_text(self) -> str:
+        draft = self.state.name_editor_draft
+        pos = max(0, min(self.state.name_inline_cursor, len(draft)))
+        if self.state.name_inline_edit_mode:
+            if self.state.name_inline_preview_index >= len(NAME_EDITOR_CHAR_OPTIONS):
+                text = draft
+                caret_pos = min(pos, len(text))
+            else:
+                preview_char = NAME_EDITOR_CHAR_OPTIONS[self.state.name_inline_preview_index][1]
+                if pos < len(draft):
+                    text = draft[:pos] + preview_char + draft[pos + 1 :]
+                else:
+                    text = draft + preview_char
+                caret_pos = pos
+        else:
+            text = draft
+            caret_pos = min(pos, len(text))
+        if not text:
+            return "[_]"
+        if caret_pos >= len(text):
+            return f"{text}[_]"
+        return f"{text[:caret_pos]}[{text[caret_pos]}]{text[caret_pos + 1:]}"
+
+    @property
+    def inline_name_status(self) -> str:
+        return "EDIT" if self.state.name_inline_edit_mode else "MOVE"
+
+    def _begin_inline_name_edit(self) -> None:
+        draft = self.state.name_editor_draft
+        pos = max(0, min(self.state.name_inline_cursor, len(draft)))
+        current_char = draft[pos] if pos < len(draft) and draft else "A"
+        self.state.name_inline_preview_index = self._char_option_index(current_char)
+        self.state.name_inline_edit_mode = True
+        self.state.ui_mode = "NAME_INLINE_EDITOR"
+
+    def _commit_inline_name_char(self) -> None:
+        draft = self.state.name_editor_draft
+        pos = max(0, min(self.state.name_inline_cursor, len(draft)))
+        if self.state.name_inline_preview_index >= len(NAME_EDITOR_CHAR_OPTIONS):
+            if not draft:
+                self.state.name_inline_edit_mode = False
+                return
+            if pos < len(draft):
+                draft = draft[:pos] + draft[pos + 1 :]
+                self.state.name_inline_cursor = min(pos, len(draft))
+            elif pos > 0:
+                draft = draft[: pos - 1] + draft[pos:]
+                self.state.name_inline_cursor = pos - 1
+            self.state.name_editor_draft = self.normalize_name_draft(draft)
+            self.state.name_inline_edit_mode = False
+            return
+        char = NAME_EDITOR_CHAR_OPTIONS[self.state.name_inline_preview_index][1]
+        if pos < len(draft):
+            draft = draft[:pos] + char + draft[pos + 1 :]
+        else:
+            if len(draft) >= NAME_EDITOR_MAX_LEN:
+                return
+            draft = draft + char
+        self.state.name_editor_draft = self.normalize_name_draft(draft)
+        self.state.name_inline_cursor = min(len(self.state.name_editor_draft), pos + 1)
+        self.state.name_inline_edit_mode = False
+
+    def _exit_inline_name_editor(self) -> None:
+        self.state.name_inline_edit_mode = False
+        self.state.ui_mode = "NAME_EDITOR"
+
+    def _regenerate_name_draft(self) -> None:
+        if self.state.name_editor_context == "save_set":
+            self.state.name_editor_draft = self.normalize_name_draft(self.suggested_set_save_name())
+        elif self.state.name_editor_context == "save_preset":
+            self.state.name_editor_draft = self.normalize_name_draft(self.suggested_preset_save_name())
+
+    def _name_exists(self, value: str) -> bool:
+        normalized = self.normalize_name_draft(value)
+        if not normalized:
+            return False
+        if self.state.name_editor_context in {"save_set", "rename_set"}:
+            return normalized in self.available_set_names and normalized != self.state.name_editor_target_name
+        if self.state.name_editor_context in {"save_preset", "rename_preset"}:
+            preset_names = {str(item.get("name", "")) for item in self.active_presets if str(item.get("name", ""))}
+            return normalized in preset_names and normalized != self.state.name_editor_target_name
+        return False
+
+    def _show_name_error(self, message: str) -> None:
+        self.state.name_error_message = str(message or "NAME ERROR")
+        self.state.ui_mode = "NAME_ERROR"
+
+    def _show_overwrite_confirm(self) -> None:
+        self.state.name_overwrite_cursor = 1
+        self.state.ui_mode = "NAME_OVERWRITE_CONFIRM"
+
+    @property
+    def overwrite_confirm_items(self) -> list[str]:
+        return NAME_OVERWRITE_CONFIRM_ITEMS
+
+    @property
+    def name_error_items(self) -> list[str]:
+        return ["..", NAME_ERROR_DISMISS]
+
+    @property
+    def name_error_title(self) -> str:
+        return self.state.name_error_message or "NAME ERROR"
+
+    def _queue_confirmed_name_action(self, value: str) -> None:
+        if self.state.name_editor_context == "save_set" and self.state.name_editor_path:
+            self.state.name_editor_draft = value
+            self.queue_action(UIAction(kind="save_set", path=self.state.name_editor_path, value=value))
+        elif self.state.name_editor_context == "rename_set" and self.state.name_editor_path:
+            self.state.name_editor_draft = value
+            self.queue_action(UIAction(kind="rename_set", path=self.state.name_editor_path, value=value))
+        elif self.state.name_editor_context == "save_preset" and self.state.name_editor_path:
+            self.state.name_editor_draft = value
+            self.queue_action(UIAction(kind="save_preset", path=self.state.name_editor_path, value=value))
+        elif self.state.name_editor_context == "rename_preset" and self.state.name_editor_path:
+            self.state.name_editor_draft = value
+            if self.current_preset_name == self.state.name_editor_target_name:
+                self.remember_loaded_preset(value)
+            self.queue_action(UIAction(kind="rename_preset", path=self.state.name_editor_path, value=value))
+
+    def _submit_name_editor(self) -> None:
+        value = self.normalize_name_draft(self.state.name_editor_draft)
+        if not value:
+            self._show_name_error("ENTER NAME")
+            return
+        if self.state.name_editor_context in {"save_set", "save_preset"} and self._name_exists(value):
+            self.state.name_editor_draft = value
+            self._show_overwrite_confirm()
+            return
+        if self.state.name_editor_context in {"rename_set", "rename_preset"} and self._name_exists(value):
+            self.state.name_editor_draft = value
+            self._show_name_error("NAME EXISTS")
+            return
+        self._queue_confirmed_name_action(value)
 
     @property
     def maint_menu_items(self) -> list[str]:
@@ -654,6 +1044,45 @@ class ShadowboxUI:
         if not instance:
             return []
         return list(instance.get("presets", []))
+
+    @property
+    def active_preset_save_path(self) -> str:
+        if not self.active_instance:
+            return ""
+        return str(self.active_instance.get("preset_save_path", "") or "")
+
+    @property
+    def active_preset_rename_path(self) -> str:
+        if not self.active_instance:
+            return ""
+        return str(self.active_instance.get("preset_rename_path", "") or "")
+
+    @property
+    def preset_action_items(self) -> list[str]:
+        items: list[str] = []
+        if self.active_preset_save_path:
+            items.append("SAVE PRESET")
+        if self.active_preset_rename_path and self.current_preset_name:
+            items.append("RENAME PRESET")
+        return items
+
+    @property
+    def preset_menu_items(self) -> list[str]:
+        return [".."] + self.preset_action_items + [str(item.get("name", "")) for item in self.active_presets]
+
+    @property
+    def preset_rows(self) -> list[MenuRow]:
+        rows = [MenuRow("..")]
+        for item in self.preset_action_items:
+            rows.append(MenuRow(str(item), action=True))
+        if not self.active_presets and not self.preset_action_items:
+            rows.append(MenuRow("no presets"))
+            return rows
+        current_indices = self.preset_current_indices
+        offset = 1 + len(self.preset_action_items)
+        for idx, item in enumerate(self.active_presets):
+            rows.append(MenuRow(str(item.get("name", "")), current=(offset + idx) in current_indices))
+        return rows
 
     @property
     def active_params(self) -> list[dict]:
@@ -702,17 +1131,60 @@ class ShadowboxUI:
 
     @property
     def selected_preset(self) -> Optional[dict]:
-        idx = self.state.preset_cursor - 1
+        idx = self.state.preset_cursor - 1 - len(self.preset_action_items)
         if idx >= 0 and idx < len(self.active_presets):
             return self.active_presets[idx]
         return None
 
     @property
     def current_preset_name(self) -> str:
+        if self.active_instance:
+            published_name = str(self.active_instance.get("current_preset_name", "") or "").strip()
+            if published_name:
+                return published_name
         instance_id = str(self.state.active_instance_id)
         if not instance_id:
             return ""
         return str(self.state.current_presets.get(instance_id, ""))
+
+    @property
+    def preset_current_indices(self) -> set[int]:
+        offset = 1 + len(self.preset_action_items)
+        return {
+            offset + idx
+            for idx, item in enumerate(self.active_presets)
+            if str(item.get("name", "")) == self.current_preset_name
+        }
+
+    def preset_initial_cursor(self) -> int:
+        if self.active_presets:
+            return 1 + len(self.preset_action_items)
+        if self.preset_action_items:
+            return 1
+        return 0
+
+    @property
+    def instance_rows(self) -> list[MenuRow]:
+        rows = [MenuRow("..")]
+        current_indices = self.instance_current_indices
+        for idx, item in enumerate(self.state.instances, start=1):
+            rows.append(MenuRow(str(item.get("label", "")), current=idx in current_indices))
+        if self.can_add_instance:
+            rows.append(MenuRow("ADD INSTANCE", action=True))
+        if self.can_remove_instances:
+            rows.append(MenuRow("REMOVE INSTANCE", action=True))
+        return rows
+
+    @property
+    def instance_current_indices(self) -> set[int]:
+        active_id = str(self.state.active_instance_id)
+        if not active_id:
+            return set()
+        return {
+            idx + 1
+            for idx, item in enumerate(self.state.instances)
+            if str(item.get("id", "")) == active_id
+        }
 
     @property
     def remove_instance_target(self) -> Optional[dict]:
@@ -727,6 +1199,18 @@ class ShadowboxUI:
     @property
     def current_audio_card(self) -> str:
         return self.state.system.get("audio", {}).get("current_card", "")
+
+    @property
+    def is_runner_version_available(self) -> bool:
+        return bool(str(self.state.system.get("status", {}).get("runner_version", "") or "").strip())
+
+    @property
+    def network_osc_port(self) -> int:
+        return 1234
+
+    @property
+    def network_ip_address(self) -> str:
+        return "?"
 
     @property
     def audio_options(self) -> list[str]:
@@ -803,6 +1287,23 @@ class ShadowboxUI:
         return [str(item) for item in port.get("connections", []) if str(item)]
 
     @property
+    def routing_target_rows(self) -> list[MenuRow]:
+        rows = [MenuRow("..")]
+        disconnect_current = not self.current_routing_targets
+        rows.append(MenuRow("DISCONNECT", current=disconnect_current))
+        current_targets = set(self.current_routing_targets)
+        used_targets = self.used_routing_targets
+        for item in self.active_routing_targets:
+            rows.append(
+                MenuRow(
+                    str(item),
+                    current=str(item) in current_targets,
+                    emphasis="italic" if str(item) in used_targets else "",
+                )
+            )
+        return rows
+
+    @property
     def used_routing_targets(self) -> set[str]:
         port = self.selected_routing_port
         if not port:
@@ -831,6 +1332,14 @@ class ShadowboxUI:
                         used_targets.add(target)
         return used_targets
 
+    @property
+    def routing_port_current_indices(self) -> set[int]:
+        return {
+            idx + 1
+            for idx, port in enumerate(self.active_routing_ports)
+            if isinstance(port, dict) and any(str(item) for item in port.get("connections", []))
+        }
+
     def _sync_audio_index(self) -> None:
         if self.current_audio_card in self.audio_options:
             self.state.audio_device_cursor = self.audio_options.index(self.current_audio_card) + 1
@@ -848,6 +1357,29 @@ class ShadowboxUI:
             self.state.buffer_size_cursor = buffer_options.index(int(current_buffer)) + 1
         else:
             self.state.buffer_size_cursor = 1 if buffer_options else 0
+
+    @property
+    def audio_device_rows(self) -> list[MenuRow]:
+        rows = [MenuRow("..")]
+        for item in self.audio_options:
+            rows.append(MenuRow(str(item), current=str(item) == str(self.current_audio_card)))
+        return rows
+
+    @property
+    def sample_rate_rows(self) -> list[MenuRow]:
+        rows = [MenuRow("..")]
+        current_rate = self.current_sample_rate
+        for item in self.sample_rate_options:
+            rows.append(MenuRow(str(item), current=item == current_rate))
+        return rows
+
+    @property
+    def buffer_size_rows(self) -> list[MenuRow]:
+        rows = [MenuRow("..")]
+        current_buffer = self.current_buffer_size
+        for item in self.buffer_size_options:
+            rows.append(MenuRow(str(item), current=item == current_buffer))
+        return rows
 
     def _cycle(self, current: int, count: int, delta: int) -> int:
         if count <= 0:
@@ -943,6 +1475,10 @@ class ShadowboxUI:
             "GRAPH_SET_LIST",
             "GRAPH_STARTUP",
             "GRAPH_STARTUP_SET_LIST",
+            "NAME_EDITOR",
+            "NAME_INLINE_EDITOR",
+            "NAME_OVERWRITE_CONFIRM",
+            "NAME_ERROR",
             "INSTANCE_LIST",
             "PATCHER_PICKER",
             "INSTANCE_MENU",
@@ -992,6 +1528,18 @@ class ShadowboxUI:
             self.state.graph_startup_cursor = self._cycle(self.state.graph_startup_cursor, len(self.graph_startup_menu_items) + 1, step)
         elif self.state.ui_mode == "GRAPH_STARTUP_SET_LIST":
             self.state.graph_startup_set_cursor = self._cycle(self.state.graph_startup_set_cursor, len(self.available_set_names) + 1, step)
+        elif self.state.ui_mode == "NAME_EDITOR":
+            self.state.name_editor_cursor = self._cycle(self.state.name_editor_cursor, len(self.name_editor_items), step)
+        elif self.state.ui_mode == "NAME_INLINE_EDITOR":
+            if self.state.name_inline_edit_mode:
+                self.state.name_inline_preview_index = self._cycle(self.state.name_inline_preview_index, self.inline_name_option_count, step)
+            else:
+                max_pos = min(len(self.state.name_editor_draft), NAME_EDITOR_MAX_LEN - 1 if len(self.state.name_editor_draft) >= NAME_EDITOR_MAX_LEN else len(self.state.name_editor_draft))
+                self.state.name_inline_cursor = self._cycle(self.state.name_inline_cursor, max_pos + 1, step)
+        elif self.state.ui_mode == "NAME_OVERWRITE_CONFIRM":
+            self.state.name_overwrite_cursor = self._cycle(self.state.name_overwrite_cursor, len(self.overwrite_confirm_items), step)
+        elif self.state.ui_mode == "NAME_ERROR":
+            self.state.name_overwrite_cursor = self._cycle(self.state.name_overwrite_cursor, len(self.name_error_items), step)
         elif self.state.ui_mode == "INSTANCE_LIST":
             self.state.instance_cursor = self._cycle(
                 self.state.instance_cursor,
@@ -1010,7 +1558,7 @@ class ShadowboxUI:
         elif self.state.ui_mode == "REMOVE_INSTANCE_CONFIRM":
             self.state.remove_instance_confirm_cursor = self._cycle(self.state.remove_instance_confirm_cursor, len(REMOVE_INSTANCE_CONFIRM_ITEMS), step)
         elif self.state.ui_mode == "PRESET_LIST":
-            self.state.preset_cursor = self._cycle(self.state.preset_cursor, len(self.active_presets) + 1, step)
+            self.state.preset_cursor = self._cycle(self.state.preset_cursor, len(self.preset_menu_items), step)
         elif self.state.ui_mode == "PARAM_LIST":
             self.state.param_cursor = self._cycle(self.state.param_cursor, len(self.active_params) + 1, step)
         elif self.state.ui_mode == "ENUM_LIST":
@@ -1105,12 +1653,18 @@ class ShadowboxUI:
                     self.state.ui_mode = "GRAPH_SET_LIST"
                     self.state.graph_set_cursor = 1 if self.available_set_names else 0
                 elif choice == "SAVE SET" and self.graph_save_path:
-                    self.queue_action(
-                        UIAction(
-                            kind="save_set",
-                            path=self.graph_save_path,
-                            value=self.suggested_set_save_name(),
-                        )
+                    self._begin_name_editor(
+                        context="save_set",
+                        path=self.graph_save_path,
+                        initial_draft=self.suggested_set_save_name(),
+                        return_mode="GRAPH_MENU",
+                    )
+                elif choice == "RENAME SET" and self.graph_rename_path:
+                    self._begin_rename_name_editor(
+                        context="rename_set",
+                        path=self.graph_rename_path,
+                        current_name=self.current_set_name,
+                        return_mode="GRAPH_MENU",
                     )
                 elif choice == "STARTUP":
                     self.state.ui_mode = "GRAPH_STARTUP"
@@ -1168,6 +1722,40 @@ class ShadowboxUI:
                         updates.append((self.graph_startup_initial_path, self.available_set_names[idx]))
                     if updates:
                         self.queue_action(UIAction(kind="set_graph_startup", value=updates))
+
+        elif self.state.ui_mode == "NAME_EDITOR":
+            if self.state.name_editor_cursor > 0:
+                choice = self.name_editor_items[self.state.name_editor_cursor]
+                if choice == self.name_editor_confirm_label:
+                    self._submit_name_editor()
+                elif choice == NAME_EDITOR_GENERATE:
+                    self._regenerate_name_draft()
+                elif choice == NAME_EDITOR_ADD_DATE:
+                    self.state.name_editor_draft = self.append_date_token(self.state.name_editor_draft)
+                elif choice == NAME_EDITOR_EDIT:
+                    self._begin_inline_name_edit()
+                elif choice == NAME_EDITOR_CLEAR:
+                    self.state.name_editor_draft = ""
+                elif choice == NAME_EDITOR_DELETE:
+                    self.state.name_editor_draft = self.state.name_editor_draft[:-1]
+                elif choice == NAME_EDITOR_CANCEL:
+                    self._cancel_name_editor()
+
+        elif self.state.ui_mode == "NAME_INLINE_EDITOR":
+            if self.state.name_inline_edit_mode:
+                self._commit_inline_name_char()
+            else:
+                self._begin_inline_name_edit()
+
+        elif self.state.ui_mode == "NAME_OVERWRITE_CONFIRM":
+            if self.state.name_overwrite_cursor == 0:
+                self.state.ui_mode = "NAME_EDITOR"
+            elif self.overwrite_confirm_items[self.state.name_overwrite_cursor] == "OVERWRITE":
+                self._queue_confirmed_name_action(self.normalize_name_draft(self.state.name_editor_draft))
+
+        elif self.state.ui_mode == "NAME_ERROR":
+            self.state.ui_mode = "NAME_EDITOR"
+            self.state.name_overwrite_cursor = 1
 
         elif self.state.ui_mode == "INSTANCE_LIST":
             if self.state.instance_cursor == 0:
@@ -1228,7 +1816,7 @@ class ShadowboxUI:
                     self.state.param_cursor = 1 if self.active_params else 0
                 elif choice == "PRESETS":
                     self.state.ui_mode = "PRESET_LIST"
-                    self.state.preset_cursor = 1 if self.active_presets else 0
+                    self.state.preset_cursor = self.preset_initial_cursor()
                 elif choice == "AUDIO":
                     self.state.active_transport = "audio"
                     self.state.ui_mode = "ROUTING_GROUP"
@@ -1263,10 +1851,28 @@ class ShadowboxUI:
             if self.state.preset_cursor == 0:
                 self.state.ui_mode = "INSTANCE_MENU"
             else:
-                preset = self.selected_preset
-                if preset:
-                    self.remember_loaded_preset(preset.get("name"))
-                    self.queue_action(UIAction(kind="load_preset", path=preset.get("path"), value=preset.get("value")))
+                action_idx = self.state.preset_cursor - 1
+                if 0 <= action_idx < len(self.preset_action_items):
+                    choice = self.preset_action_items[action_idx]
+                    if choice == "SAVE PRESET" and self.active_preset_save_path:
+                        self._begin_name_editor(
+                            context="save_preset",
+                            path=self.active_preset_save_path,
+                            initial_draft=self.suggested_preset_save_name(),
+                            return_mode="PRESET_LIST",
+                        )
+                    elif choice == "RENAME PRESET" and self.active_preset_rename_path and self.current_preset_name:
+                        self._begin_rename_name_editor(
+                            context="rename_preset",
+                            path=self.active_preset_rename_path,
+                            current_name=self.current_preset_name,
+                            return_mode="PRESET_LIST",
+                        )
+                else:
+                    preset = self.selected_preset
+                    if preset:
+                        self.remember_loaded_preset(preset.get("name"))
+                        self.queue_action(UIAction(kind="load_preset", path=preset.get("path"), value=preset.get("value")))
 
         elif self.state.ui_mode == "PARAM_LIST":
             if self.state.param_cursor == 0:
@@ -1492,6 +2098,12 @@ class ShadowboxUI:
             self.state.ui_mode = "ROUTING_PORTS"
         elif self.state.ui_mode == "GRAPH_STARTUP_SET_LIST":
             self.state.ui_mode = "GRAPH_STARTUP"
+        elif self.state.ui_mode == "NAME_INLINE_EDITOR":
+            self._exit_inline_name_editor()
+        elif self.state.ui_mode in {"NAME_OVERWRITE_CONFIRM", "NAME_ERROR"}:
+            self.state.ui_mode = "NAME_EDITOR"
+        elif self.state.ui_mode == "NAME_EDITOR":
+            self._cancel_name_editor()
         elif self.state.ui_mode in ("GRAPH_STATUS", "GRAPH_STARTUP"):
             self.state.ui_mode = "GRAPH_MENU"
         elif self.state.ui_mode == "GRAPH_SET_LIST":
