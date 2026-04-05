@@ -280,6 +280,12 @@ class ST7789RawDisplay(DisplayBackend):
             return
         self._draw.rectangle((x, y, x + w - 1, y + h - 1), outline=255 if on else 0, fill=None)
 
+    def fill_rect_level(self, x: int, y: int, w: int, h: int, level: int) -> None:
+        if w <= 0 or h <= 0:
+            return
+        fill = max(0, min(255, int(level)))
+        self._draw.rectangle((x, y, x + w - 1, y + h - 1), outline=fill, fill=fill)
+
     def text(self, s: str, x: int, y: int, on: bool = True) -> None:
         self.text_with_style(s, x, y, 1, "regular", on=on)
 

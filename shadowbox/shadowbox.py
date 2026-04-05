@@ -465,6 +465,42 @@ def main():
                         ui.apply_runner_snapshot(rnbo.discover())
                         ui.set_busy(False)
 
+                elif action.kind == "load_set":
+                    if action.path is not None:
+                        ui.set_busy(True, "load")
+                        rnbo.send_value(action.path, action.value)
+                        sleep(0.2)
+                        ui.apply_runner_snapshot(rnbo.discover())
+                        ui.state.ui_mode = "GRAPH_STATUS"
+                        ui.state.graph_menu_cursor = 1
+                        ui.set_busy(False)
+
+                elif action.kind == "save_set":
+                    if action.path is not None:
+                        ui.set_busy(True, "save")
+                        rnbo.send_value(action.path, action.value)
+                        sleep(0.2)
+                        ui.apply_runner_snapshot(rnbo.discover())
+                        ui.state.ui_mode = "GRAPH_STATUS"
+                        ui.state.graph_menu_cursor = 1
+                        ui.set_busy(False)
+
+                elif action.kind == "set_graph_startup":
+                    updates = action.value if isinstance(action.value, list) else []
+                    if updates:
+                        ui.set_busy(True, "startup")
+                        for update in updates:
+                            if not isinstance(update, (list, tuple)) or len(update) != 2:
+                                continue
+                            path, value = update
+                            if path is None or str(path) == "":
+                                continue
+                            rnbo.send_value(str(path), value)
+                        sleep(0.1)
+                        ui.apply_runner_snapshot(rnbo.discover())
+                        ui.state.ui_mode = "GRAPH_STARTUP"
+                        ui.set_busy(False)
+
                 elif action.kind == "set_routing":
                     if action.path is not None:
                         ui.set_busy(True, "routing")

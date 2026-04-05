@@ -69,10 +69,16 @@ https://www.adafruit.com/product/4484
 - Display dim/sleep management
 - Encoder navigation
 - RNBO OSCQuery integration
+- Graph set load/save from published Runner capabilities
+- Graph startup configuration through published Runner controls
 - System status display
 - Audio device switching
 - JACK restart
 - Saved top-level cursor and audio-device selection in `~/rnbo-ui/shadowbox_state.json`
+
+Shadowbox treats the published live OSCQuery runtime tree as the source of truth.
+It does not maintain its own graph model or restore graph/session state from local persistence.
+Graph load/save/startup behavior is executed only through Runner-published set and startup controls.
 
 ---
 

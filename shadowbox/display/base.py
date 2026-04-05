@@ -43,6 +43,9 @@ class DisplayBackend:
     def rect(self, x: int, y: int, w: int, h: int, on: bool = True, fill: bool = False) -> None:
         raise NotImplementedError
 
+    def fill_rect_level(self, x: int, y: int, w: int, h: int, level: int) -> None:
+        self.rect(x, y, w, h, on=level >= 128, fill=True)
+
     def set_contrast(self, value: int) -> None:
         pass
 

@@ -66,6 +66,8 @@ If metadata is missing or malformed, Shadowbox falls back to numeric behavior. T
 
 In practice, the metadata must appear in the published OSCQuery tree so that `rnbo.py` can parse it from the parameter's `meta` node. Shadowbox also accepts direct scalar child nodes for some hints, such as `editor`, `display_name`, and `ui_role`, when RNBO exports them separately instead of bundling them into `meta`.
 
+Routing ports follow the same pattern for display labels. Publishing metadata such as `{"label":"Main Input"}` or a direct `display_name` child on an input/output lets Shadowbox show a friendly routing name while preserving the underlying port path and raw node name for control.
+
 One practical use of this contract is recovering integer-style UI behavior from float-like RNBO Runner exports. For example, metadata such as `{"display_precision":0,"edit_step":1,"edit_as":"int","display_as":"int"}` lets Shadowbox present and edit a value as integer-like even when the transport value is published as a float.
 
 4. Step16 editor contract

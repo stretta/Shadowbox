@@ -11,8 +11,8 @@ pythonosc_module.udp_client = udp_client_module
 sys.modules.setdefault("pythonosc", pythonosc_module)
 sys.modules.setdefault("pythonosc.udp_client", udp_client_module)
 
-from shadowbox.renderer import ShadowboxRenderer, format_param_value
-from shadowbox.rnbo import extract_meta_info
+from shadowbox.renderer import ShadowboxRenderer, format_param_value, routing_port_display_name
+from shadowbox.rnbo import discover_instances, discover_sets, discover_system, extract_meta_info
 from shadowbox.ui import ShadowboxUI, apply_edit_delta, edit_as_int, is_boolish, normalize_current_value_for_edit, numeric_step
 
 
@@ -130,6 +130,230 @@ class ParamMetadataTests(unittest.TestCase):
         }
 
         self.assertEqual(extract_meta_info(node).get("editor"), "step16")
+
+    def test_extract_meta_info_preserves_direct_unit_children(self) -> None:
+        node = {
+            "CONTENTS": {
+                "meta": {"VALUE": '{"display_precision": 1}'},
+                "unit": {"VALUE": "Hz"},
+                "units": {"VALUE": "ignored once unit is present"},
+            }
+        }
+
+        self.assertEqual(
+            extract_meta_info(node),
+            {
+                "display_precision": 1,
+                "unit": "Hz",
+                "units": "ignored once unit is present",
+            },
+        )
+
+    def test_discover_instances_uses_routing_label_metadata_for_display_name(self) -> None:
+        tree = {
+            "CONTENTS": {
+                "rnbo": {
+                    "CONTENTS": {
+                        "jack": {
+                            "CONTENTS": {
+                                "info": {
+                                    "CONTENTS": {
+                                        "ports": {
+                                            "CONTENTS": {
+                                                "audio": {
+                                                    "CONTENTS": {
+                                                        "sources": {"VALUE": ["system:capture_1"]},
+                                                        "sinks": {"VALUE": ["system:playback_1"]},
+                                                    }
+                                                },
+                                                "midi": {
+                                                    "CONTENTS": {
+                                                        "sources": {"VALUE": []},
+                                                        "sinks": {"VALUE": []},
+                                                    }
+                                                },
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "inst": {
+                            "CONTENTS": {
+                                "1": {
+                                    "CONTENTS": {
+                                        "name": {"VALUE": "My Synth"},
+                                        "jack": {
+                                            "CONTENTS": {
+                                                "connections": {
+                                                    "CONTENTS": {
+                                                        "audio": {
+                                                            "CONTENTS": {
+                                                                "sinks": {
+                                                                    "CONTENTS": {
+                                                                        "in1": {
+                                                                            "FULL_PATH": "/rnbo/inst/1/jack/connections/audio/sinks/in1",
+                                                                            "VALUE": ["system:capture_1"],
+                                                                            "CONTENTS": {
+                                                                                "meta": {"VALUE": '["label:Main Input"]'},
+                                                                            },
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "sources": {
+                                                                    "CONTENTS": {
+                                                                        "out1": {
+                                                                            "FULL_PATH": "/rnbo/inst/1/jack/connections/audio/sources/out1",
+                                                                            "VALUE": ["system:playback_1"],
+                                                                            "CONTENTS": {
+                                                                                "display_name": {"VALUE": "Main Output"},
+                                                                            },
+                                                                        }
+                                                                    }
+                                                                },
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                    }
+                                }
+                            }
+                        },
+                    }
+                }
+            }
+        }
+
+        instances = discover_instances(tree)
+
+        self.assertEqual(instances[0]["routing"]["audio"]["inputs"][0]["name"], "in1")
+        self.assertEqual(instances[0]["routing"]["audio"]["inputs"][0]["display_name"], "Main Input")
+        self.assertEqual(instances[0]["routing"]["audio"]["outputs"][0]["display_name"], "Main Output")
+        self.assertEqual(routing_port_display_name(instances[0]["routing"]["audio"]["inputs"][0]), "Main Input")
+
+    def test_discover_sets_reads_published_set_capabilities(self) -> None:
+        tree = {
+            "CONTENTS": {
+                "rnbo": {
+                    "CONTENTS": {
+                        "inst": {
+                            "CONTENTS": {
+                                "control": {
+                                    "CONTENTS": {
+                                        "sets": {
+                                            "CONTENTS": {
+                                                "save": {"FULL_PATH": "/rnbo/inst/control/sets/save"},
+                                                "load": {
+                                                    "FULL_PATH": "/rnbo/inst/control/sets/load",
+                                                    "RANGE": [{"VALS": ["Alpha", "Bravo"]}],
+                                                },
+                                                "reload": {"FULL_PATH": "/rnbo/inst/control/sets/reload"},
+                                                "initial": {
+                                                    "FULL_PATH": "/rnbo/inst/control/sets/initial",
+                                                    "VALUE": "Alpha",
+                                                },
+                                                "current": {
+                                                    "CONTENTS": {
+                                                        "name": {"VALUE": "Bravo"},
+                                                        "dirty": {"VALUE": True},
+                                                    }
+                                                },
+                                            }
+                                        }
+                                    }
+                                },
+                                "config": {
+                                    "CONTENTS": {
+                                        "auto_start_last": {
+                                            "FULL_PATH": "/rnbo/inst/config/auto_start_last",
+                                            "VALUE": True,
+                                        }
+                                    }
+                                },
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        sets = discover_sets(tree)
+
+        self.assertEqual(sets["current_name"], "Bravo")
+        self.assertTrue(sets["dirty"])
+        self.assertEqual(sets["save_path"], "/rnbo/inst/control/sets/save")
+        self.assertEqual(sets["load_path"], "/rnbo/inst/control/sets/load")
+        self.assertEqual(sets["reload_path"], "/rnbo/inst/control/sets/reload")
+        self.assertEqual(sets["initial_path"], "/rnbo/inst/control/sets/initial")
+        self.assertEqual(sets["initial_value"], "Alpha")
+        self.assertEqual(sets["available_sets"], ["Alpha", "Bravo"])
+        self.assertEqual(sets["auto_start_last_path"], "/rnbo/inst/config/auto_start_last")
+        self.assertTrue(sets["auto_start_last"])
+
+    def test_discover_system_includes_set_name_and_sets_section(self) -> None:
+        tree = {
+            "CONTENTS": {
+                "rnbo": {
+                    "CONTENTS": {
+                        "jack": {
+                            "CONTENTS": {
+                                "config": {
+                                    "CONTENTS": {
+                                        "card": {"FULL_PATH": "/rnbo/jack/config/card", "VALUE": "hw:ES8"},
+                                        "period_frames": {"FULL_PATH": "/rnbo/jack/config/period_frames", "VALUE": 256},
+                                        "sample_rate": {"FULL_PATH": "/rnbo/jack/config/sample_rate", "VALUE": 48000.0},
+                                    }
+                                },
+                                "info": {
+                                    "CONTENTS": {
+                                        "cpu_load": {"VALUE": 1.5},
+                                        "xrun_count": {"VALUE": 0},
+                                        "ports": {
+                                            "CONTENTS": {
+                                                "audio": {"CONTENTS": {"sources": {"VALUE": []}, "sinks": {"VALUE": []}}},
+                                                "midi": {"CONTENTS": {"sources": {"VALUE": []}, "sinks": {"VALUE": []}}},
+                                            }
+                                        },
+                                    }
+                                },
+                                "restart": {"FULL_PATH": "/rnbo/jack/restart"},
+                            }
+                        },
+                        "info": {"CONTENTS": {"runner_version": {"VALUE": "1.4.3"}}},
+                        "inst": {
+                            "CONTENTS": {
+                                "control": {
+                                    "CONTENTS": {
+                                        "sets": {
+                                            "CONTENTS": {
+                                                "load": {
+                                                    "FULL_PATH": "/rnbo/inst/control/sets/load",
+                                                    "RANGE": [{"VALS": ["StudioA"]}],
+                                                },
+                                                "current": {
+                                                    "CONTENTS": {
+                                                        "name": {"VALUE": "StudioA"},
+                                                        "dirty": {"VALUE": False},
+                                                    }
+                                                },
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                    }
+                }
+            }
+        }
+
+        system = discover_system(tree)
+
+        self.assertEqual(system["set_name"], "StudioA")
+        self.assertEqual(system["sets"]["current_name"], "StudioA")
+        self.assertEqual(system["sets"]["available_sets"], ["StudioA"])
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
-import unittest
 import sys
 import types
+import unittest
 
 from shadowbox.editors.pitch_display import normalize_pitch_to_midi_note
 
@@ -50,6 +50,11 @@ class _StubDisplay:
         pass
 
 
+class _FullTftDisplay(_StubDisplay):
+    width = 320
+    height = 240
+
+
 class PitchDisplayTests(unittest.TestCase):
     def setUp(self) -> None:
         self.renderer = ShadowboxRenderer(_StubDisplay())
@@ -78,6 +83,33 @@ class PitchDisplayTests(unittest.TestCase):
     def test_pitch_display_segments_only_fall_back_for_non_numeric_pitch(self) -> None:
         segments = self.renderer._pitch_display_segments("A4", 2)
         self.assertEqual(segments, [("A4", 2, "medium")])
+
+    def test_wrap_text_to_width_preserves_full_words_when_possible(self) -> None:
+        renderer = ShadowboxRenderer(_StubDisplay())
+        lines = renderer._wrap_text_to_width("press encoder to enter", max_width=60, scale=1)
+
+        self.assertEqual(lines, ["press", "encoder to", "enter"])
+
+    def test_draw_startup_status_wraps_hint_on_full_tft_without_ellipsis(self) -> None:
+        display = _FullTftDisplay()
+        renderer = ShadowboxRenderer(display)
+
+        renderer.draw_startup_status(
+            "SHADOWBOX",
+            "waiting for OSCQuery Runner",
+            "(this is normal) press encoder to enter",
+        )
+
+        text_ops = [op for op in display.ops if op[0] == "text"]
+        rendered_text = [op[1] for op in text_ops]
+
+        self.assertIn("waiting for OSCQuery", rendered_text)
+        self.assertIn("Runner", rendered_text)
+        self.assertIn("(this is normal) press", rendered_text)
+        self.assertIn("encoder to enter", rendered_text)
+        self.assertTrue(all("..." not in text for text in rendered_text))
+        self.assertIn(2, [op[4] for op in text_ops])
+        self.assertIn(4, [op[4] for op in text_ops])
 
 
 if __name__ == "__main__":

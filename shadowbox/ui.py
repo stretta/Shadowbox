@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -75,6 +76,10 @@ class UIState:
     routing_group_cursor: int = 0
     routing_port_cursor: int = 0
     routing_target_cursor: int = 0
+    graph_menu_cursor: int = 0
+    graph_set_cursor: int = 0
+    graph_startup_cursor: int = 0
+    graph_startup_set_cursor: int = 0
     system_cursor: int = 0
     system_audio_cursor: int = 0
     maint_cursor: int = 0
@@ -380,6 +385,10 @@ class ShadowboxUI:
         self.state.routing_group_cursor = 1
         self.state.routing_port_cursor = 0
         self.state.routing_target_cursor = 0
+        self.state.graph_menu_cursor = 1 if self.graph_menu_items else 0
+        self.state.graph_set_cursor = 1 if self.available_set_names else 0
+        self.state.graph_startup_cursor = 1 if self.graph_startup_menu_items else 0
+        self.state.graph_startup_set_cursor = 1 if self.available_set_names else 0
         self.state.system_cursor = 1
         self.state.system_audio_cursor = 1
         self.state.maint_cursor = 1 if self.maint_menu_items else 0
@@ -446,6 +455,10 @@ class ShadowboxUI:
         self.state.maint_cursor = clamp_index(self.state.maint_cursor, len(self.maint_menu_items) + 1)
         self.state.routing_port_cursor = clamp_index(self.state.routing_port_cursor, len(self.active_routing_ports) + 1)
         self.state.routing_target_cursor = clamp_index(self.state.routing_target_cursor, len(self.active_routing_targets) + 2)
+        self.state.graph_menu_cursor = clamp_index(self.state.graph_menu_cursor, len(self.graph_menu_items) + 1)
+        self.state.graph_set_cursor = clamp_index(self.state.graph_set_cursor, len(self.available_set_names) + 1)
+        self.state.graph_startup_cursor = clamp_index(self.state.graph_startup_cursor, len(self.graph_startup_menu_items) + 1)
+        self.state.graph_startup_set_cursor = clamp_index(self.state.graph_startup_set_cursor, len(self.available_set_names) + 1)
 
         if self.state.ui_mode == "EDIT" and self.selected_param:
             if current_param_path and self.selected_param.get("path") != current_param_path:
@@ -483,7 +496,7 @@ class ShadowboxUI:
 
     @property
     def top_level_items(self) -> list[str]:
-        return ["INSTANCES", "SYSTEM"]
+        return ["GRAPHS", "INSTANCES", "SYSTEM"]
 
     @property
     def instance_menu_items(self) -> list[str]:
@@ -520,6 +533,106 @@ class ShadowboxUI:
         if self.maint_menu_items:
             items.append("MAINT")
         return items
+
+    @property
+    def graph_menu_items(self) -> list[str]:
+        items = ["CURRENT GRAPH", "LOAD SET"]
+        if self.graph_save_path:
+            items.append("SAVE SET")
+        items.append("STARTUP")
+        return items
+
+    @property
+    def available_set_names(self) -> list[str]:
+        sets = self.state.system.get("sets", {})
+        names = sets.get("available_sets", []) if isinstance(sets, dict) else []
+        return [str(item) for item in names if str(item)]
+
+    @property
+    def current_set_name(self) -> str:
+        value = self.state.system.get("set_name", "")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return "(untitled)"
+
+    @property
+    def current_set_dirty(self) -> bool:
+        sets = self.state.system.get("sets", {})
+        return bool(sets.get("dirty")) if isinstance(sets, dict) else False
+
+    @property
+    def startup_graph_label(self) -> str:
+        sets = self.state.system.get("sets", {})
+        if not isinstance(sets, dict):
+            return "OFF"
+        if sets.get("auto_start_last") is True:
+            return "LAST"
+        initial_value = str(sets.get("initial_value", "") or "").strip()
+        if initial_value:
+            return initial_value
+        return "OFF"
+
+    @property
+    def graph_load_path(self) -> str:
+        sets = self.state.system.get("sets", {})
+        if not isinstance(sets, dict):
+            return ""
+        return str(sets.get("load_path", "") or "")
+
+    @property
+    def graph_save_path(self) -> str:
+        sets = self.state.system.get("sets", {})
+        if not isinstance(sets, dict):
+            return ""
+        return str(sets.get("save_path", "") or "")
+
+    @property
+    def graph_startup_auto_last_path(self) -> str:
+        sets = self.state.system.get("sets", {})
+        if not isinstance(sets, dict):
+            return ""
+        return str(sets.get("auto_start_last_path", "") or "")
+
+    @property
+    def graph_startup_initial_path(self) -> str:
+        sets = self.state.system.get("sets", {})
+        if not isinstance(sets, dict):
+            return ""
+        return str(sets.get("initial_path", "") or "")
+
+    @property
+    def graph_startup_menu_items(self) -> list[str]:
+        items: list[str] = []
+        if self.graph_startup_auto_last_path:
+            items.append("RESTORE LAST")
+        if self.graph_startup_initial_path and self.available_set_names:
+            items.append("LOAD NAMED SET")
+        if self.graph_startup_auto_last_path or self.graph_startup_initial_path:
+            items.append("OFF")
+        return items
+
+    @property
+    def graph_startup_current_indices(self) -> set[int]:
+        label = self.startup_graph_label
+        indices: set[int] = set()
+        for idx, item in enumerate(self.graph_startup_menu_items, start=1):
+            if item == "RESTORE LAST" and label == "LAST":
+                indices.add(idx)
+            elif item == "LOAD NAMED SET" and label not in {"LAST", "OFF"}:
+                indices.add(idx)
+            elif item == "OFF" and label == "OFF":
+                indices.add(idx)
+        return indices
+
+    def suggested_set_save_name(self) -> str:
+        base_name = self.current_set_name
+        if base_name == "(untitled)":
+            base_name = "graph"
+        slug = re.sub(r"-{2,}", "-", re.sub(r"[^A-Za-z0-9]+", "-", base_name.strip().lower())).strip("-")
+        if not slug:
+            slug = "graph"
+        timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+        return f"{slug}-{timestamp}"
 
     @property
     def maint_menu_items(self) -> list[str]:
@@ -826,6 +939,10 @@ class ShadowboxUI:
             if is_step16_param(self.selected_param) or is_pitch_display_param(self.selected_param):
                 return False
         return self.state.ui_mode in {
+            "GRAPH_MENU",
+            "GRAPH_SET_LIST",
+            "GRAPH_STARTUP",
+            "GRAPH_STARTUP_SET_LIST",
             "INSTANCE_LIST",
             "PATCHER_PICKER",
             "INSTANCE_MENU",
@@ -867,6 +984,14 @@ class ShadowboxUI:
             self._about_press_count = 0
         elif self.state.ui_mode == "TOP":
             self.state.top_index = self._cycle(self.state.top_index, len(self.top_level_items), step)
+        elif self.state.ui_mode == "GRAPH_MENU":
+            self.state.graph_menu_cursor = self._cycle(self.state.graph_menu_cursor, len(self.graph_menu_items) + 1, step)
+        elif self.state.ui_mode == "GRAPH_SET_LIST":
+            self.state.graph_set_cursor = self._cycle(self.state.graph_set_cursor, len(self.available_set_names) + 1, step)
+        elif self.state.ui_mode == "GRAPH_STARTUP":
+            self.state.graph_startup_cursor = self._cycle(self.state.graph_startup_cursor, len(self.graph_startup_menu_items) + 1, step)
+        elif self.state.ui_mode == "GRAPH_STARTUP_SET_LIST":
+            self.state.graph_startup_set_cursor = self._cycle(self.state.graph_startup_set_cursor, len(self.available_set_names) + 1, step)
         elif self.state.ui_mode == "INSTANCE_LIST":
             self.state.instance_cursor = self._cycle(
                 self.state.instance_cursor,
@@ -957,7 +1082,10 @@ class ShadowboxUI:
             return
 
         if self.state.ui_mode == "TOP":
-            if self.top_level_items[self.state.top_index] == "INSTANCES":
+            if self.top_level_items[self.state.top_index] == "GRAPHS":
+                self.state.ui_mode = "GRAPH_MENU"
+                self.state.graph_menu_cursor = 1 if self.graph_menu_items else 0
+            elif self.top_level_items[self.state.top_index] == "INSTANCES":
                 self.state.ui_mode = "INSTANCE_LIST"
                 self.state.instance_cursor = 1 if self.state.instances or self.can_add_instance or self.can_remove_instances else 0
                 if self.state.instances:
@@ -965,6 +1093,81 @@ class ShadowboxUI:
             else:
                 self.state.ui_mode = "SYSTEM_MENU"
                 self.state.system_cursor = 1
+
+        elif self.state.ui_mode == "GRAPH_MENU":
+            if self.state.graph_menu_cursor == 0:
+                self.state.ui_mode = "TOP"
+            else:
+                choice = self.graph_menu_items[self.state.graph_menu_cursor - 1]
+                if choice == "CURRENT GRAPH":
+                    self.state.ui_mode = "GRAPH_STATUS"
+                elif choice == "LOAD SET":
+                    self.state.ui_mode = "GRAPH_SET_LIST"
+                    self.state.graph_set_cursor = 1 if self.available_set_names else 0
+                elif choice == "SAVE SET" and self.graph_save_path:
+                    self.queue_action(
+                        UIAction(
+                            kind="save_set",
+                            path=self.graph_save_path,
+                            value=self.suggested_set_save_name(),
+                        )
+                    )
+                elif choice == "STARTUP":
+                    self.state.ui_mode = "GRAPH_STARTUP"
+                    self.state.graph_startup_cursor = 1 if self.graph_startup_menu_items else 0
+
+        elif self.state.ui_mode == "GRAPH_SET_LIST":
+            if self.state.graph_set_cursor == 0:
+                self.state.ui_mode = "GRAPH_MENU"
+            elif self.graph_load_path and self.available_set_names:
+                idx = self.state.graph_set_cursor - 1
+                if 0 <= idx < len(self.available_set_names):
+                    self.queue_action(
+                        UIAction(
+                            kind="load_set",
+                            path=self.graph_load_path,
+                            value=self.available_set_names[idx],
+                        )
+                    )
+
+        elif self.state.ui_mode == "GRAPH_STARTUP":
+            if self.state.graph_startup_cursor == 0:
+                self.state.ui_mode = "GRAPH_MENU"
+            else:
+                choice = self.graph_startup_menu_items[self.state.graph_startup_cursor - 1]
+                if choice == "LOAD NAMED SET":
+                    self.state.ui_mode = "GRAPH_STARTUP_SET_LIST"
+                    self.state.graph_startup_set_cursor = 1 if self.available_set_names else 0
+                elif choice == "RESTORE LAST":
+                    updates: list[tuple[str, Any]] = []
+                    if self.graph_startup_auto_last_path:
+                        updates.append((self.graph_startup_auto_last_path, True))
+                    if self.graph_startup_initial_path:
+                        updates.append((self.graph_startup_initial_path, ""))
+                    if updates:
+                        self.queue_action(UIAction(kind="set_graph_startup", value=updates))
+                elif choice == "OFF":
+                    updates = []
+                    if self.graph_startup_auto_last_path:
+                        updates.append((self.graph_startup_auto_last_path, False))
+                    if self.graph_startup_initial_path:
+                        updates.append((self.graph_startup_initial_path, ""))
+                    if updates:
+                        self.queue_action(UIAction(kind="set_graph_startup", value=updates))
+
+        elif self.state.ui_mode == "GRAPH_STARTUP_SET_LIST":
+            if self.state.graph_startup_set_cursor == 0:
+                self.state.ui_mode = "GRAPH_STARTUP"
+            else:
+                idx = self.state.graph_startup_set_cursor - 1
+                if 0 <= idx < len(self.available_set_names):
+                    updates = []
+                    if self.graph_startup_auto_last_path:
+                        updates.append((self.graph_startup_auto_last_path, False))
+                    if self.graph_startup_initial_path:
+                        updates.append((self.graph_startup_initial_path, self.available_set_names[idx]))
+                    if updates:
+                        self.queue_action(UIAction(kind="set_graph_startup", value=updates))
 
         elif self.state.ui_mode == "INSTANCE_LIST":
             if self.state.instance_cursor == 0:
@@ -1287,6 +1490,14 @@ class ShadowboxUI:
             self.state.ui_mode = "ROUTING_GROUP"
         elif self.state.ui_mode == "ROUTING_TARGETS":
             self.state.ui_mode = "ROUTING_PORTS"
+        elif self.state.ui_mode == "GRAPH_STARTUP_SET_LIST":
+            self.state.ui_mode = "GRAPH_STARTUP"
+        elif self.state.ui_mode in ("GRAPH_STATUS", "GRAPH_STARTUP"):
+            self.state.ui_mode = "GRAPH_MENU"
+        elif self.state.ui_mode == "GRAPH_SET_LIST":
+            self.state.ui_mode = "GRAPH_MENU"
+        elif self.state.ui_mode == "GRAPH_MENU":
+            self.state.ui_mode = "TOP"
         elif self.state.ui_mode == "INSTANCE_MENU":
             self.state.ui_mode = "INSTANCE_LIST"
         elif self.state.ui_mode == "INSTANCE_LIST":

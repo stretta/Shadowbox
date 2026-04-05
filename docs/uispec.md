@@ -8,7 +8,7 @@ Shadowbox is a hardware UI for RNBO Runner that:
 - allows editing of parameters and routing that are explicitly published
 - does not invent structure that is not present in the published data
 
-The UI is organized around RNBO instances.
+The UI is organized around live RNBO instances, with a user-facing top level that separates graphs, instances, and system concerns.
 
 2. Source of Truth
 
@@ -21,6 +21,7 @@ The UI is organized around RNBO instances.
 Definitions:
 - Instance = one live published RNBO instance under `/rnbo/inst/<n>`
 - Patcher = a loadable RNBO asset published under `/rnbo/patchers/<name>`
+- Set = a Runner-managed saved graph/session exposed through published set commands and state
 - Node = avoid this term in the UI and implementation unless quoting backend terminology; when it appears in backend descriptions, it refers to an instance
 - Patch = avoid this term in the UI and implementation because it is ambiguous across RNBO authoring, patchers, and live instances
 - Parameter = editable node under an instance `params` branch
@@ -32,8 +33,30 @@ Definitions:
 3. Menu Hierarchy
 
 TOP
+GRAPHS
 INSTANCES
 SYSTEM
+
+GRAPHS
+CURRENT GRAPH
+LOAD SET
+SAVE SET
+STARTUP
+
+LOAD SET
+<SAVED GRAPH>
+<SAVED GRAPH>
+...
+
+STARTUP
+RESTORE LAST
+LOAD NAMED SET
+OFF
+
+LOAD NAMED SET
+<SAVED GRAPH>
+<SAVED GRAPH>
+...
 
 INSTANCES
 <INSTANCE>
@@ -64,6 +87,12 @@ MAINT
 
 Rules:
 - Instances are discovered from OSCQuery, not hardcoded
+- `GRAPHS` is a user-facing top-level label and must not imply a separate Shadowbox-owned graph model
+- `GRAPHS` is backed by published Runner set and startup capabilities when those paths are available
+- `CURRENT GRAPH` reflects the currently published live graph state and current set identity only
+- `LOAD SET` loads a published set by name through the published set load path
+- `SAVE SET` saves the current published live graph through the published set save path
+- `STARTUP` edits published Runner startup configuration only; it does not implement local boot restore logic
 - Instance labels should use published alias/name when available
 - `ADD INSTANCE` should appear in the `INSTANCES` menu only if the backend exposes a supported command path for creating an instance from a patcher
 - `SYSTEM` is always present
@@ -192,6 +221,7 @@ Recognized metadata categories:
 - Display hints: `unit`, `units`, `display_precision`, `display_as`
 - Edit behavior: `edit_step`, `edit_as`, `bool`, `is_bool`, `boolean`
 - Runtime state wiring: `playhead_state`, `pitch_state`, `cents_state`, `ui_role`
+- Routing display: `label` for friendly input/output names
 
 Metadata behavior rules:
 - `editor` selects a specialized editor only for supported custom screens such as `ttid`, `step16`, and `pitch_display`
@@ -201,6 +231,7 @@ Metadata behavior rules:
 - `display_as` and `edit_as` are semantic UI hints; for example, `int` means the value should be rendered or edited as integer-like even if the published transport value is float-like
 - Boolean hints in metadata explicitly opt a parameter into the bool editor
 - `ui_role` helps runtime state lookups match a published state value to a UI-specific role such as a custom editor feed
+- `label` overrides the displayed name for published routing inputs/outputs without changing their control path
 - If metadata is absent or malformed, Shadowbox does not infer bool or integer intent from range or transport type; it falls back to numeric behavior, except that RNBO enum parameters still use the enum selector
 - Shadowbox can read metadata either from the parameter's `meta` node or from direct scalar child nodes published into the OSCQuery tree, such as `editor`, `display_name`, or `ui_role`
 
@@ -225,10 +256,86 @@ Expected behavior:
 - available preset names are read from the published preset entries list
 - selecting a preset sends its name to the published preset load path
 
+If the backend publishes preset save or rename capabilities, Shadowbox should reuse the same naming UI used for graph/set save and rename actions rather than introducing a separate preset-specific editor.
+
 Shadowbox does not:
 - create its own preset format
 - infer preset groups that are not published
 - cache preset state beyond minimal UI convenience
+
+8a. Shared Naming UI
+
+Naming should be handled by one shared modal flow that can be invoked by:
+- `SAVE SET`
+- `RENAME SET` if a published rename capability is added
+- `SAVE PRESET` if a published preset-save capability exists
+- `RENAME PRESET` if a published preset-rename capability exists
+
+Rules:
+- The naming UI is only shown for published save/rename capabilities; Shadowbox must not invent local preset or set storage
+- Saving and renaming should feel identical apart from the action label and the initial text value
+- The current generated fallback name remains useful as the initial draft for `SAVE SET`, but it should be editable before commit and always remain available as an explicit regenerate action
+- Renaming should preload the current item name
+- The naming flow must work on the existing one-encoder, one-button input model without hidden gestures
+
+Proposed invocation model:
+- choosing `SAVE SET` opens `NAME EDITOR` instead of immediately dispatching the generated fallback name
+- choosing `SAVE PRESET` does the same when that published capability exists
+- choosing `RENAME SET` or `RENAME PRESET` opens `NAME EDITOR` seeded with the current item name
+- on confirm, Shadowbox dispatches the published command with the final text value
+- on cancel, no backend command is sent
+
+Proposed editor structure:
+- header shows the action context, such as `SAVE SET`, `SAVE PRESET`, `RENAME SET`, or `RENAME PRESET`
+- first row shows the current draft name, with an insertion cursor
+- second row is a compact character wheel or palette
+- final row exposes explicit actions: `SAVE` or `RENAME`, `GENERATE NAME`, `ADD DATE`, `DELETE CHAR`, `CANCEL`
+
+Interaction model:
+- encoder rotation changes the currently focused character or action
+- short press commits the current choice
+- long press cancels the naming flow and returns to the previous screen
+
+Recommended editing behavior:
+1. The editor opens with a prefilled draft and the insertion point at the end
+2. Rotating while the insertion point is active cycles through a constrained character set
+3. Short press accepts the current character and advances to the next position
+4. Selecting `GENERATE NAME` replaces the current draft with a fresh suggested name
+5. Selecting `ADD DATE` appends a compact date or datetime token to the current draft
+6. Selecting `DELETE CHAR` removes the previous character
+7. Selecting `SAVE` or `RENAME` submits the draft
+
+Generated-name guidance:
+- `SAVE SET` should open with a generated suggestion derived from the current set name when available, otherwise a neutral base such as `graph`
+- `SAVE PRESET` should open with a generated suggestion derived from the current preset or instance label when available, otherwise a neutral base such as `preset`
+- generated names may include a timestamp suffix to keep one-click saves unique
+- `GENERATE NAME` should remain available even when the user has already edited the draft, so they can quickly reset to a fresh suggestion
+- `ADD DATE` should be available independently because date stamping is useful even when the base name is handwritten
+
+Recommended character set:
+- uppercase letters
+- lowercase letters
+- digits
+- space
+- `-` and `_`
+
+Recommended constraints:
+- trim leading and trailing whitespace on submit
+- collapse repeated internal spaces
+- reject an empty final name
+- keep names within a compact display-safe limit such as 24 characters
+- if the backend reports a conflict, return to the naming UI with the attempted name preserved
+- when `GENERATE NAME` or `ADD DATE` would exceed the display-safe limit, Shadowbox may trim the base portion before applying the suffix rather than dropping the suffix silently
+
+Conflict handling:
+- For save actions, if the target name already exists and the backend distinguishes overwrite from create, Shadowbox should show a confirmation screen before overwriting
+- For rename actions, if the requested name already exists, Shadowbox should reject the action and return to the editor with a brief conflict message
+- If the backend does not publish enough information to distinguish these cases, Shadowbox should send the requested name and reflect the backend result on refresh rather than guessing
+
+Rendering guidance:
+- OLED should use a minimal single-line text preview and a compact bottom-row action list
+- TFT may show a larger text preview and a clearer per-character cursor treatment
+- The visual treatment may differ by display, but both displays must preserve the same navigation semantics
 
 9. Audio Routing
 
@@ -277,6 +384,14 @@ Rules:
 - Non-OSCQuery `SYSTEM` entries must be explicitly chosen product features, not a generic escape hatch for backend gaps
 - Host-derived `SYSTEM` data should stay read-only unless there is a deliberately integrated control path for that feature
 
+Live runtime authority:
+- Shadowbox reflects the currently published live runtime state
+- Live instances under `/rnbo/inst/<n>` are authoritative for what exists now
+- Published set metadata, view metadata, or layout metadata do not by themselves establish that an instance exists
+- Shadowbox must not reconstruct or imply missing live instances from saved graph metadata
+- Multiple instances of the same patcher are valid and must remain distinct by runtime instance id
+- Loading or saving a graph means invoking published Runner set operations and then rediscovering the resulting live runtime state
+
 12. Rendering Contract
 
 Each screen defines only:
@@ -308,6 +423,7 @@ Display rendering rules:
 - UI must stay small and readable on OLED hardware
 - hierarchy should reflect published OSCQuery structure as directly as possible
 - local persistence should be limited to UI convenience, not mirrored domain state
+- local persistence must not be presented as graph, set, or session restoration
 - no feature expansion without corresponding published data
 
 14. Explicit Non-Goals
@@ -325,4 +441,3 @@ Shadowbox will not:
 - Whether `REPLACE INSTANCE` should preserve routing automatically or rely on backend behavior
 - Whether routing should support only single-target selection or multi-connection editing
 - Whether aliases should be editable if published, or display-only
-- Whether `INSTANCES` should remain named `INSTANCES` or be labeled `GRAPHS` in the final UI while still mapping to instances internally

@@ -301,11 +301,18 @@ def _routing_port(name: str, node: dict, targets: list[str]) -> dict:
     value = node.get("VALUE", [])
     if not isinstance(value, list):
         value = [value] if value not in ("", None) else []
+    metadata = extract_meta_info(node)
+    label = metadata.get("label")
+    if not isinstance(label, str) or not label.strip():
+        label = metadata.get("display_name")
+    display_name = label.strip() if isinstance(label, str) and label.strip() else name
     return {
         "name": name,
+        "display_name": display_name,
         "path": node.get("FULL_PATH", ""),
         "connections": value,
         "targets": list(targets),
+        "metadata": metadata,
     }
 
 
@@ -374,6 +381,53 @@ def _system_ports(tree: dict) -> dict:
         "audio_sources": safe_get(tree, ["CONTENTS", "rnbo", "CONTENTS", "jack", "CONTENTS", "info", "CONTENTS", "ports", "CONTENTS", "audio", "CONTENTS", "sources", "VALUE"], []),
         "midi_sinks": safe_get(tree, ["CONTENTS", "rnbo", "CONTENTS", "jack", "CONTENTS", "info", "CONTENTS", "ports", "CONTENTS", "midi", "CONTENTS", "sinks", "VALUE"], []),
         "midi_sources": safe_get(tree, ["CONTENTS", "rnbo", "CONTENTS", "jack", "CONTENTS", "info", "CONTENTS", "ports", "CONTENTS", "midi", "CONTENTS", "sources", "VALUE"], []),
+    }
+
+
+def discover_sets(tree: dict) -> dict:
+    sets_root = safe_get(
+        tree,
+        ["CONTENTS", "rnbo", "CONTENTS", "inst", "CONTENTS", "control", "CONTENTS", "sets", "CONTENTS"],
+        {},
+    )
+    if not isinstance(sets_root, dict):
+        return {
+            "current_name": "",
+            "dirty": False,
+            "save_path": "",
+            "load_path": "",
+            "reload_path": "",
+            "initial_path": "",
+            "initial_value": "",
+            "available_sets": [],
+            "auto_start_last_path": "",
+            "auto_start_last": None,
+        }
+
+    current_name = safe_get(sets_root, ["current", "CONTENTS", "name", "VALUE"], "")
+    dirty = safe_get(sets_root, ["current", "CONTENTS", "dirty", "VALUE"], False)
+    load_node = safe_get(sets_root, ["load"], {})
+    available_sets = extract_range_info(load_node).get("vals") or []
+    if not isinstance(available_sets, list):
+        available_sets = []
+
+    auto_start_last_node = safe_get(
+        tree,
+        ["CONTENTS", "rnbo", "CONTENTS", "inst", "CONTENTS", "config", "CONTENTS", "auto_start_last"],
+        {},
+    )
+
+    return {
+        "current_name": str(current_name) if current_name is not None else "",
+        "dirty": bool(dirty),
+        "save_path": str(safe_get(sets_root, ["save", "FULL_PATH"], "") or ""),
+        "load_path": str(safe_get(load_node, ["FULL_PATH"], "") or ""),
+        "reload_path": str(safe_get(sets_root, ["reload", "FULL_PATH"], "") or ""),
+        "initial_path": str(safe_get(sets_root, ["initial", "FULL_PATH"], "") or ""),
+        "initial_value": str(safe_get(sets_root, ["initial", "VALUE"], "") or ""),
+        "available_sets": [str(item) for item in available_sets if str(item)],
+        "auto_start_last_path": str(auto_start_last_node.get("FULL_PATH", "") or "") if isinstance(auto_start_last_node, dict) else "",
+        "auto_start_last": auto_start_last_node.get("VALUE") if isinstance(auto_start_last_node, dict) and "VALUE" in auto_start_last_node else None,
     }
 
 
@@ -477,6 +531,7 @@ def discover_system(tree: dict) -> dict:
         ["CONTENTS", "rnbo", "CONTENTS", "jack", "CONTENTS", "restart", "FULL_PATH"],
         "",
     )
+    sets = discover_sets(tree)
 
     return {
         "audio": {
@@ -499,6 +554,8 @@ def discover_system(tree: dict) -> dict:
             "xruns": xruns,
             "runner_version": runner_version,
         },
+        "set_name": sets.get("current_name", ""),
+        "sets": sets,
         "maint": {
             "jack_restart_path": str(jack_restart_path) if jack_restart_path is not None else "",
         },
@@ -580,6 +637,19 @@ class RNBOClient:
                         "cpu_load": None,
                         "xruns": None,
                         "runner_version": "",
+                    },
+                    "set_name": "",
+                    "sets": {
+                        "current_name": "",
+                        "dirty": False,
+                        "save_path": "",
+                        "load_path": "",
+                        "reload_path": "",
+                        "initial_path": "",
+                        "initial_value": "",
+                        "available_sets": [],
+                        "auto_start_last_path": "",
+                        "auto_start_last": None,
                     },
                     "maint": {
                         "jack_restart_path": "",

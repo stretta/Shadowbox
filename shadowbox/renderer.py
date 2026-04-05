@@ -23,6 +23,8 @@ from shadowbox.ui import (
 )
 from shadowbox.version import SHADOWBOX_BUILD_INFO, SHADOWBOX_VERSION
 
+STEP16_ENABLED_FILL_LEVEL = int(round(255 * 0.7))
+
 
 def shorten(text: str, max_chars: int) -> str:
     text = str(text)
@@ -92,6 +94,16 @@ def format_param_value(param: dict | None, value: Any) -> str:
     return f"{text}{unit}"
 
 
+def routing_port_display_name(port: dict | None) -> str:
+    if not isinstance(port, dict):
+        return ""
+    display_name = port.get("display_name")
+    if isinstance(display_name, str) and display_name.strip():
+        return display_name.strip()
+    name = port.get("name")
+    return str(name).strip() if name is not None else ""
+
+
 def activity_frame(ticks: int) -> str:
     return ["-", "\\", "|", "/"][ticks % 4]
 
@@ -125,6 +137,31 @@ class ShadowboxRenderer:
             if self._measure_text(candidate, scale, weight)[0] <= max_width:
                 return candidate
         return ellipsis
+
+    def _wrap_text_to_width(self, text: str, max_width: int, scale: int = 1, weight: str = "regular") -> list[str]:
+        text = " ".join(str(text).split())
+        if not text or max_width <= 0:
+            return []
+
+        lines: list[str] = []
+        current = ""
+        for word in text.split(" "):
+            candidate = word if not current else f"{current} {word}"
+            if self._measure_text(candidate, scale, weight)[0] <= max_width:
+                current = candidate
+                continue
+            if current:
+                lines.append(current)
+            if self._measure_text(word, scale, weight)[0] <= max_width:
+                current = word
+                continue
+            fitted = self._truncate_to_width(word, max_width, scale, weight)
+            if fitted:
+                lines.append(fitted)
+            current = ""
+        if current:
+            lines.append(current)
+        return lines
 
     def _draw_right_aligned(self, text: str, right_x: int, y: int, scale: int = 1, weight: str = "regular") -> None:
         text_w, _ = self._measure_text(text, scale, weight)
@@ -623,7 +660,7 @@ class ShadowboxRenderer:
             else:
                 port = ports[item_idx - 1]
                 value = port.get("connections", [])
-                self.draw_value_row(rows[row_idx], row_idx == selected_row, port.get("name", ""), value)
+                self.draw_value_row(rows[row_idx], row_idx == selected_row, routing_port_display_name(port), value)
 
     def _draw_routing_list_tft(self, ports: list[dict], selected_idx: int) -> None:
         items = [None] + list(ports)
@@ -657,7 +694,7 @@ class ShadowboxRenderer:
                 continue
 
             port = items[item_idx]
-            left = shorten(shorten_param_name(port.get("name", "")), left_cols)
+            left = shorten(shorten_param_name(routing_port_display_name(port)), left_cols)
             right = shorten(format_display_value(port.get("connections", [])), right_cols)
             if self.is_full_tft:
                 self._draw_full_tft_row(y, ">" if selected else " ", left, right, selected)
@@ -779,6 +816,13 @@ class ShadowboxRenderer:
     def _fill_rect(self, x: int, y: int, w: int, h: int, on: bool = True) -> None:
         for yy in range(y, y + h):
             self.display.hline(x, yy, w, on)
+
+    def _fill_rect_level(self, x: int, y: int, w: int, h: int, level: int) -> None:
+        fill_rect_level = getattr(self.display, "fill_rect_level", None)
+        if callable(fill_rect_level):
+            fill_rect_level(x, y, w, h, level)
+            return
+        self._fill_rect(x, y, w, h, level >= 128)
 
     def _parse_float(self, value: Any) -> float | None:
         if value in (None, "", "-"):
@@ -1140,7 +1184,12 @@ class ShadowboxRenderer:
             x = origin_x + col * (cell_w + gap)
             y = origin_y + row * (cell_h + gap)
 
-            self.display.rect(x, y, cell_w, cell_h, True, cell.active)
+            if self.is_tft:
+                self.display.rect(x, y, cell_w, cell_h, True, False)
+                if cell.active:
+                    self._fill_rect_level(x + 1, y + 1, max(0, cell_w - 2), max(0, cell_h - 2), STEP16_ENABLED_FILL_LEVEL)
+            else:
+                self.display.rect(x, y, cell_w, cell_h, True, cell.active)
 
             if cell.focused:
                 self.display.rect(max(0, x - 1), max(0, y - 1), cell_w + 2, cell_h + 2, True, False)
@@ -1305,23 +1354,29 @@ class ShadowboxRenderer:
     def draw_startup_status(self, title: str, status_line: str = "", hint_line: str = "") -> None:
         self.display.clear()
         if self.is_tft:
-            title_scale = 3 if self.is_full_tft else 2
-            status_scale = 1
-            hint_scale = 1
-            status_gap = 22 if self.is_full_tft else 14
-            hint_gap = 16 if self.is_full_tft else 12
+            title_scale = 4 if self.is_full_tft else 3
+            status_scale = 2
+            hint_scale = 2
+            text_width = max(0, self.display.width - (24 if self.is_full_tft else 16))
+            status_weight = "medium" if self.is_full_tft else "regular"
+            hint_weight = "medium" if self.is_full_tft else "regular"
+            status_lines = self._wrap_text_to_width(status_line, text_width, status_scale, status_weight)
+            hint_lines = self._wrap_text_to_width(hint_line, text_width, hint_scale, hint_weight)
             if title == "SHADOWBOX":
                 _, title_h, _ = self._measure_shadowbox_logo(title_scale)
             else:
                 title_h = self._measure_text(title, title_scale, "medium")[1]
-
-            status_h = self._measure_text(status_line, status_scale)[1] if status_line else 0
-            hint_h = self._measure_text(hint_line, hint_scale)[1] if hint_line else 0
+            status_line_h = self._line_height(status_scale, status_weight) if status_lines else 0
+            hint_line_h = self._line_height(hint_scale, hint_weight) if hint_lines else 0
+            status_block_h = len(status_lines) * status_line_h
+            hint_block_h = len(hint_lines) * hint_line_h
+            status_gap = 20 if self.is_full_tft else 14
+            hint_gap = 14 if self.is_full_tft else 10
             block_h = title_h
-            if status_h:
-                block_h += status_gap + status_h
-            if hint_h:
-                block_h += hint_gap + hint_h
+            if status_block_h:
+                block_h += status_gap + status_block_h
+            if hint_block_h:
+                block_h += hint_gap + hint_block_h
             title_y = max(0, (self.display.height - block_h) // 2)
 
             if title == "SHADOWBOX":
@@ -1330,14 +1385,11 @@ class ShadowboxRenderer:
                 self.text_center_scaled(title, title_y, title_scale)
 
             status_y = title_y + title_h + status_gap
-            if status_line:
-                self.text_center_scaled(shorten(status_line, 44 if self.is_full_tft else 28), status_y, status_scale)
-            if hint_line:
-                self.text_center_scaled(
-                    shorten(hint_line, 34 if self.is_full_tft else 24),
-                    status_y + status_h + hint_gap,
-                    hint_scale,
-                )
+            for idx, line in enumerate(status_lines):
+                self.text_center_scaled(line, status_y + (idx * status_line_h), status_scale)
+            hint_y = status_y + status_block_h + hint_gap
+            for idx, line in enumerate(hint_lines):
+                self.text_center_scaled(line, hint_y + (idx * hint_line_h), hint_scale)
         else:
             self.text_center(title, 28 if self.is_tall else 12)
             if status_line:
@@ -1370,6 +1422,42 @@ class ShadowboxRenderer:
 
     def draw_system_audio(self, ui) -> None:
         self.draw_string_list([".."] + SYSTEM_AUDIO_ITEMS, ui.state.system_audio_cursor)
+
+    def draw_graph_status(self, ui) -> None:
+        dirty_text = "YES" if ui.current_set_dirty else "NO"
+        if self.is_tft:
+            self._draw_info_rows(
+                [
+                    ("SET", ui.current_set_name),
+                    ("DIRTY", dirty_text),
+                    ("SAVED", len(ui.available_set_names)),
+                ]
+            )
+            return
+        rows = self.content_rows
+        self.draw_value_row(rows[0], False, "set", ui.current_set_name)
+        self.draw_value_row(rows[1], False, "dirty", dirty_text)
+        if self.is_tall:
+            self.draw_value_row(rows[2], False, "saved", len(ui.available_set_names))
+
+    def draw_graph_startup(self, ui) -> None:
+        sets = ui.state.system.get("sets", {})
+        auto_last = "ON" if sets.get("auto_start_last") is True else "OFF"
+        initial = str(sets.get("initial_value", "") or "-")
+        if self.is_tft:
+            self._draw_info_rows(
+                [
+                    ("STARTUP", ui.startup_graph_label),
+                    ("AUTO LAST", auto_last),
+                    ("INITIAL", initial),
+                ]
+            )
+            return
+        rows = self.content_rows
+        self.draw_value_row(rows[0], False, "startup", ui.startup_graph_label)
+        self.draw_value_row(rows[1], False, "auto", auto_last.lower())
+        if self.is_tall:
+            self.draw_value_row(rows[2], False, "initial", initial)
 
     def draw_system_audio_device(self, ui) -> None:
         current_indices = {
@@ -1506,7 +1594,7 @@ class ShadowboxRenderer:
     def draw_maint(self, ui) -> None:
         self.draw_string_list([".."] + ui.maint_menu_items, ui.state.maint_cursor)
 
-    def _draw_instances_icon(self, x: int, y: int, on: bool = True) -> None:
+    def _draw_graphs_icon(self, x: int, y: int, on: bool = True) -> None:
         self.display.rect(x + 18, y + 10, 24, 18, on, False)
         self.display.rect(x + 10, y + 20, 24, 18, on, False)
         self.display.rect(x + 26, y + 20, 24, 18, on, False)
@@ -1514,6 +1602,12 @@ class ShadowboxRenderer:
 
         for dot_x, dot_y in ((22, 14), (30, 14), (26, 24), (34, 24), (42, 24), (26, 34), (34, 34)):
             self.display.rect(x + dot_x, y + dot_y, 4, 4, on, True)
+
+    def _draw_instances_icon(self, x: int, y: int, on: bool = True) -> None:
+        for offset_y in (10, 24, 38):
+            self.display.rect(x + 14, y + offset_y, 32, 10, on, False)
+            self.display.rect(x + 18, y + offset_y + 3, 4, 4, on, True)
+            self.display.rect(x + 26, y + offset_y + 3, 12, 4, on, True)
 
     def _draw_system_icon(self, x: int, y: int, on: bool = True) -> None:
         self.display.rect(x + 18, y + 18, 24, 24, on, False)
@@ -1546,6 +1640,8 @@ class ShadowboxRenderer:
         icon_y = y + (18 if self.is_full_tft else 12)
         if label == "SYSTEM":
             self._draw_system_icon(icon_x, icon_y, on=True)
+        elif label == "GRAPHS":
+            self._draw_graphs_icon(icon_x, icon_y, on=True)
         else:
             self._draw_instances_icon(icon_x, icon_y, on=True)
 
@@ -1565,7 +1661,8 @@ class ShadowboxRenderer:
         avail_top = self.content_top
         avail_h = max(0, self.display.height - avail_top)
         gap = 18 if self.is_full_tft else 10
-        card_w = min(136 if self.is_full_tft else 70, max(56, (self.display.width - (gap * 3)) // 2))
+        max_card_w = (self.display.width - (gap * max(0, total - 1)) - 8) // max(1, total)
+        card_w = min(136 if self.is_full_tft else 70, max(56, max_card_w))
         card_h = min(146 if self.is_full_tft else 82, max(56, avail_h - (24 if self.is_full_tft else 12)))
         total_w = (card_w * total) + (gap * (total - 1))
         start_x = max(4, (self.display.width - total_w) // 2)
@@ -1581,6 +1678,11 @@ class ShadowboxRenderer:
 
         header = {
             "TOP": "SHADOWBOX",
+            "GRAPH_MENU": "GRAPHS",
+            "GRAPH_STATUS": "CURRENT GRAPH",
+            "GRAPH_SET_LIST": "LOAD SET",
+            "GRAPH_STARTUP": "STARTUP",
+            "GRAPH_STARTUP_SET_LIST": "STARTUP SET",
             "INSTANCE_LIST": "INSTANCES",
             "PATCHER_PICKER": "ADD INSTANCE" if state.patcher_picker_context == "add" else "REPLACE",
             "INSTANCE_MENU": ui.active_instance.get("label", "INSTANCE") if ui.active_instance else "INSTANCE",
@@ -1591,7 +1693,7 @@ class ShadowboxRenderer:
             "ENUM_LIST": shorten(shorten_param_name(ui.selected_param.get("name", "")), 19) if ui.selected_param else "ENUM",
             "ROUTING_GROUP": state.active_transport.upper(),
             "ROUTING_PORTS": f"{state.active_transport[:1].upper()}{state.active_transport[1:]} {state.active_routing_direction[:1].upper()}{state.active_routing_direction[1:]}",
-            "ROUTING_TARGETS": ui.selected_routing_port.get("name", "TARGET") if ui.selected_routing_port else "TARGET",
+            "ROUTING_TARGETS": routing_port_display_name(ui.selected_routing_port) or "TARGET",
             "SYSTEM_MENU": "SYSTEM",
             "SYSTEM_AUDIO": "AUDIO",
             "SYSTEM_AUDIO_DEVICE": "DEVICE",
@@ -1614,6 +1716,20 @@ class ShadowboxRenderer:
                 self.draw_top_menu_tft(ui.top_level_items, state.top_index)
             else:
                 self.draw_string_list(ui.top_level_items, state.top_index)
+        elif state.ui_mode == "GRAPH_MENU":
+            self.draw_string_list([".."] + ui.graph_menu_items, state.graph_menu_cursor)
+        elif state.ui_mode == "GRAPH_STATUS":
+            self.draw_graph_status(ui)
+        elif state.ui_mode == "GRAPH_SET_LIST":
+            self.draw_string_list([".."] + ui.available_set_names if ui.available_set_names else ["..", "no saved graphs"], state.graph_set_cursor)
+        elif state.ui_mode == "GRAPH_STARTUP":
+            self.draw_string_list(
+                [".."] + ui.graph_startup_menu_items if ui.graph_startup_menu_items else ["..", "no startup options"],
+                state.graph_startup_cursor,
+                current_indices=ui.graph_startup_current_indices,
+            )
+        elif state.ui_mode == "GRAPH_STARTUP_SET_LIST":
+            self.draw_string_list([".."] + ui.available_set_names if ui.available_set_names else ["..", "no saved graphs"], state.graph_startup_set_cursor)
         elif state.ui_mode == "INSTANCE_LIST":
             self.draw_instance_list(ui)
         elif state.ui_mode == "REMOVE_INSTANCE_PICKER":

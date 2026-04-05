@@ -40,6 +40,7 @@ Module responsibilities:
 - Discovers:
   - instances
   - patchers
+  - graph/set capabilities and startup configuration when published
   - presets
   - parameters
   - JACK audio and MIDI routing
@@ -65,6 +66,10 @@ Data flow:
 
 Design rules:
 - OSCQuery is the source of truth for instance-scoped runtime structure
+- The authoritative runtime view is the currently published live tree, especially live instances under `/rnbo/inst/<n>`
+- Published set metadata, view metadata, or layout metadata are not by themselves proof that a live instance exists
+- Shadowbox must not synthesize missing runtime instances or reconstruct a graph from non-runtime metadata
+- Graph load/save/startup controls must map directly to published Runner set/config paths rather than a Shadowbox-owned persistence layer
 - The UI should be capability-driven; if a backend command or branch is not published, Shadowbox should not invent it
 - System controls must remain separate from per-instance controls
 - `SYSTEM` may include a narrow, explicitly documented set of host-level status or maintenance features outside OSCQuery when they are not owned by an instance
@@ -73,3 +78,4 @@ Design rules:
   - use `Instance` for live runtime objects
   - use `Patcher` for loadable assets
   - avoid `Patch` unless quoting external documentation
+  - identify instances by RNBO runtime instance id, not by patcher name or display label
