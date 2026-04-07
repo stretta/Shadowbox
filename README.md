@@ -248,7 +248,19 @@ cd Shadowbox
 
 ---
 
-# 6. Create Python virtual environment
+# 6. Choose setup path
+
+After cloning, you typically have two options:
+
+- For development, testing, or running Shadowbox manually from the checkout,
+  continue with the virtual environment steps below.
+- For a normal device install that should set up dependencies, hardware
+  interfaces, and the systemd service for you, skip ahead to step 11 and run
+  `./install.sh`.
+
+---
+
+# 7. Create Python virtual environment
 
 Create environment:
 
@@ -318,7 +330,7 @@ If `pigpiod` is not running, startup will fail with `RuntimeError: pigpio daemon
 
 ---
 
-# 7. Test display
+# 8. Test display
 
 For OLED builds:
 
@@ -353,7 +365,7 @@ If the raw test works but `SHADOWBOX_DISPLAY=st7789` stays blank, use
 
 ---
 
-# 8. Test encoder
+# 9. Test encoder
 
 Run:
 
@@ -365,7 +377,7 @@ Rotating the encoder should print movement values.
 
 ---
 
-# 9. Encoder + display test
+# 10. Encoder + display test
 
 Run:
 
@@ -377,7 +389,7 @@ Turning the encoder should update the OLED display.
 
 ---
 
-# 10. Install the Shadowbox service
+# 11. Install the Shadowbox service
 
 From the repository root:
 
