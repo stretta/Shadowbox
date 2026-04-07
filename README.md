@@ -147,6 +147,7 @@ python3-venv \
 python3-pip \
 git \
 pigpio \
+libopenjp2-7 \
 python3-spidev \
 python3-rpi.gpio
 ```
@@ -424,12 +425,15 @@ The installer:
 - enables and starts `pigpiod`
 - creates the virtual environment as your current user
 - upgrades `pip` and installs `requirements.txt`
+- persists the current `SHADOWBOX_*` environment variables to `/etc/default/shadowbox`
 - generates a systemd unit for the current repository path and current user
 - reloads systemd, enables `shadowbox`, and restarts the service
 
 It uses `sudo` only for system package, hardware interface, and service steps.
 If the installer changes I2C or SPI state on a fresh system, a reboot is still
 recommended afterward.
+If you exported `SHADOWBOX_DISPLAY` before running `./install.sh`, that value is
+saved for future boots in `/etc/default/shadowbox`.
 
 The repository also includes a static unit file at:
 
