@@ -12,7 +12,7 @@ sys.modules.setdefault("pythonosc", pythonosc_module)
 sys.modules.setdefault("pythonosc.udp_client", udp_client_module)
 
 from shadowbox.renderer import ShadowboxRenderer
-from shadowbox.rnbo import RNBOSnapshot
+from shadowbox.rnbo import RNBO_PORT, RNBOSnapshot
 from shadowbox.ui import ShadowboxUI
 
 
@@ -393,6 +393,25 @@ class InstanceActionTests(unittest.TestCase):
 
         self.assertEqual(renderer.last_items, ["..", "CURRENT GRAPH", "LOAD SET", "SAVE SET", "STARTUP"])
         self.assertEqual(renderer.last_selected_idx, 1)
+
+    def test_network_properties_use_discovered_ip_and_rnbo_port(self) -> None:
+        ui = ShadowboxUI()
+        fake_socket = mock.Mock()
+        fake_socket.getsockname.return_value = ("10.0.0.24", 54321)
+
+        with mock.patch("shadowbox.ui.socket.socket", return_value=fake_socket) as socket_ctor:
+            self.assertEqual(ui.network_ip_address, "10.0.0.24")
+
+        socket_ctor.assert_called_once()
+        fake_socket.connect.assert_called_once_with(("1.1.1.1", 80))
+        fake_socket.close.assert_called_once()
+        self.assertEqual(ui.network_osc_port, RNBO_PORT)
+
+    def test_network_ip_address_falls_back_when_probe_fails(self) -> None:
+        ui = ShadowboxUI()
+
+        with mock.patch("shadowbox.ui.socket.socket", side_effect=OSError("offline")):
+            self.assertEqual(ui.network_ip_address, "?")
 
     def test_graph_set_list_renders_published_saved_sets(self) -> None:
         ui = ShadowboxUI()

@@ -83,6 +83,7 @@ SYSTEM
 STATUS
 AUDIO
 NETWORK
+ABOUT
 MAINT
 
 Rules:
@@ -376,6 +377,7 @@ Initial system areas:
 - status
 - audio device selection
 - network status
+- about screen
 - maintenance actions
 
 Rules:

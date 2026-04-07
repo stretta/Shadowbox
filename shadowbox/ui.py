@@ -10,6 +10,7 @@ import json
 import math
 import os
 import re
+import socket
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,6 +37,7 @@ from shadowbox.editors.step16 import (
     playhead_state_key,
     toggle_step as toggle_step16,
 )
+from shadowbox.rnbo import RNBO_PORT
 
 
 STATE_PATH = Path.home() / "rnbo-ui" / "shadowbox_state.json"
@@ -1206,11 +1208,23 @@ class ShadowboxUI:
 
     @property
     def network_osc_port(self) -> int:
-        return 1234
+        return RNBO_PORT
 
     @property
     def network_ip_address(self) -> str:
-        return "?"
+        sock: socket.socket | None = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.connect(("1.1.1.1", 80))
+            return str(sock.getsockname()[0] or "?")
+        except Exception:
+            return "?"
+        finally:
+            if sock is not None:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
     @property
     def audio_options(self) -> list[str]:

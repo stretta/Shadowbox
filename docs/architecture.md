@@ -16,7 +16,7 @@ Module responsibilities:
 - Produces normalized UI events such as rotate, short press, and long press
 
 `display/`
-- OLED driver abstraction
+- Display backend abstraction for OLED and TFT hardware
 - Hides device-specific drawing and initialization details from the rest of the app
 
 `renderer.py`
