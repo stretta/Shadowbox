@@ -2,6 +2,8 @@
 
 Shadowbox is a hardware UI for RNBO Runner designed for Raspberry Pi systems running RNBO exports.
 
+https://youtu.be/zsdFlw8vSHw
+
 It provides:
 
 - Instance browsing
