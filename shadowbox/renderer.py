@@ -6,13 +6,12 @@ Hardware UI for RNBO Runner
 
 from __future__ import annotations
 
-import socket
 from typing import Any
 
 from shadowbox.editors.pitch_display import is_pitch_display_param, normalize_pitch_to_midi_note
 from shadowbox.editors.step16 import build_cells, is_step16_param
 from shadowbox.editors.ttid import get_root_names, is_pc_on, is_ttid_param, note_name
-from shadowbox.rnbo import RNBO_PORT
+from shadowbox.rnbo import RNBO_HOST
 from shadowbox.ui import (
     MenuRow,
     NAME_EDITOR_CHAR_OPTIONS,
@@ -1558,27 +1557,20 @@ class ShadowboxRenderer:
     def draw_system_audio_buffer(self, ui) -> None:
         self.draw_menu_rows(ui.buffer_size_rows, ui.state.buffer_size_cursor)
 
-    def draw_network(self) -> None:
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.connect(("1.1.1.1", 80))
-            ip = sock.getsockname()[0]
-            sock.close()
-        except Exception:
-            ip = "?"
+    def draw_network(self, ui) -> None:
         if self.is_tft:
             self._draw_info_rows(
                 [
-                    ("IP", ip),
-                    ("OSC", RNBO_PORT),
-                    ("HOST", "127.0.0.1"),
+                    ("IP", ui.network_ip_address),
+                    ("OSC", ui.network_osc_port),
+                    ("HOST", RNBO_HOST),
                 ],
                 top_padding=18 if not self.is_full_tft else 8,
             )
             return
         rows = self.content_rows
-        self.draw_value_row(rows[0], False, "ip", ip)
-        self.draw_value_row(rows[1], False, "osc", RNBO_PORT)
+        self.draw_value_row(rows[0], False, "ip", ui.network_ip_address)
+        self.draw_value_row(rows[1], False, "osc", ui.network_osc_port)
 
     def draw_name_inline_editor(self, ui) -> None:
         if self.is_tft:
@@ -1910,7 +1902,7 @@ class ShadowboxRenderer:
         elif state.ui_mode == "SYSTEM_AUDIO_BUFFER":
             self.draw_system_audio_buffer(ui)
         elif state.ui_mode == "NETWORK":
-            self.draw_network()
+            self.draw_network(ui)
         elif state.ui_mode == "ABOUT":
             self.draw_about()
         elif state.ui_mode == "BRICK_PANEL":

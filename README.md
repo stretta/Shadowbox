@@ -211,7 +211,10 @@ If necessary upgrade the runner first:
 
 ```
 sudo apt install rnbooscquery=1.4.3
+sudo apt-mark hold rnbooscquery
 ```
+
+This keeps `apt` from replacing the pinned `rnbooscquery` version during a later upgrade.
 
 Then install the panel:
 
@@ -714,24 +717,41 @@ shadowbox/
 │   ├── walkthrough.md
 │   └── wiring.md
 ├── install.sh
+├── requirements-dev.txt
 ├── requirements.txt
 ├── README.md
 ├── service/
 │   └── shadowbox.service
 ├── shadowbox/
+│   ├── __init__.py
+│   ├── brick_panel.py
 │   ├── data/
+│   ├── display/
 │   ├── editors/
-│   ├── shadowbox.py
-│   ├── ui.py
+│   ├── encoder.py
 │   ├── renderer.py
 │   ├── rnbo.py
-│   ├── encoder.py
-│   └── display/
+│   ├── shadowbox.py
+│   ├── ui.py
+│   └── version.py
+├── tests/
+│   ├── test_brick_panel.py
+│   ├── test_display_defaults.py
+│   ├── test_encoder_input.py
+│   ├── test_instance_actions.py
+│   ├── test_param_metadata.py
+│   ├── test_pitch_display.py
+│   ├── test_step16_renderer.py
+│   ├── test_tft_text.py
+│   ├── test_ttid_renderer.py
+│   └── test_version.py
 └── tools/
     ├── deploy_pi.sh
     ├── display_test.py
+    ├── encoder_display_test.py
     ├── encoder_test.py
-    └── encoder_display_test.py
+    ├── st7789_raw_test.py
+    └── st7789_test.py
 ```
 
 ---
