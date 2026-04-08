@@ -667,7 +667,57 @@ keys currently include `editor`, `unit`, `units`, `display_precision`,
 
 ---
 
-# 11. Start the service
+# 12. Update Shadowbox
+
+If Shadowbox is already installed on the Pi and you want to update it to the
+latest version from this repository, use one of these paths.
+
+Update directly on the Pi checkout:
+
+```bash
+cd ~/Shadowbox
+git pull
+source .venv/bin/activate
+pip install -r requirements.txt
+./install.sh
+```
+
+Why rerun `./install.sh` after pulling:
+
+- it refreshes system packages if new ones were added
+- it updates the Python virtual environment
+- it rewrites the systemd unit for the current checkout path and user
+- it preserves existing `/etc/default/shadowbox` settings and only updates
+  `SHADOWBOX_*` variables you exported before running it
+- it restarts the `shadowbox` service
+
+If you changed local files in the Pi checkout, `git pull` may stop with merge
+conflicts. In that case, either commit/stash those changes first or deploy a
+fresh copy from your development machine with the helper below.
+
+Update from your Mac or development machine with the deploy helper:
+
+```bash
+tools/deploy_pi.sh --alias pt4
+```
+
+Useful variants:
+
+- `tools/deploy_pi.sh --dry-run` previews the sync
+- `tools/deploy_pi.sh --sync-only` copies files without reinstalling Python
+  requirements or restarting the service
+- `tools/deploy_pi.sh --alias studio --no-install-deps` is useful when only app
+  code changed and dependencies did not
+
+After either update path, verify the service:
+
+```bash
+systemctl status shadowbox --no-pager -l
+```
+
+---
+
+# 13. Start the service
 
 ```
 sudo systemctl start shadowbox
@@ -681,7 +731,7 @@ systemctl status shadowbox
 
 ---
 
-# 12. Enable auto-start
+# 14. Enable auto-start
 
 ```
 sudo systemctl enable shadowbox
