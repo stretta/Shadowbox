@@ -544,9 +544,9 @@ SHADOWBOX_BRIGHTNESS_NORMAL=255
 SHADOWBOX_BRIGHTNESS_DIM=64
 ```
 
-Known-good PT4 config:
+Known-good Raspberry Pi config:
 
-`pt4.local`, raw ST7789 backend, `/home/pi/Shadowbox`
+`<pi-host>`, raw ST7789 backend, `/home/pi/Shadowbox`
 
 ```sh
 SHADOWBOX_DISPLAY=st7789_raw
@@ -575,20 +575,21 @@ SHADOWBOX_BRIGHTNESS_NORMAL=255
 SHADOWBOX_BRIGHTNESS_DIM=64
 ```
 
-Deploy to PT4:
+Deploy to a Pi:
 
 ```bash
-ssh pi@pt4.local "mkdir -p /home/pi/Shadowbox" && \
+PI_HOST=<pi-host>
+ssh "pi@$PI_HOST" "mkdir -p /home/pi/Shadowbox" && \
 rsync -av --delete --progress \
   --exclude '.venv' \
   --exclude '__pycache__' \
   --exclude '*.pyc' \
   --exclude '.DS_Store' \
   /Users/mdavidson/Documents/Repos/Shadowbox/ \
-  pi@pt4.local:/home/pi/Shadowbox/
+  "pi@$PI_HOST:/home/pi/Shadowbox/"
 ```
 
-Restart Shadowbox on PT4:
+Restart Shadowbox on the Pi:
 
 ```bash
 sudo systemctl restart shadowbox
@@ -698,7 +699,7 @@ fresh copy from your development machine with the helper below.
 Update from your Mac or development machine with the deploy helper:
 
 ```bash
-tools/deploy_pi.sh --alias pt4
+PI_HOST=<pi-host> tools/deploy_pi.sh
 ```
 
 Useful variants:
@@ -706,8 +707,10 @@ Useful variants:
 - `tools/deploy_pi.sh --dry-run` previews the sync
 - `tools/deploy_pi.sh --sync-only` copies files without reinstalling Python
   requirements or restarting the service
-- `tools/deploy_pi.sh --alias studio --no-install-deps` is useful when only app
-  code changed and dependencies did not
+- `PI_HOST=<pi-host> tools/deploy_pi.sh --no-install-deps` is useful when only
+  app code changed and dependencies did not
+- `tools/deploy_pi.sh --alias studio --no-install-deps` does the same thing when
+  you prefer a configured alias
 
 After either update path, verify the service:
 
@@ -750,9 +753,10 @@ It syncs the repo with `rsync`, optionally installs Python requirements in the r
 Helpful flags:
 
 ```bash
-tools/deploy_pi.sh --alias pt4
+PI_HOST=<pi-host> tools/deploy_pi.sh
 tools/deploy_pi.sh --dry-run
 tools/deploy_pi.sh --sync-only
+PI_HOST=<pi-host> tools/deploy_pi.sh --no-install-deps
 tools/deploy_pi.sh --alias studio --no-install-deps
 ```
 
