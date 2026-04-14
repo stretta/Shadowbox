@@ -63,6 +63,7 @@ NAME_EDITOR_CHAR_OPTIONS: list[tuple[str, str]] = [
     ("_", "_"),
 ] + [(char, char) for char in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"]
 NAME_INLINE_DELETE_LABEL = "DEL"
+NEW_GRAPH_SET_NAME = "New Graph"
 
 
 @dataclass
@@ -96,6 +97,7 @@ class UIState:
     routing_target_cursor: int = 0
     graph_menu_cursor: int = 0
     graph_set_cursor: int = 0
+    graph_preset_cursor: int = 0
     graph_startup_cursor: int = 0
     graph_startup_set_cursor: int = 0
     system_cursor: int = 0
@@ -432,6 +434,7 @@ class ShadowboxUI:
         self.state.routing_target_cursor = 0
         self.state.graph_menu_cursor = 1 if self.graph_menu_items else 0
         self.state.graph_set_cursor = 1 if self.available_set_names else 0
+        self.state.graph_preset_cursor = self.graph_preset_initial_cursor()
         self.state.graph_startup_cursor = 1 if self.graph_startup_menu_items else 0
         self.state.graph_startup_set_cursor = 1 if self.available_set_names else 0
         self.state.system_cursor = 1
@@ -513,6 +516,7 @@ class ShadowboxUI:
         self.state.routing_target_cursor = clamp_index(self.state.routing_target_cursor, len(self.active_routing_targets) + 2)
         self.state.graph_menu_cursor = clamp_index(self.state.graph_menu_cursor, len(self.graph_menu_items) + 1)
         self.state.graph_set_cursor = clamp_index(self.state.graph_set_cursor, len(self.available_set_names) + 1)
+        self.state.graph_preset_cursor = clamp_index(self.state.graph_preset_cursor, len(self.graph_preset_menu_items))
         self.state.graph_startup_cursor = clamp_index(self.state.graph_startup_cursor, len(self.graph_startup_menu_items) + 1)
         self.state.graph_startup_set_cursor = clamp_index(self.state.graph_startup_set_cursor, len(self.available_set_names) + 1)
 
@@ -592,11 +596,15 @@ class ShadowboxUI:
 
     @property
     def graph_menu_items(self) -> list[str]:
-        items = ["CURRENT GRAPH", "LOAD SET"]
+        items = ["CURRENT GRAPH", "LOAD GRAPH"]
+        if self.new_graph_available:
+            items.insert(1, "NEW GRAPH")
+        if self.graph_preset_menu_enabled:
+            items.append("GRAPH PRESETS")
         if self.graph_save_path:
-            items.append("SAVE SET")
+            items.append("SAVE GRAPH")
         if self.graph_rename_path and self.current_set_name != "(untitled)":
-            items.append("RENAME SET")
+            items.append("RENAME GRAPH")
         items.append("STARTUP")
         return items
 
@@ -605,6 +613,10 @@ class ShadowboxUI:
         sets = self.state.system.get("sets", {})
         names = sets.get("available_sets", []) if isinstance(sets, dict) else []
         return [str(item) for item in names if str(item)]
+
+    @property
+    def new_graph_available(self) -> bool:
+        return bool(self.graph_load_path and NEW_GRAPH_SET_NAME in self.available_set_names)
 
     @property
     def graph_set_current_indices(self) -> set[int]:
@@ -640,6 +652,90 @@ class ShadowboxUI:
         if len(rows) == 1:
             rows.append(MenuRow("no saved graphs"))
         return rows
+
+    @property
+    def set_presets(self) -> dict:
+        presets = self.state.system.get("set_presets", {})
+        return presets if isinstance(presets, dict) else {}
+
+    @property
+    def graph_preset_menu_enabled(self) -> bool:
+        return bool(self.available_graph_preset_names or self.graph_preset_action_items)
+
+    @property
+    def available_graph_preset_names(self) -> list[str]:
+        names = self.set_presets.get("available_presets", [])
+        return [str(item) for item in names if str(item)]
+
+    @property
+    def current_graph_preset_name(self) -> str:
+        return str(self.set_presets.get("loaded_name", "") or "").strip()
+
+    @property
+    def graph_preset_load_path(self) -> str:
+        return str(self.set_presets.get("load_path", "") or "")
+
+    @property
+    def graph_preset_save_path(self) -> str:
+        return str(self.set_presets.get("save_path", "") or "")
+
+    @property
+    def graph_preset_rename_path(self) -> str:
+        return str(self.set_presets.get("rename_path", "") or "")
+
+    @property
+    def graph_preset_destroy_path(self) -> str:
+        return str(self.set_presets.get("destroy_path", "") or "")
+
+    @property
+    def graph_preset_count(self) -> int:
+        count = self.set_presets.get("count", 0)
+        return int(count) if isinstance(count, int) else 0
+
+    @property
+    def graph_preset_action_items(self) -> list[str]:
+        items: list[str] = []
+        if self.graph_preset_save_path:
+            items.append("SAVE PRESET")
+        if self.graph_preset_rename_path and self.current_graph_preset_name:
+            items.append("RENAME PRESET")
+        if self.graph_preset_destroy_path and self.current_graph_preset_name:
+            items.append("DELETE PRESET")
+        return items
+
+    @property
+    def graph_preset_menu_items(self) -> list[str]:
+        return [".."] + self.graph_preset_action_items + self.available_graph_preset_names
+
+    @property
+    def graph_preset_rows(self) -> list[MenuRow]:
+        rows = [MenuRow("..")]
+        for item in self.graph_preset_action_items:
+            rows.append(MenuRow(str(item), action=True))
+        if not self.available_graph_preset_names and not self.graph_preset_action_items:
+            rows.append(MenuRow("no graph presets"))
+            return rows
+        current_indices = self.graph_preset_current_indices
+        offset = 1 + len(self.graph_preset_action_items)
+        for idx, item in enumerate(self.available_graph_preset_names):
+            rows.append(MenuRow(str(item), current=(offset + idx) in current_indices))
+        return rows
+
+    @property
+    def graph_preset_current_indices(self) -> set[int]:
+        offset = 1 + len(self.graph_preset_action_items)
+        return {
+            offset + idx
+            for idx, item in enumerate(self.available_graph_preset_names)
+            if str(item) == self.current_graph_preset_name
+        }
+
+    def graph_preset_initial_cursor(self) -> int:
+        if self.available_graph_preset_names:
+            return 1 + len(self.graph_preset_action_items)
+        if self.graph_preset_action_items:
+            return 1
+        return 0
 
     @property
     def current_set_name(self) -> str:
@@ -706,7 +802,7 @@ class ShadowboxUI:
         if self.graph_startup_auto_last_path:
             items.append("RESTORE LAST")
         if self.graph_startup_initial_path and self.available_set_names:
-            items.append("LOAD NAMED SET")
+            items.append("LOAD NAMED GRAPH")
         if self.graph_startup_auto_last_path or self.graph_startup_initial_path:
             items.append("OFF")
         return items
@@ -718,7 +814,7 @@ class ShadowboxUI:
         for idx, item in enumerate(self.graph_startup_menu_items, start=1):
             if item == "RESTORE LAST" and label == "LAST":
                 indices.add(idx)
-            elif item == "LOAD NAMED SET" and label not in {"LAST", "OFF"}:
+            elif item == "LOAD NAMED GRAPH" and label not in {"LAST", "OFF"}:
                 indices.add(idx)
             elif item == "OFF" and label == "OFF":
                 indices.add(idx)
@@ -739,11 +835,13 @@ class ShadowboxUI:
     @property
     def graph_status_value_rows(self) -> list[ValueRow]:
         rows = [
-            ValueRow("set", self.current_set_name, current=True, emphasis="italic" if self.current_set_dirty else ""),
+            ValueRow("graph", self.current_set_name, current=True, emphasis="italic" if self.current_set_dirty else ""),
             ValueRow("dirty", "YES" if self.current_set_dirty else "NO", current=self.current_set_dirty),
         ]
         if self.available_set_names or True:
-            rows.append(ValueRow("saved", len(self.available_set_names)))
+            rows.append(ValueRow("graphs", len(self.available_set_names)))
+        if self.graph_preset_menu_enabled:
+            rows.append(ValueRow("preset", self.current_graph_preset_name or "-", current=bool(self.current_graph_preset_name)))
         return rows
 
     @property
@@ -803,6 +901,16 @@ class ShadowboxUI:
         timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
         return f"{slug}-{timestamp}"
 
+    def suggested_graph_preset_save_name(self) -> str:
+        base_name = self.current_graph_preset_name or self.current_set_name
+        if base_name == "(untitled)":
+            base_name = "preset"
+        slug = re.sub(r"-{2,}", "-", re.sub(r"[^A-Za-z0-9]+", "-", base_name.strip().lower())).strip("-")
+        if not slug:
+            slug = "preset"
+        timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+        return f"{slug}-{timestamp}"
+
     def append_date_token(self, value: str, include_time: bool = False) -> str:
         token = time.strftime("%Y%m%d-%H%M%S" if include_time else "%Y%m%d", time.localtime())
         base = str(value or "").strip()
@@ -841,9 +949,13 @@ class ShadowboxUI:
     @property
     def name_editor_title(self) -> str:
         if self.state.name_editor_context == "save_set":
-            return "SAVE SET"
+            return "SAVE GRAPH"
         if self.state.name_editor_context == "rename_set":
-            return "RENAME SET"
+            return "RENAME GRAPH"
+        if self.state.name_editor_context == "save_graph_preset":
+            return "SAVE GRAPH PRESET"
+        if self.state.name_editor_context == "rename_graph_preset":
+            return "RENAME GRAPH PRESET"
         if self.state.name_editor_context == "save_preset":
             return "SAVE PRESET"
         if self.state.name_editor_context == "rename_preset":
@@ -852,7 +964,7 @@ class ShadowboxUI:
 
     @property
     def name_editor_confirm_label(self) -> str:
-        if self.state.name_editor_context in {"rename_set", "rename_preset"}:
+        if self.state.name_editor_context in {"rename_set", "rename_graph_preset", "rename_preset"}:
             return "RENAME"
         return NAME_EDITOR_SAVE
 
@@ -961,6 +1073,8 @@ class ShadowboxUI:
     def _regenerate_name_draft(self) -> None:
         if self.state.name_editor_context == "save_set":
             self.state.name_editor_draft = self.normalize_name_draft(self.suggested_set_save_name())
+        elif self.state.name_editor_context == "save_graph_preset":
+            self.state.name_editor_draft = self.normalize_name_draft(self.suggested_graph_preset_save_name())
         elif self.state.name_editor_context == "save_preset":
             self.state.name_editor_draft = self.normalize_name_draft(self.suggested_preset_save_name())
 
@@ -970,6 +1084,8 @@ class ShadowboxUI:
             return False
         if self.state.name_editor_context in {"save_set", "rename_set"}:
             return normalized in self.available_set_names and normalized != self.state.name_editor_target_name
+        if self.state.name_editor_context in {"save_graph_preset", "rename_graph_preset"}:
+            return normalized in self.available_graph_preset_names and normalized != self.state.name_editor_target_name
         if self.state.name_editor_context in {"save_preset", "rename_preset"}:
             preset_names = {str(item.get("name", "")) for item in self.active_presets if str(item.get("name", ""))}
             return normalized in preset_names and normalized != self.state.name_editor_target_name
@@ -1002,6 +1118,18 @@ class ShadowboxUI:
         elif self.state.name_editor_context == "rename_set" and self.state.name_editor_path:
             self.state.name_editor_draft = value
             self.queue_action(UIAction(kind="rename_set", path=self.state.name_editor_path, value=value))
+        elif self.state.name_editor_context == "save_graph_preset" and self.state.name_editor_path:
+            self.state.name_editor_draft = value
+            self.queue_action(UIAction(kind="save_graph_preset", path=self.state.name_editor_path, value=value))
+        elif self.state.name_editor_context == "rename_graph_preset" and self.state.name_editor_path:
+            self.state.name_editor_draft = value
+            self.queue_action(
+                UIAction(
+                    kind="rename_graph_preset",
+                    path=self.state.name_editor_path,
+                    value=[self.state.name_editor_target_name, value],
+                )
+            )
         elif self.state.name_editor_context == "save_preset" and self.state.name_editor_path:
             self.state.name_editor_draft = value
             self.queue_action(UIAction(kind="save_preset", path=self.state.name_editor_path, value=value))
@@ -1016,11 +1144,11 @@ class ShadowboxUI:
         if not value:
             self._show_name_error("ENTER NAME")
             return
-        if self.state.name_editor_context in {"save_set", "save_preset"} and self._name_exists(value):
+        if self.state.name_editor_context in {"save_set", "save_graph_preset", "save_preset"} and self._name_exists(value):
             self.state.name_editor_draft = value
             self._show_overwrite_confirm()
             return
-        if self.state.name_editor_context in {"rename_set", "rename_preset"} and self._name_exists(value):
+        if self.state.name_editor_context in {"rename_set", "rename_graph_preset", "rename_preset"} and self._name_exists(value):
             self.state.name_editor_draft = value
             self._show_name_error("NAME EXISTS")
             return
@@ -1137,6 +1265,13 @@ class ShadowboxUI:
         if idx >= 0 and idx < len(self.active_presets):
             return self.active_presets[idx]
         return None
+
+    @property
+    def selected_graph_preset_name(self) -> str:
+        idx = self.state.graph_preset_cursor - 1 - len(self.graph_preset_action_items)
+        if 0 <= idx < len(self.available_graph_preset_names):
+            return str(self.available_graph_preset_names[idx])
+        return ""
 
     @property
     def current_preset_name(self) -> str:
@@ -1538,6 +1673,8 @@ class ShadowboxUI:
             self.state.graph_menu_cursor = self._cycle(self.state.graph_menu_cursor, len(self.graph_menu_items) + 1, step)
         elif self.state.ui_mode == "GRAPH_SET_LIST":
             self.state.graph_set_cursor = self._cycle(self.state.graph_set_cursor, len(self.available_set_names) + 1, step)
+        elif self.state.ui_mode == "GRAPH_PRESET_LIST":
+            self.state.graph_preset_cursor = self._cycle(self.state.graph_preset_cursor, len(self.graph_preset_menu_items), step)
         elif self.state.ui_mode == "GRAPH_STARTUP":
             self.state.graph_startup_cursor = self._cycle(self.state.graph_startup_cursor, len(self.graph_startup_menu_items) + 1, step)
         elif self.state.ui_mode == "GRAPH_STARTUP_SET_LIST":
@@ -1663,17 +1800,28 @@ class ShadowboxUI:
                 choice = self.graph_menu_items[self.state.graph_menu_cursor - 1]
                 if choice == "CURRENT GRAPH":
                     self.state.ui_mode = "GRAPH_STATUS"
-                elif choice == "LOAD SET":
+                elif choice == "NEW GRAPH" and self.new_graph_available:
+                    self.queue_action(
+                        UIAction(
+                            kind="load_set",
+                            path=self.graph_load_path,
+                            value=NEW_GRAPH_SET_NAME,
+                        )
+                    )
+                elif choice == "LOAD GRAPH":
                     self.state.ui_mode = "GRAPH_SET_LIST"
                     self.state.graph_set_cursor = 1 if self.available_set_names else 0
-                elif choice == "SAVE SET" and self.graph_save_path:
+                elif choice == "GRAPH PRESETS":
+                    self.state.ui_mode = "GRAPH_PRESET_LIST"
+                    self.state.graph_preset_cursor = self.graph_preset_initial_cursor()
+                elif choice == "SAVE GRAPH" and self.graph_save_path:
                     self._begin_name_editor(
                         context="save_set",
                         path=self.graph_save_path,
                         initial_draft=self.suggested_set_save_name(),
                         return_mode="GRAPH_MENU",
                     )
-                elif choice == "RENAME SET" and self.graph_rename_path:
+                elif choice == "RENAME GRAPH" and self.graph_rename_path:
                     self._begin_rename_name_editor(
                         context="rename_set",
                         path=self.graph_rename_path,
@@ -1698,12 +1846,52 @@ class ShadowboxUI:
                         )
                     )
 
+        elif self.state.ui_mode == "GRAPH_PRESET_LIST":
+            if self.state.graph_preset_cursor == 0:
+                self.state.ui_mode = "GRAPH_MENU"
+            else:
+                action_idx = self.state.graph_preset_cursor - 1
+                if 0 <= action_idx < len(self.graph_preset_action_items):
+                    choice = self.graph_preset_action_items[action_idx]
+                    if choice == "SAVE PRESET" and self.graph_preset_save_path:
+                        self._begin_name_editor(
+                            context="save_graph_preset",
+                            path=self.graph_preset_save_path,
+                            initial_draft=self.suggested_graph_preset_save_name(),
+                            return_mode="GRAPH_PRESET_LIST",
+                        )
+                    elif choice == "RENAME PRESET" and self.graph_preset_rename_path and self.current_graph_preset_name:
+                        self._begin_rename_name_editor(
+                            context="rename_graph_preset",
+                            path=self.graph_preset_rename_path,
+                            current_name=self.current_graph_preset_name,
+                            return_mode="GRAPH_PRESET_LIST",
+                        )
+                    elif choice == "DELETE PRESET" and self.graph_preset_destroy_path and self.current_graph_preset_name:
+                        self.queue_action(
+                            UIAction(
+                                kind="delete_graph_preset",
+                                path=self.graph_preset_destroy_path,
+                                value=self.current_graph_preset_name,
+                            )
+                        )
+                elif self.graph_preset_load_path:
+                    preset_name = self.selected_graph_preset_name
+                    if preset_name:
+                        self.queue_action(
+                            UIAction(
+                                kind="load_graph_preset",
+                                path=self.graph_preset_load_path,
+                                value=preset_name,
+                            )
+                        )
+
         elif self.state.ui_mode == "GRAPH_STARTUP":
             if self.state.graph_startup_cursor == 0:
                 self.state.ui_mode = "GRAPH_MENU"
             else:
                 choice = self.graph_startup_menu_items[self.state.graph_startup_cursor - 1]
-                if choice == "LOAD NAMED SET":
+                if choice == "LOAD NAMED GRAPH":
                     self.state.ui_mode = "GRAPH_STARTUP_SET_LIST"
                     self.state.graph_startup_set_cursor = 1 if self.available_set_names else 0
                 elif choice == "RESTORE LAST":
@@ -2120,7 +2308,7 @@ class ShadowboxUI:
             self._cancel_name_editor()
         elif self.state.ui_mode in ("GRAPH_STATUS", "GRAPH_STARTUP"):
             self.state.ui_mode = "GRAPH_MENU"
-        elif self.state.ui_mode == "GRAPH_SET_LIST":
+        elif self.state.ui_mode in {"GRAPH_SET_LIST", "GRAPH_PRESET_LIST"}:
             self.state.ui_mode = "GRAPH_MENU"
         elif self.state.ui_mode == "GRAPH_MENU":
             self.state.ui_mode = "TOP"

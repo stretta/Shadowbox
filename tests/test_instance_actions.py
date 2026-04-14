@@ -144,6 +144,24 @@ class InstanceActionTests(unittest.TestCase):
             system={},
         )
 
+    def _snapshot_with_graph_preset_capabilities(self) -> RNBOSnapshot:
+        snapshot = self._snapshot_with_sets()
+        snapshot.system["set_presets"] = {
+            "save_path": "/rnbo/inst/control/sets/presets/save",
+            "load_path": "/rnbo/inst/control/sets/presets/load",
+            "rename_path": "/rnbo/inst/control/sets/presets/rename",
+            "destroy_path": "/rnbo/inst/control/sets/presets/destroy",
+            "loaded_name": "linke synce",
+            "count": 2,
+            "available_presets": ["Unipolar Positive", "linke synce"],
+        }
+        return snapshot
+
+    def _snapshot_with_new_graph_set(self) -> RNBOSnapshot:
+        snapshot = self._snapshot_with_sets()
+        snapshot.system["sets"]["available_sets"] = ["New Graph", "StudioA", "StudioB"]
+        return snapshot
+
     def _apply_empty_snapshot(self) -> ShadowboxUI:
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(
@@ -391,8 +409,19 @@ class InstanceActionTests(unittest.TestCase):
         renderer = _CaptureRenderer()
         renderer.draw(ui)
 
-        self.assertEqual(renderer.last_items, ["..", "CURRENT GRAPH", "LOAD SET", "SAVE SET", "STARTUP"])
+        self.assertEqual(renderer.last_items, ["..", "CURRENT GRAPH", "LOAD GRAPH", "SAVE GRAPH", "STARTUP"])
         self.assertEqual(renderer.last_selected_idx, 1)
+
+    def test_graph_menu_shows_new_graph_when_published_as_loadable_set(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_new_graph_set())
+        ui.state.ui_mode = "GRAPH_MENU"
+        ui.state.graph_menu_cursor = 1
+
+        renderer = _CaptureRenderer()
+        renderer.draw(ui)
+
+        self.assertEqual(renderer.last_items, ["..", "CURRENT GRAPH", "NEW GRAPH", "LOAD GRAPH", "SAVE GRAPH", "STARTUP"])
 
     def test_network_properties_use_discovered_ip_and_rnbo_port(self) -> None:
         ui = ShadowboxUI()
@@ -436,7 +465,18 @@ class InstanceActionTests(unittest.TestCase):
         renderer = _CaptureRenderer()
         renderer.draw(ui)
 
-        self.assertEqual(renderer.last_items, ["..", "CURRENT GRAPH", "LOAD SET", "SAVE SET", "RENAME SET", "STARTUP"])
+        self.assertEqual(renderer.last_items, ["..", "CURRENT GRAPH", "LOAD GRAPH", "SAVE GRAPH", "RENAME GRAPH", "STARTUP"])
+
+    def test_graph_menu_shows_presets_when_published(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_graph_preset_capabilities())
+        ui.state.ui_mode = "GRAPH_MENU"
+        ui.state.graph_menu_cursor = 1
+
+        renderer = _CaptureRenderer()
+        renderer.draw(ui)
+
+        self.assertEqual(renderer.last_items, ["..", "CURRENT GRAPH", "LOAD GRAPH", "GRAPH PRESETS", "SAVE GRAPH", "STARTUP"])
 
     def test_graph_status_marks_current_set_and_dirty_state_in_value_rows(self) -> None:
         ui = ShadowboxUI()
@@ -446,9 +486,17 @@ class InstanceActionTests(unittest.TestCase):
         renderer = _CaptureRenderer()
         renderer.draw(ui)
 
-        self.assertEqual(renderer.last_value_rows, [("set", "StudioA"), ("dirty", "YES"), ("saved", 2)])
+        self.assertEqual(renderer.last_value_rows, [("graph", "StudioA"), ("dirty", "YES"), ("graphs", 2)])
         self.assertEqual(renderer.last_current_indices, {1, 2})
         self.assertEqual(renderer.last_value_weights, ["italic", None, None])
+
+    def test_graph_status_shows_loaded_graph_preset_when_published(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_graph_preset_capabilities())
+        self.assertEqual(
+            [(row.label, row.value, row.current) for row in ui.graph_status_value_rows],
+            [("graph", "StudioA", True), ("dirty", "YES", True), ("graphs", 2, False), ("preset", "linke synce", True)],
+        )
 
     def test_graph_set_selection_queues_load_set_action(self) -> None:
         ui = ShadowboxUI()
@@ -463,6 +511,20 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(actions[0].kind, "load_set")
         self.assertEqual(actions[0].path, "/rnbo/inst/control/sets/load")
         self.assertEqual(actions[0].value, "StudioB")
+
+    def test_new_graph_action_queues_load_new_graph_set(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_new_graph_set())
+        ui.state.ui_mode = "GRAPH_MENU"
+        ui.state.graph_menu_cursor = 2
+
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+
+        actions = [action for action in ui.pop_actions() if action.kind != "save_state"]
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0].kind, "load_set")
+        self.assertEqual(actions[0].path, "/rnbo/inst/control/sets/load")
+        self.assertEqual(actions[0].value, "New Graph")
 
     def test_graph_save_set_opens_name_editor_with_generated_name(self) -> None:
         ui = ShadowboxUI()
@@ -480,6 +542,89 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(ui.state.name_editor_path, "/rnbo/inst/control/sets/save")
         self.assertEqual(ui.state.name_editor_draft, "studioa-20260401-120000")
         self.assertEqual(ui.state.name_editor_cursor, 1)
+
+    def test_graph_preset_list_shows_actions_and_current_selection(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_graph_preset_capabilities())
+        ui.state.ui_mode = "GRAPH_PRESET_LIST"
+        ui.state.graph_preset_cursor = ui.graph_preset_initial_cursor()
+
+        renderer = _CaptureRenderer()
+        renderer.draw(ui)
+
+        self.assertEqual(
+            renderer.last_items,
+            ["..", "SAVE PRESET", "RENAME PRESET", "DELETE PRESET", "Unipolar Positive", "linke synce"],
+        )
+        self.assertEqual(renderer.last_current_indices, {5})
+        self.assertEqual(renderer.last_selected_idx, 4)
+
+    def test_graph_preset_selection_queues_load_action(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_graph_preset_capabilities())
+        ui.state.ui_mode = "GRAPH_PRESET_LIST"
+        ui.state.graph_preset_cursor = 4
+
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+
+        actions = [action for action in ui.pop_actions() if action.kind != "save_state"]
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0].kind, "load_graph_preset")
+        self.assertEqual(actions[0].path, "/rnbo/inst/control/sets/presets/load")
+        self.assertEqual(actions[0].value, "Unipolar Positive")
+
+    def test_save_graph_preset_action_opens_name_editor(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_graph_preset_capabilities())
+        ui.state.ui_mode = "GRAPH_PRESET_LIST"
+        ui.state.graph_preset_cursor = 1
+
+        with mock.patch("shadowbox.ui.time.strftime", return_value="20260404-111500"):
+            ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+
+        actions = [action for action in ui.pop_actions() if action.kind != "save_state"]
+        self.assertEqual(actions, [])
+        self.assertEqual(ui.state.ui_mode, "NAME_EDITOR")
+        self.assertEqual(ui.state.name_editor_context, "save_graph_preset")
+        self.assertEqual(ui.state.name_editor_path, "/rnbo/inst/control/sets/presets/save")
+        self.assertEqual(ui.state.name_editor_draft, "linke-synce-20260404-111")
+
+    def test_rename_graph_preset_action_opens_name_editor_and_submits_pair(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_graph_preset_capabilities())
+        ui.state.ui_mode = "GRAPH_PRESET_LIST"
+        ui.state.graph_preset_cursor = 2
+
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+
+        self.assertEqual(ui.state.ui_mode, "NAME_EDITOR")
+        self.assertEqual(ui.state.name_editor_context, "rename_graph_preset")
+        self.assertEqual(ui.state.name_editor_draft, "linke synce")
+        self.assertEqual(ui.state.name_editor_target_name, "linke synce")
+
+        ui.state.name_editor_draft = "linke synce 2"
+        ui.state.name_editor_cursor = 1
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+
+        actions = [action for action in ui.pop_actions() if action.kind != "save_state"]
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0].kind, "rename_graph_preset")
+        self.assertEqual(actions[0].path, "/rnbo/inst/control/sets/presets/rename")
+        self.assertEqual(actions[0].value, ["linke synce", "linke synce 2"])
+
+    def test_delete_graph_preset_action_queues_delete(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_graph_preset_capabilities())
+        ui.state.ui_mode = "GRAPH_PRESET_LIST"
+        ui.state.graph_preset_cursor = 3
+
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+
+        actions = [action for action in ui.pop_actions() if action.kind != "save_state"]
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0].kind, "delete_graph_preset")
+        self.assertEqual(actions[0].path, "/rnbo/inst/control/sets/presets/destroy")
+        self.assertEqual(actions[0].value, "linke synce")
 
     def test_name_editor_generate_name_replaces_draft(self) -> None:
         ui = ShadowboxUI()
@@ -585,7 +730,7 @@ class InstanceActionTests(unittest.TestCase):
         renderer = _CaptureRenderer()
         renderer.draw(ui)
 
-        self.assertEqual(renderer.last_header, "SAVE SET")
+        self.assertEqual(renderer.last_header, "SAVE GRAPH")
         self.assertEqual(
             renderer.last_items,
             [
@@ -680,7 +825,7 @@ class InstanceActionTests(unittest.TestCase):
 
         renderer = _CaptureRenderer()
         renderer.draw(ui)
-        self.assertEqual(renderer.last_header, "RENAME SET")
+        self.assertEqual(renderer.last_header, "RENAME GRAPH")
         self.assertEqual(renderer.last_items[1], "RENAME")
 
         ui.handle_event(type("Evt", (), {"kind": "short_press"})())
@@ -800,7 +945,7 @@ class InstanceActionTests(unittest.TestCase):
         renderer = _CaptureRenderer()
         renderer.draw(ui)
 
-        self.assertEqual(renderer.last_items, ["..", "RESTORE LAST", "LOAD NAMED SET", "OFF"])
+        self.assertEqual(renderer.last_items, ["..", "RESTORE LAST", "LOAD NAMED GRAPH", "OFF"])
         self.assertEqual(renderer.last_current_indices, {1})
 
     def test_graph_startup_value_rows_mark_current_startup_state(self) -> None:

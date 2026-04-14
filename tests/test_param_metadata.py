@@ -12,7 +12,7 @@ sys.modules.setdefault("pythonosc", pythonosc_module)
 sys.modules.setdefault("pythonosc.udp_client", udp_client_module)
 
 from shadowbox.renderer import ShadowboxRenderer, format_param_value, routing_port_display_name
-from shadowbox.rnbo import discover_instances, discover_sets, discover_system, extract_meta_info
+from shadowbox.rnbo import discover_instances, discover_set_presets, discover_sets, discover_system, extract_meta_info
 from shadowbox.ui import ShadowboxUI, apply_edit_delta, edit_as_int, is_boolish, normalize_current_value_for_edit, numeric_step
 
 
@@ -231,7 +231,51 @@ class ParamMetadataTests(unittest.TestCase):
         self.assertEqual(instances[0]["routing"]["audio"]["inputs"][0]["name"], "in1")
         self.assertEqual(instances[0]["routing"]["audio"]["inputs"][0]["display_name"], "Main Input")
         self.assertEqual(instances[0]["routing"]["audio"]["outputs"][0]["display_name"], "Main Output")
-        self.assertEqual(routing_port_display_name(instances[0]["routing"]["audio"]["inputs"][0]), "Main Input")
+
+    def test_discover_set_presets_reads_published_graph_preset_branch(self) -> None:
+        tree = {
+            "CONTENTS": {
+                "rnbo": {
+                    "CONTENTS": {
+                        "inst": {
+                            "CONTENTS": {
+                                "control": {
+                                    "CONTENTS": {
+                                        "sets": {
+                                            "CONTENTS": {
+                                                "presets": {
+                                                    "CONTENTS": {
+                                                        "save": {"FULL_PATH": "/rnbo/inst/control/sets/presets/save"},
+                                                        "load": {
+                                                            "FULL_PATH": "/rnbo/inst/control/sets/presets/load",
+                                                            "RANGE": [{"VALS": ["Unipolar Positive", "linke synce"]}],
+                                                        },
+                                                        "loaded": {"VALUE": "linke synce"},
+                                                        "count": {"VALUE": 2},
+                                                        "destroy": {"FULL_PATH": "/rnbo/inst/control/sets/presets/destroy"},
+                                                        "rename": {"FULL_PATH": "/rnbo/inst/control/sets/presets/rename"},
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        presets = discover_set_presets(tree)
+
+        self.assertEqual(presets["save_path"], "/rnbo/inst/control/sets/presets/save")
+        self.assertEqual(presets["load_path"], "/rnbo/inst/control/sets/presets/load")
+        self.assertEqual(presets["rename_path"], "/rnbo/inst/control/sets/presets/rename")
+        self.assertEqual(presets["destroy_path"], "/rnbo/inst/control/sets/presets/destroy")
+        self.assertEqual(presets["loaded_name"], "linke synce")
+        self.assertEqual(presets["count"], 2)
+        self.assertEqual(presets["available_presets"], ["Unipolar Positive", "linke synce"])
 
     def test_discover_sets_reads_published_set_capabilities(self) -> None:
         tree = {

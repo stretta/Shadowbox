@@ -71,6 +71,7 @@ https://www.adafruit.com/product/4484
 - Display dim/sleep management
 - Encoder navigation
 - RNBO OSCQuery integration
+- `NEW GRAPH` support when implemented as loading a published set named `New Graph`
 - Graph set load/save from published Runner capabilities
 - Graph startup configuration through published Runner controls
 - System status display
@@ -81,6 +82,7 @@ https://www.adafruit.com/product/4484
 Shadowbox treats the published live OSCQuery runtime tree as the source of truth.
 It does not maintain its own graph model or restore graph/session state from local persistence.
 Graph load/save/startup behavior is executed only through Runner-published set and startup controls.
+A curated `NEW GRAPH` action is acceptable when it maps directly to the published set load path using a verified set named `New Graph`.
 
 ---
 

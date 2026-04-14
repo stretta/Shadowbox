@@ -453,6 +453,47 @@ def discover_sets(tree: dict) -> dict:
     }
 
 
+def discover_set_presets(tree: dict) -> dict:
+    presets_root = safe_get(
+        tree,
+        ["CONTENTS", "rnbo", "CONTENTS", "inst", "CONTENTS", "control", "CONTENTS", "sets", "CONTENTS", "presets", "CONTENTS"],
+        {},
+    )
+    if not isinstance(presets_root, dict):
+        return {
+            "save_path": "",
+            "load_path": "",
+            "rename_path": "",
+            "destroy_path": "",
+            "loaded_name": "",
+            "count": 0,
+            "available_presets": [],
+        }
+
+    load_node = safe_get(presets_root, ["load"], {})
+    available_presets = extract_range_info(load_node).get("vals") or []
+    if not isinstance(available_presets, list):
+        available_presets = []
+
+    count = safe_get(presets_root, ["count", "VALUE"], 0)
+    if isinstance(count, bool):
+        count = 0
+    try:
+        count = int(count)
+    except (TypeError, ValueError):
+        count = 0
+
+    return {
+        "save_path": str(safe_get(presets_root, ["save", "FULL_PATH"], "") or ""),
+        "load_path": str(safe_get(load_node, ["FULL_PATH"], "") or ""),
+        "rename_path": str(safe_get(presets_root, ["rename", "FULL_PATH"], "") or ""),
+        "destroy_path": str(safe_get(presets_root, ["destroy", "FULL_PATH"], "") or ""),
+        "loaded_name": str(safe_get(presets_root, ["loaded", "VALUE"], "") or ""),
+        "count": max(0, count),
+        "available_presets": [str(item) for item in available_presets if str(item)],
+    }
+
+
 def discover_instances(tree: dict) -> list[dict]:
     inst_root = safe_get(tree, ["CONTENTS", "rnbo", "CONTENTS", "inst", "CONTENTS"], {})
     system_ports = _system_ports(tree)
@@ -558,6 +599,7 @@ def discover_system(tree: dict) -> dict:
         "",
     )
     sets = discover_sets(tree)
+    set_presets = discover_set_presets(tree)
 
     return {
         "audio": {
@@ -582,6 +624,7 @@ def discover_system(tree: dict) -> dict:
         },
         "set_name": sets.get("current_name", ""),
         "sets": sets,
+        "set_presets": set_presets,
         "maint": {
             "jack_restart_path": str(jack_restart_path) if jack_restart_path is not None else "",
         },
@@ -668,6 +711,7 @@ class RNBOClient:
                     "sets": {
                         "current_name": "",
                         "dirty": False,
+                        "rename_path": "",
                         "save_path": "",
                         "load_path": "",
                         "reload_path": "",
@@ -676,6 +720,15 @@ class RNBOClient:
                         "available_sets": [],
                         "auto_start_last_path": "",
                         "auto_start_last": None,
+                    },
+                    "set_presets": {
+                        "save_path": "",
+                        "load_path": "",
+                        "rename_path": "",
+                        "destroy_path": "",
+                        "loaded_name": "",
+                        "count": 0,
+                        "available_presets": [],
                     },
                     "maint": {
                         "jack_restart_path": "",

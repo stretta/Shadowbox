@@ -1804,9 +1804,9 @@ class ShadowboxRenderer:
             "TOP": "SHADOWBOX",
             "GRAPH_MENU": "GRAPHS",
             "GRAPH_STATUS": "CURRENT GRAPH",
-            "GRAPH_SET_LIST": "LOAD SET",
+            "GRAPH_SET_LIST": "LOAD GRAPH",
             "GRAPH_STARTUP": "STARTUP",
-            "GRAPH_STARTUP_SET_LIST": "STARTUP SET",
+            "GRAPH_STARTUP_SET_LIST": "STARTUP GRAPH",
             "NAME_EDITOR": ui.name_editor_title,
             "NAME_OVERWRITE_CONFIRM": "OVERWRITE?",
             "NAME_ERROR": ui.name_error_title,
@@ -1832,6 +1832,7 @@ class ShadowboxRenderer:
             "ABOUT": "ABOUT",
             "BRICK_PANEL": "BRICK PANEL",
             "MAINT": "MAINT",
+            "GRAPH_PRESET_LIST": "GRAPH PRESETS",
         }.get(state.ui_mode, state.ui_mode)
         if state.ui_mode == "EDIT":
             header = self.edit_header_title(ui.selected_param)
@@ -1850,6 +1851,8 @@ class ShadowboxRenderer:
             self.draw_graph_status(ui)
         elif state.ui_mode == "GRAPH_SET_LIST":
             self.draw_menu_rows(ui.graph_set_rows, state.graph_set_cursor)
+        elif state.ui_mode == "GRAPH_PRESET_LIST":
+            self.draw_menu_rows(ui.graph_preset_rows, state.graph_preset_cursor)
         elif state.ui_mode == "GRAPH_STARTUP":
             self.draw_menu_rows(ui.graph_startup_rows, state.graph_startup_cursor)
         elif state.ui_mode == "GRAPH_STARTUP_SET_LIST":

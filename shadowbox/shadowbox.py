@@ -475,6 +475,46 @@ def main():
                         ui.state.graph_menu_cursor = 1
                         ui.set_busy(False)
 
+                elif action.kind == "load_graph_preset":
+                    if action.path is not None:
+                        ui.set_busy(True, "load")
+                        rnbo.send_value(action.path, action.value)
+                        sleep(0.2)
+                        ui.apply_runner_snapshot(rnbo.discover())
+                        ui.state.ui_mode = "GRAPH_PRESET_LIST"
+                        ui.state.graph_preset_cursor = ui.graph_preset_initial_cursor()
+                        ui.set_busy(False)
+
+                elif action.kind == "save_graph_preset":
+                    if action.path is not None:
+                        ui.set_busy(True, "save")
+                        rnbo.send_value(action.path, action.value)
+                        sleep(0.2)
+                        ui.apply_runner_snapshot(rnbo.discover())
+                        ui.state.ui_mode = "GRAPH_PRESET_LIST"
+                        ui.state.graph_preset_cursor = ui.graph_preset_initial_cursor()
+                        ui.set_busy(False)
+
+                elif action.kind == "rename_graph_preset":
+                    if action.path is not None:
+                        ui.set_busy(True, "rename")
+                        rnbo.send_value(action.path, action.value)
+                        sleep(0.2)
+                        ui.apply_runner_snapshot(rnbo.discover())
+                        ui.state.ui_mode = "GRAPH_PRESET_LIST"
+                        ui.state.graph_preset_cursor = ui.graph_preset_initial_cursor()
+                        ui.set_busy(False)
+
+                elif action.kind == "delete_graph_preset":
+                    if action.path is not None:
+                        ui.set_busy(True, "delete")
+                        rnbo.send_value(action.path, action.value)
+                        sleep(0.2)
+                        ui.apply_runner_snapshot(rnbo.discover())
+                        ui.state.ui_mode = "GRAPH_PRESET_LIST"
+                        ui.state.graph_preset_cursor = ui.graph_preset_initial_cursor()
+                        ui.set_busy(False)
+
                 elif action.kind == "save_set":
                     if action.path is not None:
                         ui.set_busy(True, "save")
