@@ -228,6 +228,32 @@ class InstanceActionTests(unittest.TestCase):
             system={},
         )
 
+    def _snapshot_with_many_routing_instances(self, count: int = 8) -> RNBOSnapshot:
+        instances = []
+        for idx in range(1, count + 1):
+            instances.append(
+                {
+                    "id": str(idx),
+                    "label": f"Inst {idx}",
+                    "params": [],
+                    "presets": [],
+                    "routing": {
+                        "audio": {
+                            "inputs": [{"connections": [f"system:capture_{idx}"]}],
+                            "outputs": [{"connections": [f"system:playback_{idx}"]}],
+                        },
+                        "midi": {"inputs": [], "outputs": []},
+                    },
+                }
+            )
+        return RNBOSnapshot(
+            instances=instances,
+            patchers=[],
+            add_instance_path="",
+            remove_instance_path="",
+            system={},
+        )
+
     def test_empty_install_keeps_instance_actions_available(self) -> None:
         ui = self._apply_empty_snapshot()
 
@@ -530,6 +556,19 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(ui.state.ui_mode, "AUDIO_ROUTING_OVERVIEW")
         self.assertEqual(ui.state.active_transport, "audio")
         self.assertEqual(ui.state.routing_overview_cursor, 2)
+
+    def test_overview_rotation_reaches_eighth_item_without_wrapping(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_many_routing_instances(8))
+        ui.state.active_transport = "audio"
+        ui.state.ui_mode = "AUDIO_ROUTING_OVERVIEW"
+        ui.state.routing_overview_cursor = 7
+        ui.state.active_instance_id = "7"
+
+        ui.handle_event(type("Evt", (), {"kind": "rotate", "delta": 1})())
+
+        self.assertEqual(ui.state.routing_overview_cursor, 8)
+        self.assertEqual(ui.state.active_instance_id, "8")
 
     def test_overview_press_opens_selected_instance_menu(self) -> None:
         ui = ShadowboxUI()

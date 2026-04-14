@@ -1633,6 +1633,12 @@ class ShadowboxUI:
             return 0
         return (current + delta) % count
 
+    def _cycle_one_based(self, current: int, count: int, delta: int) -> int:
+        if count <= 0:
+            return 0
+        base = current - 1 if current > 0 else 0
+        return ((base + delta) % count) + 1
+
     def _begin_ttid_edit(self, param: dict) -> None:
         self.state.edit_value = normalize_ttid(param.get("value", 0))
         self.state.edit_ttid_mode = "keyboard"
@@ -1823,7 +1829,11 @@ class ShadowboxUI:
         elif self.state.ui_mode == "ROUTING_TARGETS":
             self.state.routing_target_cursor = self._cycle(self.state.routing_target_cursor, len(self.active_routing_targets) + 2, step)
         elif self.state.ui_mode in {"AUDIO_ROUTING_OVERVIEW", "MIDI_ROUTING_OVERVIEW"}:
-            self.state.routing_overview_cursor = self._cycle(self.state.routing_overview_cursor, len(self.routing_overview_rows), step)
+            self.state.routing_overview_cursor = self._cycle_one_based(
+                self.state.routing_overview_cursor,
+                len(self.routing_overview_rows),
+                step,
+            )
             selected = self.selected_routing_overview_instance
             if selected is not None:
                 self.state.active_instance_id = str(selected.get("id", ""))
