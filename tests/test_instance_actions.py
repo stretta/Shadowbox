@@ -55,6 +55,7 @@ class _CaptureRenderer(ShadowboxRenderer):
         self.last_value_rows: list[tuple[str, object]] | None = None
         self.last_value_weights: list[str | None] | None = None
         self.last_header: str | None = None
+        self.last_selectable_value_rows: list[tuple[str, object, bool]] | None = None
 
     def draw_header(self, title: str, busy: bool = False, ticks: int = 0) -> None:
         self.last_header = title
@@ -91,6 +92,10 @@ class _CaptureRenderer(ShadowboxRenderer):
             current_indices = self.last_current_indices or set()
             current_indices.add(len(self.last_value_rows))
             self.last_current_indices = current_indices
+
+    def draw_selectable_value_rows(self, rows, selected_idx: int) -> None:
+        self.last_selectable_value_rows = [(row.label, row.value, row.current) for row in rows]
+        self.last_selected_idx = selected_idx
 
 
 class InstanceActionTests(unittest.TestCase):
@@ -174,6 +179,54 @@ class InstanceActionTests(unittest.TestCase):
             )
         )
         return ui
+
+    def _snapshot_with_routing_overview(self) -> RNBOSnapshot:
+        return RNBOSnapshot(
+            instances=[
+                {
+                    "id": "1",
+                    "label": "Synth A",
+                    "params": [],
+                    "presets": [],
+                    "routing": {
+                        "audio": {
+                            "inputs": [
+                                {"connections": ["system:capture_1"]},
+                                {"connections": ["system:capture_2"]},
+                            ],
+                            "outputs": [
+                                {"connections": ["system:playback_1"]},
+                                {"connections": ["system:playback_2"]},
+                            ],
+                        },
+                        "midi": {
+                            "inputs": [{"connections": ["system:midi_from_keys"]}],
+                            "outputs": [{"connections": ["system:midi_to_synth"]}],
+                        },
+                    },
+                },
+                {
+                    "id": "2",
+                    "label": "Looper",
+                    "params": [],
+                    "presets": [],
+                    "routing": {
+                        "audio": {
+                            "inputs": [{"connections": ["system:capture_3"]}],
+                            "outputs": [],
+                        },
+                        "midi": {
+                            "inputs": [],
+                            "outputs": [],
+                        },
+                    },
+                },
+            ],
+            patchers=[],
+            add_instance_path="",
+            remove_instance_path="",
+            system={},
+        )
 
     def test_empty_install_keeps_instance_actions_available(self) -> None:
         ui = self._apply_empty_snapshot()
@@ -390,6 +443,116 @@ class InstanceActionTests(unittest.TestCase):
         renderer.draw(ui)
         self.assertEqual(renderer.last_header, "Main Input")
 
+    def test_instance_menu_does_not_show_graph_level_overview_entries(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_routing_overview())
+        ui.state.active_instance_id = "1"
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+
+        renderer = _CaptureRenderer()
+        renderer.draw(ui)
+
+        self.assertEqual(
+            renderer.last_items,
+            ["..", "PARAMETERS", "PRESETS", "AUDIO", "MIDI"],
+        )
+
+    def test_audio_overview_rows_summarize_instance_routing(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_routing_overview())
+        ui.state.active_instance_id = "1"
+        ui.state.active_transport = "audio"
+
+        self.assertEqual(
+            [(row.label, row.value, row.current) for row in ui.routing_overview_rows],
+            [
+                ("Synth A", "I:C1-2 O:P1-2", True),
+                ("Looper", "I:C3 O:-", False),
+            ],
+        )
+
+    def test_midi_overview_rows_summarize_instance_routing(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_routing_overview())
+        ui.state.active_instance_id = "1"
+        ui.state.active_transport = "midi"
+
+        self.assertEqual(
+            [(row.label, row.value, row.current) for row in ui.routing_overview_rows],
+            [
+                ("Synth A", "I:midi_from_keys O:midi_to_synth", True),
+                ("Looper", "I:- O:-", False),
+            ],
+        )
+
+    def test_audio_overview_renders_as_selectable_value_rows(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_routing_overview())
+        ui.state.active_transport = "audio"
+        ui.state.ui_mode = "AUDIO_ROUTING_OVERVIEW"
+        ui.state.routing_overview_cursor = 2
+
+        renderer = _CaptureRenderer()
+        renderer.draw(ui)
+
+        self.assertEqual(renderer.last_header, "AUDIO I/O")
+        self.assertEqual(
+            renderer.last_selectable_value_rows,
+            [
+                ("Synth A", "I:C1-2 O:P1-2", True),
+                ("Looper", "I:C3 O:-", False),
+            ],
+        )
+        self.assertEqual(renderer.last_selected_idx, 2)
+
+    def test_graph_menu_shows_audio_and_midi_overview_entries(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_routing_overview())
+        ui.state.ui_mode = "GRAPH_MENU"
+        ui.state.graph_menu_cursor = 1
+
+        renderer = _CaptureRenderer()
+        renderer.draw(ui)
+
+        self.assertIn("AUDIO OVERVIEW", renderer.last_items or [])
+        self.assertIn("MIDI OVERVIEW", renderer.last_items or [])
+
+    def test_graph_menu_audio_overview_selects_active_instance_row(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_routing_overview())
+        ui.state.active_instance_id = "2"
+        ui.state.ui_mode = "GRAPH_MENU"
+        ui.state.graph_menu_cursor = ui.graph_menu_items.index("AUDIO OVERVIEW") + 1
+
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+
+        self.assertEqual(ui.state.ui_mode, "AUDIO_ROUTING_OVERVIEW")
+        self.assertEqual(ui.state.active_transport, "audio")
+        self.assertEqual(ui.state.routing_overview_cursor, 2)
+
+    def test_overview_press_opens_selected_instance_menu(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_routing_overview())
+        ui.state.active_transport = "audio"
+        ui.state.ui_mode = "AUDIO_ROUTING_OVERVIEW"
+        ui.state.routing_overview_cursor = 2
+
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+
+        self.assertEqual(ui.state.active_instance_id, "2")
+        self.assertEqual(ui.state.ui_mode, "INSTANCE_MENU")
+        self.assertEqual(ui.state.instance_menu_cursor, 1)
+
+    def test_overview_long_press_returns_to_instance_menu(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_routing_overview())
+        ui.state.ui_mode = "MIDI_ROUTING_OVERVIEW"
+
+        ui.handle_event(type("Evt", (), {"kind": "long_press"})())
+
+        self.assertEqual(ui.state.ui_mode, "GRAPH_MENU")
+
     def test_top_level_graphs_enters_graph_menu(self) -> None:
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_sets())
@@ -409,7 +572,10 @@ class InstanceActionTests(unittest.TestCase):
         renderer = _CaptureRenderer()
         renderer.draw(ui)
 
-        self.assertEqual(renderer.last_items, ["..", "CURRENT GRAPH", "LOAD GRAPH", "SAVE GRAPH", "STARTUP"])
+        self.assertEqual(
+            renderer.last_items,
+            ["..", "CURRENT GRAPH", "LOAD GRAPH", "AUDIO OVERVIEW", "MIDI OVERVIEW", "SAVE GRAPH", "STARTUP"],
+        )
         self.assertEqual(renderer.last_selected_idx, 1)
 
     def test_graph_menu_shows_new_graph_when_published_as_loadable_set(self) -> None:
@@ -421,7 +587,10 @@ class InstanceActionTests(unittest.TestCase):
         renderer = _CaptureRenderer()
         renderer.draw(ui)
 
-        self.assertEqual(renderer.last_items, ["..", "CURRENT GRAPH", "NEW GRAPH", "LOAD GRAPH", "SAVE GRAPH", "STARTUP"])
+        self.assertEqual(
+            renderer.last_items,
+            ["..", "CURRENT GRAPH", "NEW GRAPH", "LOAD GRAPH", "AUDIO OVERVIEW", "MIDI OVERVIEW", "SAVE GRAPH", "STARTUP"],
+        )
 
     def test_network_properties_use_discovered_ip_and_rnbo_port(self) -> None:
         ui = ShadowboxUI()
@@ -465,7 +634,10 @@ class InstanceActionTests(unittest.TestCase):
         renderer = _CaptureRenderer()
         renderer.draw(ui)
 
-        self.assertEqual(renderer.last_items, ["..", "CURRENT GRAPH", "LOAD GRAPH", "SAVE GRAPH", "RENAME GRAPH", "STARTUP"])
+        self.assertEqual(
+            renderer.last_items,
+            ["..", "CURRENT GRAPH", "LOAD GRAPH", "AUDIO OVERVIEW", "MIDI OVERVIEW", "SAVE GRAPH", "RENAME GRAPH", "STARTUP"],
+        )
 
     def test_graph_menu_shows_presets_when_published(self) -> None:
         ui = ShadowboxUI()
@@ -476,7 +648,10 @@ class InstanceActionTests(unittest.TestCase):
         renderer = _CaptureRenderer()
         renderer.draw(ui)
 
-        self.assertEqual(renderer.last_items, ["..", "CURRENT GRAPH", "LOAD GRAPH", "GRAPH PRESETS", "SAVE GRAPH", "STARTUP"])
+        self.assertEqual(
+            renderer.last_items,
+            ["..", "CURRENT GRAPH", "LOAD GRAPH", "AUDIO OVERVIEW", "MIDI OVERVIEW", "GRAPH PRESETS", "SAVE GRAPH", "STARTUP"],
+        )
 
     def test_graph_status_marks_current_set_and_dirty_state_in_value_rows(self) -> None:
         ui = ShadowboxUI()
@@ -530,7 +705,7 @@ class InstanceActionTests(unittest.TestCase):
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_sets())
         ui.state.ui_mode = "GRAPH_MENU"
-        ui.state.graph_menu_cursor = 3
+        ui.state.graph_menu_cursor = 5
 
         with mock.patch("shadowbox.ui.time.strftime", return_value="20260401-120000"):
             ui.handle_event(type("Evt", (), {"kind": "short_press"})())
@@ -804,7 +979,7 @@ class InstanceActionTests(unittest.TestCase):
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_set_rename())
         ui.state.ui_mode = "GRAPH_MENU"
-        ui.state.graph_menu_cursor = 4
+        ui.state.graph_menu_cursor = 6
 
         ui.handle_event(type("Evt", (), {"kind": "short_press"})())
 

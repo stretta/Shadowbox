@@ -468,6 +468,11 @@ def main():
                 elif action.kind == "load_set":
                     if action.path is not None:
                         ui.set_busy(True, "load")
+                        # Runner set loads currently append, so clear the live graph first
+                        # when the published global unload path is available.
+                        if ui.state.remove_instance_path:
+                            rnbo.send_value(ui.state.remove_instance_path, -1)
+                            sleep(0.1)
                         rnbo.send_value(action.path, action.value)
                         sleep(0.2)
                         ui.apply_runner_snapshot(rnbo.discover())

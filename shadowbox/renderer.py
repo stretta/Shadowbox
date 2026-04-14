@@ -634,6 +634,70 @@ class ShadowboxRenderer:
                 emphasis=self._row_base_weight(row),
             )
 
+    def draw_selectable_value_rows(self, rows: list[ValueRow], selected_idx: int) -> None:
+        if not rows:
+            self.draw_string_list(["no instances"], 0)
+            return
+        if self.is_tft:
+            self._draw_selectable_value_rows_tft(rows, selected_idx)
+            return
+
+        selected_zero = max(0, min(len(rows) - 1, selected_idx - 1))
+        indices, selected_row, y_positions = self.list_window(selected_zero, len(rows))
+        for row_idx, item_idx in enumerate(indices):
+            row = rows[item_idx]
+            self.draw_value_row(
+                y_positions[row_idx],
+                row_idx == selected_row,
+                row.label,
+                row.value,
+                current=row.current,
+                emphasis=self._row_base_weight(row),
+            )
+
+    def _draw_selectable_value_rows_tft(self, rows: list[ValueRow], selected_idx: int) -> None:
+        panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
+        self._draw_panel(panel_x, panel_y, panel_w, panel_h, None)
+
+        y_positions = self._panel_list_rows(panel_y, panel_h)
+        visible = len(y_positions)
+        total = len(rows)
+        if total <= 0 or visible <= 0:
+            return
+
+        selected_zero = max(0, min(total - 1, selected_idx - 1))
+        if total <= visible:
+            indices = list(range(total))
+            selected_row = selected_zero
+        else:
+            half = visible // 2
+            start = max(0, min(selected_zero - half, total - visible))
+            indices = list(range(start, start + visible))
+            selected_row = selected_zero - start
+
+        left_cols, right_cols = self._tft_value_columns()
+        for row_idx, item_idx in enumerate(indices):
+            y = y_positions[row_idx]
+            row = rows[item_idx]
+            selected = row_idx == selected_row
+            text_weight = self._current_row_weight(row.emphasis or None, current=row.current)
+            if self.is_full_tft:
+                self._draw_full_tft_row(
+                    y,
+                    ">" if selected else " ",
+                    shorten(str(row.label), self.value_name_cols),
+                    shorten(str(row.value), self.value_cols),
+                    selected=selected,
+                    text_weight=text_weight,
+                )
+            else:
+                if selected:
+                    self.display.rect(2, y - 2, max(0, self.display.width - 4), 8, True, False)
+                left = shorten(str(row.label), left_cols)
+                right = shorten(str(row.value), right_cols)
+                line = f"{'> ' if selected else '  '}{left:<{left_cols}} {right:>{right_cols}}"[: self.text_cols]
+                self._text(line, 6, y, weight=text_weight)
+
     def draw_param_list(self, params: list[dict], selected_idx: int) -> None:
         if self.is_tft:
             self._draw_param_list_tft(params, selected_idx)
@@ -1818,6 +1882,8 @@ class ShadowboxRenderer:
             "REMOVE_INSTANCE_CONFIRM": "REMOVE",
             "PRESET_LIST": "PRESETS",
             "PARAM_LIST": "PARAMETERS",
+            "AUDIO_ROUTING_OVERVIEW": "AUDIO I/O",
+            "MIDI_ROUTING_OVERVIEW": "MIDI I/O",
             "ENUM_LIST": shorten(shorten_param_name(ui.selected_param.get("name", "")), 19) if ui.selected_param else "ENUM",
             "ROUTING_GROUP": state.active_transport.upper(),
             "ROUTING_PORTS": f"{state.active_transport[:1].upper()}{state.active_transport[1:]} {state.active_routing_direction[:1].upper()}{state.active_routing_direction[1:]}",
@@ -1886,6 +1952,8 @@ class ShadowboxRenderer:
             self.draw_param_list(ui.active_params, state.param_cursor) if ui.active_params else self.draw_string_list(["..", "no params"], state.param_cursor)
         elif state.ui_mode == "ENUM_LIST":
             self.draw_enum_list(ui, state.enum_cursor)
+        elif state.ui_mode in {"AUDIO_ROUTING_OVERVIEW", "MIDI_ROUTING_OVERVIEW"}:
+            self.draw_selectable_value_rows(ui.routing_overview_rows, state.routing_overview_cursor)
         elif state.ui_mode == "ROUTING_GROUP":
             self.draw_string_list([".."] + ROUTING_GROUP_ITEMS, state.routing_group_cursor)
         elif state.ui_mode == "ROUTING_PORTS":

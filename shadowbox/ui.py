@@ -95,6 +95,7 @@ class UIState:
     routing_group_cursor: int = 0
     routing_port_cursor: int = 0
     routing_target_cursor: int = 0
+    routing_overview_cursor: int = 0
     graph_menu_cursor: int = 0
     graph_set_cursor: int = 0
     graph_preset_cursor: int = 0
@@ -432,6 +433,7 @@ class ShadowboxUI:
         self.state.routing_group_cursor = 1
         self.state.routing_port_cursor = 0
         self.state.routing_target_cursor = 0
+        self.state.routing_overview_cursor = 1 if self.state.instances else 0
         self.state.graph_menu_cursor = 1 if self.graph_menu_items else 0
         self.state.graph_set_cursor = 1 if self.available_set_names else 0
         self.state.graph_preset_cursor = self.graph_preset_initial_cursor()
@@ -514,6 +516,10 @@ class ShadowboxUI:
         self.state.maint_cursor = clamp_index(self.state.maint_cursor, len(self.maint_menu_items) + 1)
         self.state.routing_port_cursor = clamp_index(self.state.routing_port_cursor, len(self.active_routing_ports) + 1)
         self.state.routing_target_cursor = clamp_index(self.state.routing_target_cursor, len(self.active_routing_targets) + 2)
+        self.state.routing_overview_cursor = clamp_index(
+            self.state.routing_overview_cursor if self.state.routing_overview_cursor > 0 else 1,
+            len(self.routing_overview_rows),
+        )
         self.state.graph_menu_cursor = clamp_index(self.state.graph_menu_cursor, len(self.graph_menu_items) + 1)
         self.state.graph_set_cursor = clamp_index(self.state.graph_set_cursor, len(self.available_set_names) + 1)
         self.state.graph_preset_cursor = clamp_index(self.state.graph_preset_cursor, len(self.graph_preset_menu_items))
@@ -599,6 +605,7 @@ class ShadowboxUI:
         items = ["CURRENT GRAPH", "LOAD GRAPH"]
         if self.new_graph_available:
             items.insert(1, "NEW GRAPH")
+        items.extend(["AUDIO OVERVIEW", "MIDI OVERVIEW"])
         if self.graph_preset_menu_enabled:
             items.append("GRAPH PRESETS")
         if self.graph_save_path:
@@ -1237,6 +1244,97 @@ class ShadowboxUI:
         branch = routing.get(self.state.active_transport, {})
         return list(branch.get(self.state.active_routing_direction, []))
 
+    def _routing_branch(self, instance: dict | None, transport: str) -> dict:
+        if not isinstance(instance, dict):
+            return {}
+        routing = instance.get("routing", {})
+        if not isinstance(routing, dict):
+            return {}
+        branch = routing.get(str(transport), {})
+        return branch if isinstance(branch, dict) else {}
+
+    def _short_routing_target(self, target: Any) -> str:
+        text = str(target or "").strip()
+        if not text:
+            return ""
+        match = re.fullmatch(r"system:(capture|playback)_(\d+)", text)
+        if match:
+            return f"{'C' if match.group(1) == 'capture' else 'P'}{int(match.group(2))}"
+        if ":" in text:
+            text = text.split(":", 1)[1]
+        return text
+
+    def _compress_routing_tokens(self, tokens: list[str]) -> list[str]:
+        compressed: list[str] = []
+        index = 0
+        while index < len(tokens):
+            match = re.fullmatch(r"([A-Za-z]+)(\d+)", tokens[index])
+            if not match:
+                compressed.append(tokens[index])
+                index += 1
+                continue
+
+            prefix = match.group(1)
+            start = int(match.group(2))
+            end = start
+            lookahead = index + 1
+            while lookahead < len(tokens):
+                next_match = re.fullmatch(r"([A-Za-z]+)(\d+)", tokens[lookahead])
+                if not next_match or next_match.group(1) != prefix:
+                    break
+                next_value = int(next_match.group(2))
+                if next_value != end + 1:
+                    break
+                end = next_value
+                lookahead += 1
+
+            compressed.append(f"{prefix}{start}-{end}" if end > start else f"{prefix}{start}")
+            index = lookahead
+        return compressed
+
+    def _routing_connection_summary(self, ports: list[dict]) -> str:
+        tokens: list[str] = []
+        for port in ports:
+            if not isinstance(port, dict):
+                continue
+            connections = [self._short_routing_target(item) for item in port.get("connections", []) if str(item).strip()]
+            if connections:
+                tokens.extend(item for item in connections if item)
+        if not tokens:
+            return "-"
+        return ",".join(self._compress_routing_tokens(tokens))
+
+    def _instance_routing_summary(self, instance: dict | None, transport: str) -> str:
+        branch = self._routing_branch(instance, transport)
+        inputs = branch.get("inputs", [])
+        outputs = branch.get("outputs", [])
+        input_summary = self._routing_connection_summary(inputs if isinstance(inputs, list) else [])
+        output_summary = self._routing_connection_summary(outputs if isinstance(outputs, list) else [])
+        return f"I:{input_summary} O:{output_summary}"
+
+    @property
+    def routing_overview_rows(self) -> list[ValueRow]:
+        rows: list[ValueRow] = []
+        transport = self.state.active_transport
+        active_id = str(self.state.active_instance_id)
+        for instance in self.state.instances:
+            label = str(instance.get("label", "") or instance.get("name", "") or instance.get("id", "")).strip() or "instance"
+            rows.append(
+                ValueRow(
+                    label,
+                    self._instance_routing_summary(instance, transport),
+                    current=str(instance.get("id", "")) == active_id,
+                )
+            )
+        return rows
+
+    @property
+    def selected_routing_overview_instance(self) -> Optional[dict]:
+        idx = self.state.routing_overview_cursor - 1
+        if 0 <= idx < len(self.state.instances):
+            return self.state.instances[idx]
+        return None
+
     @property
     def selected_param(self) -> Optional[dict]:
         idx = self.state.param_cursor - 1
@@ -1636,6 +1734,8 @@ class ShadowboxUI:
             "PRESET_LIST",
             "ROUTING_GROUP",
             "ROUTING_PORTS",
+            "AUDIO_ROUTING_OVERVIEW",
+            "MIDI_ROUTING_OVERVIEW",
             "EDIT",
             "ENUM_LIST",
             "ROUTING_TARGETS",
@@ -1722,6 +1822,11 @@ class ShadowboxUI:
             self.state.routing_port_cursor = self._cycle(self.state.routing_port_cursor, len(self.active_routing_ports) + 1, step)
         elif self.state.ui_mode == "ROUTING_TARGETS":
             self.state.routing_target_cursor = self._cycle(self.state.routing_target_cursor, len(self.active_routing_targets) + 2, step)
+        elif self.state.ui_mode in {"AUDIO_ROUTING_OVERVIEW", "MIDI_ROUTING_OVERVIEW"}:
+            self.state.routing_overview_cursor = self._cycle(self.state.routing_overview_cursor, len(self.routing_overview_rows), step)
+            selected = self.selected_routing_overview_instance
+            if selected is not None:
+                self.state.active_instance_id = str(selected.get("id", ""))
         elif self.state.ui_mode == "SYSTEM_MENU":
             self.state.system_cursor = self._cycle(self.state.system_cursor, len(self.system_menu_items) + 1, step)
         elif self.state.ui_mode == "SYSTEM_AUDIO":
@@ -1811,6 +1916,14 @@ class ShadowboxUI:
                 elif choice == "LOAD GRAPH":
                     self.state.ui_mode = "GRAPH_SET_LIST"
                     self.state.graph_set_cursor = 1 if self.available_set_names else 0
+                elif choice == "AUDIO OVERVIEW":
+                    self.state.active_transport = "audio"
+                    self.state.ui_mode = "AUDIO_ROUTING_OVERVIEW"
+                    self.state.routing_overview_cursor = self.instance_cursor_for_active_instance()
+                elif choice == "MIDI OVERVIEW":
+                    self.state.active_transport = "midi"
+                    self.state.ui_mode = "MIDI_ROUTING_OVERVIEW"
+                    self.state.routing_overview_cursor = self.instance_cursor_for_active_instance()
                 elif choice == "GRAPH PRESETS":
                     self.state.ui_mode = "GRAPH_PRESET_LIST"
                     self.state.graph_preset_cursor = self.graph_preset_initial_cursor()
@@ -2150,6 +2263,13 @@ class ShadowboxUI:
                         )
                     )
 
+        elif self.state.ui_mode in {"AUDIO_ROUTING_OVERVIEW", "MIDI_ROUTING_OVERVIEW"}:
+            selected = self.selected_routing_overview_instance
+            if selected is not None:
+                self.state.active_instance_id = str(selected.get("id", ""))
+                self.state.instance_menu_cursor = 1
+                self.state.ui_mode = "INSTANCE_MENU"
+
         elif self.state.ui_mode == "SYSTEM_MENU":
             if self.state.system_cursor == 0:
                 self.state.ui_mode = "TOP"
@@ -2298,6 +2418,8 @@ class ShadowboxUI:
             self.state.ui_mode = "ROUTING_GROUP"
         elif self.state.ui_mode == "ROUTING_TARGETS":
             self.state.ui_mode = "ROUTING_PORTS"
+        elif self.state.ui_mode in {"AUDIO_ROUTING_OVERVIEW", "MIDI_ROUTING_OVERVIEW"}:
+            self.state.ui_mode = "GRAPH_MENU"
         elif self.state.ui_mode == "GRAPH_STARTUP_SET_LIST":
             self.state.ui_mode = "GRAPH_STARTUP"
         elif self.state.ui_mode == "NAME_INLINE_EDITOR":
@@ -2334,3 +2456,12 @@ class ShadowboxUI:
 
         self.state.activity_ticks += 1
         self.queue_action(UIAction(kind="save_state"))
+
+    def instance_cursor_for_active_instance(self) -> int:
+        active_id = str(self.state.active_instance_id)
+        if not active_id:
+            return 1 if self.state.instances else 0
+        for idx, item in enumerate(self.state.instances, start=1):
+            if str(item.get("id", "")) == active_id:
+                return idx
+        return 1 if self.state.instances else 0
