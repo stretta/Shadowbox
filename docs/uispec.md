@@ -4,7 +4,7 @@ Shadowbox UI Specification (draft)
 
 Shadowbox is a hardware UI for RNBO Runner that:
 - discovers structure via OSCQuery
-- presents that structure using a single encoder and button
+- presents that structure using a simple step/press input model
 - allows editing of parameters and routing that are explicitly published
 - does not invent structure that is not present in the published data
 
@@ -107,18 +107,18 @@ Rules:
 4. Navigation Model
 
 Input:
-- One encoder (delta)
-- One button
+- One normalized step control
+- One normalized press control
 
 Behavior:
-- Encoder moves selection
+- Step input moves selection
 - Button press enters submenu or confirms selection
 - Navigation uses a stack
 
 Back Behavior:
 - First item in any submenu is `..` and returns to parent
 - Long press acts as a universal back/cancel shortcut
-- No hidden gestures beyond short press, long press, and encoder rotation
+- No hidden gestures beyond short press, long press, and step movement
 
 Navigation rules:
 - List and menu screens should prefer visible `..` navigation
@@ -237,8 +237,8 @@ Recognized metadata categories:
 Metadata behavior rules:
 - `editor` selects a specialized editor only for supported custom screens such as `ttid`, `step16`, and `pitch_display`
 - `unit` and `units` provide a display suffix only
-- `display_precision` controls decimal formatting only and does not imply encoder step size
-- `edit_step` controls encoder increment only and does not imply display formatting
+- `display_precision` controls decimal formatting only and does not imply input step size
+- `edit_step` controls step increment only and does not imply display formatting
 - `display_as` and `edit_as` are semantic UI hints; for example, `int` means the value should be rendered or edited as integer-like even if the published transport value is float-like
 - Boolean hints in metadata explicitly opt a parameter into the bool editor
 - `ui_role` helps runtime state lookups match a published state value to a UI-specific role such as a custom editor feed
@@ -302,7 +302,7 @@ Rules:
 - Saving and renaming should feel identical apart from the action label and the initial text value
 - The current generated fallback name remains useful as the initial draft for `SAVE GRAPH`, but it should be editable before commit and always remain available as an explicit regenerate action
 - Renaming should preload the current item name
-- The naming flow must work on the existing one-encoder, one-button input model without hidden gestures
+- The naming flow must work on the existing step/press input model without hidden gestures
 
 Proposed invocation model:
 - choosing `SAVE GRAPH` opens `NAME EDITOR` instead of immediately dispatching the generated fallback name
@@ -318,7 +318,7 @@ Proposed editor structure:
 - final row exposes explicit actions: `SAVE` or `RENAME`, `GENERATE NAME`, `ADD DATE`, `DELETE CHAR`, `CANCEL`
 
 Interaction model:
-- encoder rotation changes the currently focused character or action
+- step movement changes the currently focused character or action
 - short press commits the current choice
 - long press cancels the naming flow and returns to the previous screen
 
@@ -401,7 +401,7 @@ Unlike instance browsing and editing, `SYSTEM` may include a tightly scoped set 
 Initial system areas:
 - status
 - audio device selection
-- network status
+- network status and direct Ethernet rescue setup
 - about screen
 - maintenance actions
 
@@ -410,6 +410,8 @@ Rules:
 - Per-instance structure, lifecycle, parameters, presets, and routing remain OSCQuery/published-command driven
 - Non-OSCQuery `SYSTEM` entries must be explicitly chosen product features, not a generic escape hatch for backend gaps
 - Host-derived `SYSTEM` data should stay read-only unless there is a deliberately integrated control path for that feature
+- `NETWORK` may include a local `DIRECT ETHERNET SETUP` action that manages a fixed fallback address on `eth0` for headless recovery
+- Direct Ethernet setup must be tightly scoped: touch only the configured Ethernet interface and only the configured fallback subnet
 
 Live runtime authority:
 - Shadowbox reflects the currently published live runtime state
@@ -428,7 +430,7 @@ Each screen defines only:
 - optional value or routing display
 
 Each screen responds to:
-- encoder movement
+- step movement
 - button press
 - long press
 

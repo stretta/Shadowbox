@@ -105,7 +105,53 @@ class EncoderInputTests(unittest.TestCase):
         encoder._on_ab(encoder.clk_pin, 0, 0)
 
         events = encoder.get_events()
-        self.assertEqual([(event.kind, event.delta) for event in events], [("rotate", 1)])
+        self.assertEqual([(event.kind, event.delta) for event in events], [("step", 1)])
+
+    def test_waveshare_hat_maps_joystick_and_buttons_to_shadowbox_events(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "SHADOWBOX_INPUT_KIND": "waveshare_144_hat",
+            },
+            clear=False,
+        ):
+            encoder = self.encoder_module.EncoderInput()
+
+        self.fake_pi.pin_values[encoder.joy_up_pin] = 0
+        events = encoder.get_events()
+        self.assertEqual([(event.kind, event.delta) for event in events], [("step", -1)])
+
+        self.fake_pi.pin_values[encoder.joy_up_pin] = 1
+        self.assertEqual(encoder.get_events(), [])
+
+        self.fake_pi.pin_values[encoder.key1_pin] = 0
+        events = encoder.get_events()
+        self.assertEqual([event.kind for event in events], ["long_press"])
+        self.assertTrue(encoder.is_back_button_configured())
+        self.assertTrue(encoder.is_back_button_pressed())
+
+        self.fake_pi.pin_values[encoder.key1_pin] = 1
+        self.assertEqual(encoder.get_events(), [])
+        self.assertFalse(encoder.is_back_button_pressed())
+
+        self.fake_pi.pin_values[encoder.key2_pin] = 0
+        events = encoder.get_events()
+        self.assertEqual([event.kind for event in events], ["short_press"])
+
+        encoder.close()
+
+    def test_st7735s_hat_display_defaults_to_waveshare_hat_input(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "SHADOWBOX_DISPLAY": "st7735s_hat",
+            },
+            clear=False,
+        ):
+            encoder = self.encoder_module.EncoderInput()
+
+        self.assertEqual(encoder.input_kind, "waveshare_144_hat")
+        encoder.close()
 
 
 if __name__ == "__main__":

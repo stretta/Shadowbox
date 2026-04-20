@@ -15,6 +15,8 @@ VENV_PYTHON="${REPO_DIR}/.venv/bin/python"
 SERVICE_PATH="/etc/systemd/system/shadowbox.service"
 DEFAULT_ENV_PATH="/etc/default/shadowbox"
 DISPLAY_KIND="${SHADOWBOX_DISPLAY:-st7789_raw}"
+DIRECT_ETHERNET_HELPER="${REPO_DIR}/tools/direct_ethernet.sh"
+SUDOERS_PATH="/etc/sudoers.d/shadowbox-direct-ethernet"
 
 echo "Shadowbox installer"
 echo "==================="
@@ -42,7 +44,7 @@ case "${DISPLAY_KIND}" in
         echo "Enabling I2C..."
         sudo raspi-config nonint do_i2c 0
         ;;
-    st7789|st7789_raw|waveshare_2inch)
+    st7789|st7789_raw|st7735s_hat|waveshare_2inch)
         echo "Skipping I2C setup for TFT display backend."
         ;;
     *)
@@ -92,9 +94,22 @@ done < <(env | LC_ALL=C sort | grep '^SHADOWBOX_')
 if ! grep -q '^SHADOWBOX_DISPLAY=' "${TMP_ENV}"; then
     printf 'SHADOWBOX_DISPLAY=%s\n' "${DISPLAY_KIND}" >> "${TMP_ENV}"
 fi
+if ! grep -q '^SHADOWBOX_DIRECT_ETHERNET_HELPER=' "${TMP_ENV}"; then
+    printf 'SHADOWBOX_DIRECT_ETHERNET_HELPER=%s\n' "${DIRECT_ETHERNET_HELPER}" >> "${TMP_ENV}"
+fi
 
 sudo install -m 0644 "${TMP_ENV}" "${DEFAULT_ENV_PATH}"
 rm -f "${TMP_ENV}"
+
+echo "Configuring direct Ethernet helper..."
+chmod 0755 "${DIRECT_ETHERNET_HELPER}"
+TMP_SUDOERS="$(mktemp)"
+cat > "${TMP_SUDOERS}" <<EOF
+${RUN_USER} ALL=(root) NOPASSWD: ${DIRECT_ETHERNET_HELPER}
+EOF
+sudo visudo -cf "${TMP_SUDOERS}"
+sudo install -m 0440 "${TMP_SUDOERS}" "${SUDOERS_PATH}"
+rm -f "${TMP_SUDOERS}"
 
 echo "Installing systemd service..."
 sudo tee "${SERVICE_PATH}" >/dev/null <<EOF

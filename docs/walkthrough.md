@@ -41,7 +41,7 @@ Shadowbox uses parameter metadata as its general UI hint mechanism.
 Metadata may be used for:
 - custom editor selection
 - display formatting such as units or decimal precision
-- edit behavior such as encoder step size or integer-style editing
+- edit behavior such as input step size or integer-style editing
 - runtime state key overrides for specialized live editors
 
 Common metadata keys:
@@ -88,7 +88,7 @@ Optional metadata overrides:
 - `playhead_state`: alternate state key for the playhead
 
 Shadowbox behavior:
-- rotate moves the focus step
+- step input moves the focus step
 - short press toggles the focused step and sends the updated mask immediately
 - long press exits the editor without reverting already committed edits
 

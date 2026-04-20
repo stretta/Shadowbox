@@ -12,8 +12,8 @@ Primary concepts:
 Module responsibilities:
 
 `encoder.py`
-- Hardware input adapter for the rotary encoder and button
-- Produces normalized UI events such as rotate, short press, and long press
+- Hardware input adapter for the rotary encoder or Waveshare HAT controls
+- Produces normalized UI events such as step, short press, and long press
 
 `display/`
 - Display backend abstraction for OLED and TFT hardware

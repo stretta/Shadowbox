@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
+from pathlib import Path
 from queue import Empty, SimpleQueue
 from threading import Thread
 from time import monotonic, sleep
@@ -36,6 +38,7 @@ BRIGHTNESS_DIM = 0x10
 OSC_LISTEN_HOST = "127.0.0.1"
 OSC_LISTEN_PORT = 13333
 POST_LOAD_VIEW_DEFAULT = "instance"
+DIRECT_ETHERNET_HELPER_DEFAULT = str(Path(__file__).resolve().parent.parent / "tools" / "direct_ethernet.sh")
 
 
 def _env_float(name: str, default: float) -> float:
@@ -58,6 +61,14 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_text(name: str, default: str) -> str:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    text = str(value).strip()
+    return text or default
+
+
 DIM_TIMEOUT = max(0.0, _env_float("SHADOWBOX_DIM_TIMEOUT", DIM_TIMEOUT))
 SLEEP_TIMEOUT = max(DIM_TIMEOUT, _env_float("SHADOWBOX_SLEEP_TIMEOUT", SLEEP_TIMEOUT))
 BRIGHTNESS_NORMAL = max(0, min(255, _env_int("SHADOWBOX_BRIGHTNESS_NORMAL", BRIGHTNESS_NORMAL)))
@@ -69,6 +80,47 @@ TURBO_FRAME_DT = 1.0 / TURBO_FPS
 def _is_tft_display(display) -> bool:
     module = type(display).__module__
     return module.startswith("shadowbox.display.st7789") or module.startswith("shadowbox.display.waveshare_2inch")
+
+
+def _direct_ethernet_helper_path() -> str:
+    return _env_text("SHADOWBOX_DIRECT_ETHERNET_HELPER", DIRECT_ETHERNET_HELPER_DEFAULT)
+
+
+def _short_error_text(message: str, limit: int = 48) -> str:
+    text = " ".join(str(message or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)] + "..."
+
+
+def _run_direct_ethernet_helper(command: str) -> tuple[bool, str]:
+    helper_path = _direct_ethernet_helper_path()
+    if not helper_path or not os.path.exists(helper_path):
+        return False, "helper missing"
+
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", helper_path, command],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except FileNotFoundError:
+        return False, "sudo unavailable"
+    except subprocess.TimeoutExpired:
+        return False, "network timeout"
+    except Exception as exc:
+        return False, _short_error_text(str(exc))
+
+    if result.returncode == 0:
+        return True, ""
+
+    detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
+    lowered = detail.lower()
+    if "password" in lowered and "sudo" in lowered:
+        return False, "sudo not configured"
+    return False, _short_error_text(detail)
 
 
 class RunnerOSCListener:
@@ -236,7 +288,7 @@ def _discover_new_instance_ids(ui, rnbo, before_ids: list[str], attempts: int = 
 def _startup_status_lines(snapshot) -> tuple[str, str]:
     if _snapshot_ready(snapshot):
         return "OSCQuery Runner found!", "Launching..."
-    return "waiting for OSCQuery Runner", "(this is normal) press encoder to enter"
+    return "waiting for OSCQuery Runner", "(this is normal) press to enter"
 
 
 def _assign_next_unused_inputs(ui, rnbo, instance_id: str) -> bool:
@@ -683,6 +735,21 @@ def main():
                 elif action.kind == "refresh_snapshot":
                     ui.set_busy(True, "refresh")
                     ui.apply_runner_snapshot(rnbo.discover())
+                    ui.set_busy(False)
+
+                elif action.kind in {"enable_direct_ethernet", "disable_direct_ethernet"}:
+                    ui.set_busy(True, "network")
+                    ok, error = _run_direct_ethernet_helper(
+                        "enable" if action.kind == "enable_direct_ethernet" else "disable"
+                    )
+                    sleep(0.1)
+                    ui.apply_runner_snapshot(rnbo.discover())
+                    if ok:
+                        ui.clear_network_error()
+                    else:
+                        ui.set_network_error(error)
+                    ui.state.ui_mode = "NETWORK"
+                    ui.state.network_cursor = 1 if ui.network_value_rows else 0
                     ui.set_busy(False)
 
                 elif action.kind == "save_state":

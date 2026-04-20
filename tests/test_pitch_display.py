@@ -1,6 +1,7 @@
 import sys
 import types
 import unittest
+from types import SimpleNamespace
 
 from shadowbox.editors.pitch_display import normalize_pitch_to_midi_note
 
@@ -55,6 +56,24 @@ class _FullTftDisplay(_StubDisplay):
     height = 240
 
 
+class _HatDisplay(_StubDisplay):
+    width = 128
+    height = 128
+
+
+_HatDisplay.__module__ = "shadowbox.display.st7735s_hat"
+
+
+class _RendererUIStub(SimpleNamespace):
+    def __getattr__(self, name: str):
+        return ""
+
+
+class _RendererStateStub(SimpleNamespace):
+    def __getattr__(self, name: str):
+        return ""
+
+
 class PitchDisplayTests(unittest.TestCase):
     def setUp(self) -> None:
         self.renderer = ShadowboxRenderer(_StubDisplay())
@@ -86,9 +105,9 @@ class PitchDisplayTests(unittest.TestCase):
 
     def test_wrap_text_to_width_preserves_full_words_when_possible(self) -> None:
         renderer = ShadowboxRenderer(_StubDisplay())
-        lines = renderer._wrap_text_to_width("press encoder to enter", max_width=60, scale=1)
+        lines = renderer._wrap_text_to_width("press to enter", max_width=60, scale=1)
 
-        self.assertEqual(lines, ["press", "encoder to", "enter"])
+        self.assertEqual(lines, ["press to", "enter"])
 
     def test_draw_startup_status_wraps_hint_on_full_tft_without_ellipsis(self) -> None:
         display = _FullTftDisplay()
@@ -97,7 +116,7 @@ class PitchDisplayTests(unittest.TestCase):
         renderer.draw_startup_status(
             "SHADOWBOX",
             "waiting for OSCQuery Runner",
-            "(this is normal) press encoder to enter",
+            "(this is normal) press to enter",
         )
 
         text_ops = [op for op in display.ops if op[0] == "text"]
@@ -106,10 +125,58 @@ class PitchDisplayTests(unittest.TestCase):
         self.assertIn("waiting for OSCQuery", rendered_text)
         self.assertIn("Runner", rendered_text)
         self.assertIn("(this is normal) press", rendered_text)
-        self.assertIn("encoder to enter", rendered_text)
+        self.assertIn("to enter", rendered_text)
         self.assertTrue(all("..." not in text for text in rendered_text))
         self.assertIn(2, [op[4] for op in text_ops])
         self.assertIn(4, [op[4] for op in text_ops])
+
+    def test_st7735s_hat_uses_four_text_rows(self) -> None:
+        renderer = ShadowboxRenderer(_HatDisplay())
+
+        self.assertEqual(renderer.layout_mode, "tft_tiny_text")
+        self.assertEqual(renderer.content_rows, [26, 50, 74, 98])
+
+    def test_st7735s_hat_top_menu_renders_as_text_list_not_icon_cards(self) -> None:
+        display = _HatDisplay()
+        renderer = ShadowboxRenderer(display)
+        ui = _RendererUIStub(
+            state=_RendererStateStub(
+                ui_mode="TOP",
+                top_index=1,
+                busy=False,
+                activity_ticks=0,
+            ),
+            top_level_items=["GRAPHS", "INSTANCES", "SYSTEM"],
+        )
+
+        renderer.draw(ui)
+
+        text_ops = [op for op in display.ops if op[0] == "text"]
+        rendered = [op[1] for op in text_ops]
+        self.assertIn("SHADOWBOX", rendered)
+        self.assertIn("  GRAPHS", rendered)
+        self.assertIn("> INSTANCES", rendered)
+        self.assertIn("  SYSTEM", rendered)
+        self.assertFalse(any(op[0] == "rect" for op in display.ops))
+        self.assertFalse(any(op[0] == "hline" for op in display.ops))
+
+    def test_st7735s_hat_startup_status_uses_simple_splash(self) -> None:
+        display = _HatDisplay()
+        renderer = ShadowboxRenderer(display)
+
+        renderer.draw_startup_status(
+            "SHADOWBOX",
+            "waiting for OSCQuery Runner",
+            "(this is normal) press to enter",
+        )
+
+        text_ops = [op for op in display.ops if op[0] == "text"]
+        rendered = [op[1] for op in text_ops]
+        self.assertIn("SHADOW", rendered)
+        self.assertIn("BOX", rendered)
+        self.assertNotIn("waiting for OSCQuery Runner", rendered)
+        self.assertFalse(any("waiting" in text.lower() for text in rendered))
+        self.assertFalse(any("press" in text.lower() for text in rendered))
 
 
 if __name__ == "__main__":

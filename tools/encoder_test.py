@@ -115,7 +115,7 @@ print(
     f" fast<={ACCEL_FAST_SECONDS:.3f}s x{ACCEL_FAST_MULTIPLIER}"
     f" turbo<={ACCEL_TURBO_SECONDS:.3f}s x{ACCEL_TURBO_MULTIPLIER}"
 )
-print("Turn encoder or press button\n")
+print("Use controls or press button\n")
 
 try:
     while True:

@@ -32,7 +32,7 @@ class EncoderDisplayTest:
 
     def poll_input(self):
         for event in self.encoder.get_events():
-            if event.kind == "rotate":
+            if event.kind == "step":
                 self.position += event.delta
                 self.last_event = f"CW +{event.delta}" if event.delta > 0 else f"CCW {event.delta}"
                 print(self.last_event)

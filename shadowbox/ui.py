@@ -10,7 +10,6 @@ import json
 import math
 import os
 import re
-import socket
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,7 +36,7 @@ from shadowbox.editors.step16 import (
     playhead_state_key,
     toggle_step as toggle_step16,
 )
-from shadowbox.rnbo import RNBO_PORT
+from shadowbox.rnbo import RNBO_HOST, RNBO_PORT
 
 
 STATE_PATH = Path.home() / "rnbo-ui" / "shadowbox_state.json"
@@ -102,6 +101,7 @@ class UIState:
     graph_startup_cursor: int = 0
     graph_startup_set_cursor: int = 0
     system_cursor: int = 0
+    network_cursor: int = 0
     system_audio_cursor: int = 0
     maint_cursor: int = 0
     audio_device_cursor: int = 0
@@ -133,6 +133,7 @@ class UIState:
     name_inline_preview_index: int = 0
     name_overwrite_cursor: int = 1
     name_error_message: str = ""
+    network_error_message: str = ""
 
     busy: bool = False
     busy_reason: str = ""
@@ -440,6 +441,7 @@ class ShadowboxUI:
         self.state.graph_startup_cursor = 1 if self.graph_startup_menu_items else 0
         self.state.graph_startup_set_cursor = 1 if self.available_set_names else 0
         self.state.system_cursor = 1
+        self.state.network_cursor = 1 if self.network_value_rows else 0
         self.state.system_audio_cursor = 1
         self.state.maint_cursor = 1 if self.maint_menu_items else 0
         self.state.audio_device_cursor = 1 if self.audio_options else 0
@@ -469,6 +471,7 @@ class ShadowboxUI:
         self.state.name_inline_preview_index = 0
         self.state.name_overwrite_cursor = 1
         self.state.name_error_message = ""
+        self.state.network_error_message = ""
         self._edit_original_value = None
         self._about_press_count = 0
         self._reset_float_edit_acceleration()
@@ -514,6 +517,10 @@ class ShadowboxUI:
         self.state.param_cursor = clamp_index(self.state.param_cursor, len(self.active_params) + 1)
         self.state.preset_cursor = clamp_index(self.state.preset_cursor, len(self.preset_menu_items))
         self.state.maint_cursor = clamp_index(self.state.maint_cursor, len(self.maint_menu_items) + 1)
+        self.state.network_cursor = clamp_index(
+            self.state.network_cursor if self.state.network_cursor > 0 else 1,
+            len(self.network_value_rows),
+        )
         self.state.routing_port_cursor = clamp_index(self.state.routing_port_cursor, len(self.active_routing_ports) + 1)
         self.state.routing_target_cursor = clamp_index(self.state.routing_target_cursor, len(self.active_routing_targets) + 2)
         self.state.routing_overview_cursor = clamp_index(
@@ -881,10 +888,25 @@ class ShadowboxUI:
 
     @property
     def network_value_rows(self) -> list[ValueRow]:
-        return [
-            ValueRow("ip", self.network_ip_address),
-            ValueRow("osc", self.network_osc_port),
+        rows = [
+            ValueRow("setup", self.network_setup_action_label, current=self.network_direct_setup_active),
+            ValueRow("state", self.network_setup_state_text, current=self.network_direct_setup_active or bool(self.state.network_error_message)),
+            ValueRow("wired", "LINK" if self.network_wired_link else "DOWN", current=self.network_direct_setup_ready),
+            ValueRow("eth ip", self.network_wired_ip_address),
+            ValueRow("wifi", "ON" if self.network_wifi_connected else "DOWN"),
+            ValueRow("wifi ip", self.network_wifi_ip_address),
         ]
+        if self.state.network_error_message:
+            rows.append(ValueRow("error", self.state.network_error_message, current=True, emphasis="italic"))
+        elif self.network_direct_setup_ready and not self.network_direct_setup_active:
+            rows.append(ValueRow("hint", "DIRECT READY", current=True))
+        rows.extend(
+            [
+                ValueRow("host", self.network_host_display),
+                ValueRow("osc", self.network_osc_port),
+            ]
+        )
+        return rows
 
     def suggested_set_save_name(self) -> str:
         base_name = self.current_set_name
@@ -1444,20 +1466,78 @@ class ShadowboxUI:
         return RNBO_PORT
 
     @property
+    def network_info(self) -> dict:
+        value = self.state.system.get("network", {})
+        return value if isinstance(value, dict) else {}
+
+    @property
     def network_ip_address(self) -> str:
-        sock: socket.socket | None = None
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.connect(("1.1.1.1", 80))
-            return str(sock.getsockname()[0] or "?")
-        except Exception:
-            return "?"
-        finally:
-            if sock is not None:
-                try:
-                    sock.close()
-                except Exception:
-                    pass
+        primary = str(self.network_info.get("primary_ipv4", "") or "").strip()
+        if primary:
+            return primary
+        if self.network_direct_setup_ready:
+            return self.network_wired_ip_address
+        return "?"
+
+    @property
+    def network_wired_link(self) -> bool:
+        return bool(self.network_info.get("wired_link"))
+
+    @property
+    def network_wired_ip_address(self) -> str:
+        return str(self.network_info.get("wired_ipv4", "") or "").strip() or "-"
+
+    @property
+    def network_wifi_connected(self) -> bool:
+        return bool(self.network_info.get("wifi_connected"))
+
+    @property
+    def network_wifi_ip_address(self) -> str:
+        return str(self.network_info.get("wifi_ipv4", "") or "").strip() or "-"
+
+    @property
+    def network_direct_setup_ready(self) -> bool:
+        return bool(self.network_info.get("direct_setup_ready"))
+
+    @property
+    def network_direct_setup_available(self) -> bool:
+        return bool(self.network_info.get("direct_setup_available"))
+
+    @property
+    def network_direct_setup_active(self) -> bool:
+        return bool(self.network_info.get("direct_setup_active"))
+
+    @property
+    def network_direct_setup_ip(self) -> str:
+        return str(self.network_info.get("direct_setup_ip", "") or "").strip()
+
+    @property
+    def network_setup_action_label(self) -> str:
+        if not self.network_direct_setup_available:
+            return "UNAVAIL"
+        return "DISABLE" if self.network_direct_setup_active else "ENABLE"
+
+    @property
+    def network_setup_state_text(self) -> str:
+        if self.state.network_error_message:
+            return "ERROR"
+        if self.network_direct_setup_active:
+            return "ACTIVE"
+        return "OFF"
+
+    @property
+    def network_host_display(self) -> str:
+        hostname_local = str(self.network_info.get("hostname_local", "") or "").strip()
+        if hostname_local:
+            return hostname_local
+        hostname = str(self.network_info.get("hostname", "") or "").strip()
+        return hostname or RNBO_HOST
+
+    def set_network_error(self, message: str) -> None:
+        self.state.network_error_message = str(message or "").strip()
+
+    def clear_network_error(self) -> None:
+        self.state.network_error_message = ""
 
     @property
     def audio_options(self) -> list[str]:
@@ -1756,14 +1836,14 @@ class ShadowboxUI:
             self.brick_panel.update(frame_scale=frame_scale)
 
     def handle_event(self, event: UIEvent) -> None:
-        if event.kind == "rotate":
-            self._handle_rotate(event.delta)
+        if event.kind == "step":
+            self._handle_step(event.delta)
         elif event.kind == "short_press":
             self._handle_short_press()
         elif event.kind == "long_press":
             self._handle_long_press()
 
-    def _handle_rotate(self, delta: int) -> None:
+    def _handle_step(self, delta: int) -> None:
         if delta == 0:
             return
         step = delta
@@ -1839,6 +1919,8 @@ class ShadowboxUI:
                 self.state.active_instance_id = str(selected.get("id", ""))
         elif self.state.ui_mode == "SYSTEM_MENU":
             self.state.system_cursor = self._cycle(self.state.system_cursor, len(self.system_menu_items) + 1, step)
+        elif self.state.ui_mode == "NETWORK":
+            self.state.network_cursor = self._cycle_one_based(self.state.network_cursor, len(self.network_value_rows), step)
         elif self.state.ui_mode == "SYSTEM_AUDIO":
             self.state.system_audio_cursor = self._cycle(self.state.system_audio_cursor, len(SYSTEM_AUDIO_ITEMS) + 1, step)
         elif self.state.ui_mode == "MAINT":
@@ -2288,12 +2370,22 @@ class ShadowboxUI:
                 if choice == "AUDIO":
                     self.state.ui_mode = "SYSTEM_AUDIO"
                     self.state.system_audio_cursor = 1
+                elif choice == "NETWORK":
+                    self.state.ui_mode = "NETWORK"
+                    self.state.network_cursor = 1 if self.network_value_rows else 0
                 elif choice == "MAINT":
                     self.state.ui_mode = "MAINT"
                     self.state.maint_cursor = 1 if self.maint_menu_items else 0
                 else:
                     self._about_press_count = 0
                     self.state.ui_mode = choice
+
+        elif self.state.ui_mode == "NETWORK":
+            if self.state.network_cursor == 1 and self.network_direct_setup_available:
+                if self.network_direct_setup_active:
+                    self.queue_action(UIAction(kind="disable_direct_ethernet"))
+                else:
+                    self.queue_action(UIAction(kind="enable_direct_ethernet"))
 
         elif self.state.ui_mode == "SYSTEM_AUDIO":
             if self.state.system_audio_cursor == 0:

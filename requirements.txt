@@ -6,3 +6,4 @@ st7789
 numpy
 spidev
 gpiozero
+gpiod; platform_system == "Linux"

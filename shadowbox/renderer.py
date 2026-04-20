@@ -226,6 +226,9 @@ class ShadowboxRenderer:
 
     @property
     def layout_mode(self) -> str:
+        module = type(self.display).__module__
+        if module.startswith("shadowbox.display.st7735s_hat"):
+            return "tft_tiny_text"
         width = getattr(self.display, "width", 128)
         height = getattr(self.display, "height", 32)
         if width >= 320 and height >= 240:
@@ -236,11 +239,15 @@ class ShadowboxRenderer:
 
     @property
     def is_tft(self) -> bool:
-        return self.layout_mode in {"tft", "tft_full"}
+        return self.layout_mode in {"tft", "tft_full", "tft_tiny_text"}
 
     @property
     def is_full_tft(self) -> bool:
         return self.layout_mode == "tft_full"
+
+    @property
+    def is_tiny_text_tft(self) -> bool:
+        return self.layout_mode == "tft_tiny_text"
 
     @property
     def is_tall(self) -> bool:
@@ -250,6 +257,8 @@ class ShadowboxRenderer:
     def header_height(self) -> int:
         if self.is_full_tft:
             return self._line_height(2, "semibold") + 8
+        if self.is_tiny_text_tft:
+            return 16
         if self.is_tft:
             return 10
         return 8
@@ -267,6 +276,8 @@ class ShadowboxRenderer:
         if self.is_full_tft:
             rows = list(range(self.content_top + 8, self.content_bottom, self._line_height(2) + 4))
             return rows or [self.content_top + 4]
+        if self.is_tiny_text_tft:
+            return [26, 50, 74, 98]
         if self.is_tft:
             return [12, 22, 32, 42, 52, 62, 72, 82, 92, 102, 112]
         return [10, 20, 30, 40, 50] if self.is_tall else [8, 16, 24]
@@ -281,6 +292,8 @@ class ShadowboxRenderer:
             sample_w, _ = self._measure_text("abcdefghijklmnopqrstuvwxyz", 2, "regular")
             avg_char_w = max(1, sample_w // 26)
             return max(8, usable_width // avg_char_w)
+        if self.is_tiny_text_tft:
+            return 16
         return max(8, getattr(self.display, "width", 128) // 6)
 
     @property
@@ -295,16 +308,22 @@ class ShadowboxRenderer:
     def value_name_cols(self) -> int:
         if self.is_full_tft:
             return 30
+        if self.is_tiny_text_tft:
+            return 10
         return 13 if self.is_tft else 9
 
     @property
     def value_cols(self) -> int:
         if self.is_full_tft:
             return 18
+        if self.is_tiny_text_tft:
+            return 6
         return 11 if self.is_tft else 9
 
     @property
     def value_row_cols(self) -> int:
+        if self.is_tiny_text_tft:
+            return 14
         return max(12, self.text_cols - 2)
 
     def text_center(self, text: str, y: int) -> None:
@@ -362,7 +381,10 @@ class ShadowboxRenderer:
         return max(available_top, available_top + ((available_height - block_height) // 2))
 
     def draw_header(self, title: str, busy: bool = False, ticks: int = 0) -> None:
-        self._text(shorten(title, self.header_cols), 0, 0)
+        if self.is_tiny_text_tft:
+            self._text(shorten(title, self.header_cols), 4, 4)
+        else:
+            self._text(shorten(title, self.header_cols), 0, 0)
         if busy:
             self._text(activity_frame(ticks), max(0, self.display.width - 8), 0)
 
@@ -370,6 +392,10 @@ class ShadowboxRenderer:
         if self.is_full_tft:
             if title:
                 self._text(self._truncate_to_width(title, max(0, w - 8), 2, "semibold"), x + 4, y + 2, 2, "semibold")
+            return
+        if self.is_tiny_text_tft:
+            if title:
+                self._text(shorten(title, self.header_cols), x + 4, y + 2)
             return
         self.display.rect(x, y, w, h, True, False)
         if title:
@@ -421,6 +447,8 @@ class ShadowboxRenderer:
             end = panel_y + max(8, panel_h - 20)
             rows = list(range(start, end, self._line_height(2) + 4))
             return rows or [start]
+        if self.is_tiny_text_tft:
+            return list(self.content_rows)
         return [14, 22, 30, 38, 46, 54, 62, 70, 78, 86, 94, 102, 110]
 
     def _inline_name_window(self, ui, max_chars: int) -> str:
@@ -510,6 +538,10 @@ class ShadowboxRenderer:
         if self.is_full_tft:
             self._draw_full_tft_row(y, ">" if selected else " ", label, selected=selected, text_weight=weight)
             return
+        if self.is_tiny_text_tft:
+            x = 8
+            self._text(f"{'>' if selected else ' '} {shorten(label, self.value_row_cols)}"[: self.text_cols], x, y, weight=weight)
+            return
         if self.is_tft and selected:
             self.display.rect(2, y - 2, max(0, self.display.width - 4), 8, True, False)
         x = 6 if self.is_tft else 0
@@ -593,6 +625,15 @@ class ShadowboxRenderer:
         for row_idx, item_idx in enumerate(indices):
             y = rows[row_idx]
             selected = row_idx == selected_row
+            if self.is_tiny_text_tft:
+                self.draw_current_menu_row(
+                    y,
+                    selected,
+                    item_idx in (current_indices or set()),
+                    str(items[item_idx]),
+                    text_weight=(item_weights or {}).get(item_idx),
+                )
+                continue
             if selected and not self.is_full_tft:
                 self.display.rect(2, y - 2, max(0, self.display.width - 4), 12 if self.is_full_tft else 8, True, False)
             current = item_idx in (current_indices or set())
@@ -691,7 +732,7 @@ class ShadowboxRenderer:
                     text_weight=text_weight,
                 )
             else:
-                if selected:
+                if selected and not self.is_tiny_text_tft:
                     self.display.rect(2, y - 2, max(0, self.display.width - 4), 8, True, False)
                 left = shorten(str(row.label), left_cols)
                 right = shorten(str(row.value), right_cols)
@@ -715,6 +756,8 @@ class ShadowboxRenderer:
             right_cols = 8
             left_cols = max(8, self.text_cols - right_cols - 3)
             return left_cols, right_cols
+        if self.is_tiny_text_tft:
+            return 9, 5
         right_cols = max(6, min(12, (self.text_cols - 4) // 3))
         left_cols = max(8, self.text_cols - right_cols - 3)
         return left_cols, right_cols
@@ -741,7 +784,7 @@ class ShadowboxRenderer:
             y = rows[row_idx]
             selected = row_idx == selected_row
             if item_idx == 0:
-                if selected and not self.is_full_tft:
+                if selected and not self.is_full_tft and not self.is_tiny_text_tft:
                     self.display.rect(2, y - 2, max(0, self.display.width - 4), 12 if self.is_full_tft else 8, True, False)
                 if self.is_full_tft:
                     self._draw_full_tft_row(y, ">" if selected else " ", "..", selected=selected)
@@ -750,7 +793,7 @@ class ShadowboxRenderer:
             else:
                 param = items[item_idx]
                 prefix = "> " if selected else "  "
-                if selected and not self.is_full_tft:
+                if selected and not self.is_full_tft and not self.is_tiny_text_tft:
                     self.display.rect(2, y - 2, max(0, self.display.width - 4), 12 if self.is_full_tft else 8, True, False)
                 left_cols, right_cols = self._tft_value_columns()
                 left = shorten(shorten_param_name(param.get("name", "")), left_cols)
@@ -852,7 +895,7 @@ class ShadowboxRenderer:
             y = rows[row_idx]
             selected = row_idx == selected_row
             if item_idx == 0:
-                if selected and not self.is_full_tft:
+                if selected and not self.is_full_tft and not self.is_tiny_text_tft:
                     self.display.rect(2, y - 2, max(0, self.display.width - 4), 8, True, False)
                 if self.is_full_tft:
                     self._draw_full_tft_row(y, ">" if selected else " ", "..", selected=selected)
@@ -867,7 +910,7 @@ class ShadowboxRenderer:
             if self.is_full_tft:
                 self._draw_full_tft_row(y, ">" if selected else " ", left, right, selected, text_weight=text_weight)
             else:
-                if selected:
+                if selected and not self.is_tiny_text_tft:
                     self.display.rect(2, y - 2, max(0, self.display.width - 4), 8, True, False)
                 row = f"{'> ' if selected else '  '}{left:<{left_cols}} {right:>{right_cols}}"[: self.text_cols]
                 self._text(row, 6, y, weight=text_weight)
@@ -1520,6 +1563,9 @@ class ShadowboxRenderer:
     def draw_startup_status(self, title: str, status_line: str = "", hint_line: str = "") -> None:
         self.display.clear()
         if self.is_tft:
+            if self.is_tiny_text_tft:
+                self.draw_splash(title)
+                return
             title_scale = 4 if self.is_full_tft else 3
             status_scale = 2
             hint_scale = 2
@@ -1622,19 +1668,7 @@ class ShadowboxRenderer:
         self.draw_menu_rows(ui.buffer_size_rows, ui.state.buffer_size_cursor)
 
     def draw_network(self, ui) -> None:
-        if self.is_tft:
-            self._draw_info_rows(
-                [
-                    ("IP", ui.network_ip_address),
-                    ("OSC", ui.network_osc_port),
-                    ("HOST", RNBO_HOST),
-                ],
-                top_padding=18 if not self.is_full_tft else 8,
-            )
-            return
-        rows = self.content_rows
-        self.draw_value_row(rows[0], False, "ip", ui.network_ip_address)
-        self.draw_value_row(rows[1], False, "osc", ui.network_osc_port)
+        self.draw_selectable_value_rows(ui.network_value_rows, ui.state.network_cursor)
 
     def draw_name_inline_editor(self, ui) -> None:
         if self.is_tft:
@@ -1666,7 +1700,7 @@ class ShadowboxRenderer:
                 char_strip = self._inline_char_strip_text(ui, 7)
                 self._draw_centered_text(self._truncate_to_width(char_strip, max(0, panel_w - 12), 1, "medium"), rows[4], 1, "medium")
             if len(rows) > 6:
-                hint_text = "Rotate chooses char" if ui.state.name_inline_edit_mode else "Rotate moves cursor"
+                hint_text = "Step chooses char" if ui.state.name_inline_edit_mode else "Step moves cursor"
                 action_text = "PRESS=SET  HOLD=BACK" if ui.state.name_inline_edit_mode else "PRESS=EDIT  HOLD=BACK"
                 self._draw_centered_text(hint_text, rows[6], 1, "regular")
                 if len(rows) > 7:
@@ -1681,7 +1715,7 @@ class ShadowboxRenderer:
             char_strip = self._inline_char_strip_text(ui, 7)
             self._draw_centered_text(shorten(char_strip, self.text_cols), rows[2], 1, "regular")
         elif len(rows) > 2:
-            self._draw_centered_text(shorten("rotate moves cursor", self.text_cols), rows[2], 1, "regular")
+            self._draw_centered_text(shorten("step moves cursor", self.text_cols), rows[2], 1, "regular")
         if self.is_tall and len(rows) > 3:
             hint = "press=set hold=back" if ui.state.name_inline_edit_mode else "press=edit hold=back"
             self._draw_centered_text(shorten(hint, self.text_cols), rows[3], 1, "regular")
@@ -1907,7 +1941,7 @@ class ShadowboxRenderer:
         if state.ui_mode == "EDIT":
             self.draw_edit(ui, ui.selected_param, state)
         elif state.ui_mode == "TOP":
-            if self.is_tft:
+            if self.is_tft and not self.is_tiny_text_tft:
                 self.draw_top_menu_tft(ui.top_level_items, state.top_index)
             else:
                 self.draw_string_list(ui.top_level_items, state.top_index)

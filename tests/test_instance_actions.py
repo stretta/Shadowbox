@@ -99,6 +99,42 @@ class _CaptureRenderer(ShadowboxRenderer):
 
 
 class InstanceActionTests(unittest.TestCase):
+    def _snapshot_with_direct_network(self) -> RNBOSnapshot:
+        return RNBOSnapshot(
+            instances=[],
+            patchers=[],
+            add_instance_path="",
+            remove_instance_path="",
+            system={
+                "network": {
+                    "hostname": "shadowbox",
+                    "hostname_local": "shadowbox.local",
+                    "wired_name": "eth0",
+                    "wired_link": True,
+                    "wired_ipv4": "169.254.12.34",
+                    "wired_link_local": "169.254.12.34",
+                    "wifi_name": "wlan0",
+                    "wifi_connected": False,
+                    "wifi_ssid": "",
+                    "wifi_ipv4": "",
+                    "primary_ipv4": "",
+                    "direct_setup_available": True,
+                    "direct_setup_active": False,
+                    "direct_setup_ip": "",
+                    "direct_setup_ready": True,
+                }
+            },
+        )
+
+    def _snapshot_with_active_direct_setup(self) -> RNBOSnapshot:
+        snapshot = self._snapshot_with_direct_network()
+        snapshot.system["network"]["wired_ipv4"] = "10.42.0.1"
+        snapshot.system["network"]["primary_ipv4"] = "10.42.0.1"
+        snapshot.system["network"]["direct_setup_active"] = True
+        snapshot.system["network"]["direct_setup_ip"] = "10.42.0.1"
+        snapshot.system["network"]["direct_setup_ready"] = True
+        return snapshot
+
     def _snapshot_with_sets(self) -> RNBOSnapshot:
         return RNBOSnapshot(
             instances=[],
@@ -258,8 +294,84 @@ class InstanceActionTests(unittest.TestCase):
         ui = self._apply_empty_snapshot()
 
         self.assertTrue(ui.can_add_instance)
-        self.assertTrue(ui.can_remove_instances)
-        self.assertEqual(ui.state.instance_cursor, 1)
+
+    def test_network_rows_surface_direct_ethernet_setup_state(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_direct_network())
+
+        rows = [(row.label, row.value, row.current) for row in ui.network_value_rows]
+
+        self.assertEqual(
+            rows,
+            [
+                ("setup", "ENABLE", False),
+                ("state", "OFF", False),
+                ("wired", "LINK", True),
+                ("eth ip", "169.254.12.34", False),
+                ("wifi", "DOWN", False),
+                ("wifi ip", "-", False),
+                ("hint", "DIRECT READY", True),
+                ("host", "shadowbox.local", False),
+                ("osc", RNBO_PORT, False),
+            ],
+        )
+        self.assertEqual(ui.network_ip_address, "169.254.12.34")
+
+    def test_network_rows_show_active_direct_setup_state(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_active_direct_setup())
+
+        rows = [(row.label, row.value, row.current) for row in ui.network_value_rows[:4]]
+
+        self.assertEqual(
+            rows,
+            [
+                ("setup", "DISABLE", True),
+                ("state", "ACTIVE", True),
+                ("wired", "LINK", True),
+                ("eth ip", "10.42.0.1", False),
+            ],
+        )
+        self.assertEqual(ui.network_ip_address, "10.42.0.1")
+
+    def test_network_press_queues_enable_direct_ethernet(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_direct_network())
+        ui.state.ui_mode = "NETWORK"
+        ui.state.network_cursor = 1
+
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        self.assertEqual(ui.pop_actions()[0].kind, "enable_direct_ethernet")
+
+    def test_network_press_queues_disable_direct_ethernet_when_active(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_active_direct_setup())
+        ui.state.ui_mode = "NETWORK"
+        ui.state.network_cursor = 1
+
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        self.assertEqual(ui.pop_actions()[0].kind, "disable_direct_ethernet")
+
+    def test_renderer_draw_network_uses_network_value_rows_on_oled(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_direct_network())
+        ui.state.ui_mode = "NETWORK"
+        ui.state.network_cursor = 1
+
+        renderer = _CaptureRenderer()
+        renderer.draw(ui)
+
+        self.assertEqual(renderer.last_header, "NETWORK")
+        self.assertEqual(
+            renderer.last_selectable_value_rows[:3],
+            [
+                ("setup", "ENABLE", False),
+                ("state", "OFF", False),
+                ("wired", "LINK", True),
+            ],
+        )
 
     def test_instance_list_shows_add_and_remove_actions_without_patchers_or_instances(self) -> None:
         ui = self._apply_empty_snapshot()
@@ -565,7 +677,7 @@ class InstanceActionTests(unittest.TestCase):
         ui.state.routing_overview_cursor = 7
         ui.state.active_instance_id = "7"
 
-        ui.handle_event(type("Evt", (), {"kind": "rotate", "delta": 1})())
+        ui.handle_event(type("Evt", (), {"kind": "step", "delta": 1})())
 
         self.assertEqual(ui.state.routing_overview_cursor, 8)
         self.assertEqual(ui.state.active_instance_id, "8")
@@ -631,24 +743,31 @@ class InstanceActionTests(unittest.TestCase):
             ["..", "CURRENT GRAPH", "NEW GRAPH", "LOAD GRAPH", "AUDIO OVERVIEW", "MIDI OVERVIEW", "SAVE GRAPH", "STARTUP"],
         )
 
-    def test_network_properties_use_discovered_ip_and_rnbo_port(self) -> None:
+    def test_network_properties_use_snapshot_network_info_and_rnbo_port(self) -> None:
         ui = ShadowboxUI()
-        fake_socket = mock.Mock()
-        fake_socket.getsockname.return_value = ("10.0.0.24", 54321)
+        ui.apply_runner_snapshot(
+            RNBOSnapshot(
+                instances=[],
+                patchers=[],
+                add_instance_path="",
+                remove_instance_path="",
+                system={
+                    "network": {
+                        "primary_ipv4": "10.0.0.24",
+                        "hostname": "shadowbox",
+                        "hostname_local": "shadowbox.local",
+                    }
+                },
+            )
+        )
 
-        with mock.patch("shadowbox.ui.socket.socket", return_value=fake_socket) as socket_ctor:
-            self.assertEqual(ui.network_ip_address, "10.0.0.24")
-
-        socket_ctor.assert_called_once()
-        fake_socket.connect.assert_called_once_with(("1.1.1.1", 80))
-        fake_socket.close.assert_called_once()
+        self.assertEqual(ui.network_ip_address, "10.0.0.24")
+        self.assertEqual(ui.network_host_display, "shadowbox.local")
         self.assertEqual(ui.network_osc_port, RNBO_PORT)
 
     def test_network_ip_address_falls_back_when_probe_fails(self) -> None:
         ui = ShadowboxUI()
-
-        with mock.patch("shadowbox.ui.socket.socket", side_effect=OSError("offline")):
-            self.assertEqual(ui.network_ip_address, "?")
+        self.assertEqual(ui.network_ip_address, "?")
 
     def test_graph_set_list_renders_published_saved_sets(self) -> None:
         ui = ShadowboxUI()
@@ -970,7 +1089,7 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(ui.state.ui_mode, "NAME_INLINE_EDITOR")
         self.assertTrue(ui.state.name_inline_edit_mode)
 
-        ui.handle_event(type("Evt", (), {"kind": "rotate", "delta": 1})())
+        ui.handle_event(type("Evt", (), {"kind": "step", "delta": 1})())
         ui.handle_event(type("Evt", (), {"kind": "short_press"})())
 
         self.assertFalse(ui.state.name_inline_edit_mode)

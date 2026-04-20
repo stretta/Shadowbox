@@ -95,8 +95,8 @@ class ST7789RawDisplay(DisplayBackend):
         logical_height: int = 240,
         invert_colors: bool = False,
     ):
-        if rotation not in {0, 180}:
-            raise ValueError("ST7789 raw backend currently supports rotation 0 or 180")
+        if rotation not in {0, 90, 180, 270}:
+            raise ValueError("ST7789 raw backend currently supports rotation 0, 90, 180, or 270")
 
         self.width = logical_width
         self.height = logical_height
@@ -195,10 +195,30 @@ class ST7789RawDisplay(DisplayBackend):
     def clear(self) -> None:
         self._draw.rectangle((0, 0, self.width, self.height), fill=0)
 
-    def _frame_bytes(self) -> bytes:
+    def _frame_image(self) -> Image.Image:
         image = self._canvas
-        if self.width != self.physical_width or self.height != self.physical_height:
-            image = image.resize((self.physical_width, self.physical_height), Image.Resampling.NEAREST)
+        if self.rotation == 90:
+            image = image.transpose(Image.Transpose.ROTATE_270)
+        elif self.rotation == 180:
+            image = image.transpose(Image.Transpose.ROTATE_180)
+        elif self.rotation == 270:
+            image = image.transpose(Image.Transpose.ROTATE_90)
+
+        if image.width == self.physical_width and image.height == self.physical_height:
+            return image
+
+        scale = max(1, min(self.physical_width // image.width, self.physical_height // image.height))
+        scaled_size = (image.width * scale, image.height * scale)
+        scaled = image.resize(scaled_size, Image.Resampling.NEAREST)
+
+        canvas = Image.new("L", (self.physical_width, self.physical_height), 0)
+        left = max(0, (self.physical_width - scaled_size[0]) // 2)
+        top = max(0, (self.physical_height - scaled_size[1]) // 2)
+        canvas.paste(scaled, (left, top))
+        return canvas
+
+    def _frame_bytes(self) -> bytes:
+        image = self._frame_image()
         data = image.tobytes()
         out = bytearray(len(data) * 2)
         for i, value in enumerate(data):

@@ -9,6 +9,9 @@ https://github.com/stretta/shadowbox
 from __future__ import annotations
 
 import json
+import os
+import socket
+import subprocess
 import urllib.request
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -19,6 +22,9 @@ from pythonosc.udp_client import SimpleUDPClient
 RNBO_HOST = "127.0.0.1"
 RNBO_PORT = 1234
 OSCQUERY_URL = "http://127.0.0.1:5678"
+DIRECT_ETHERNET_IFACE = os.environ.get("SHADOWBOX_DIRECT_ETHERNET_IFACE", "eth0").strip() or "eth0"
+DIRECT_ETHERNET_CIDR = os.environ.get("SHADOWBOX_DIRECT_ETHERNET_CIDR", "10.42.0.1/24").strip() or "10.42.0.1/24"
+DIRECT_ETHERNET_IP = DIRECT_ETHERNET_CIDR.split("/", 1)[0].strip()
 
 
 @dataclass
@@ -130,6 +136,158 @@ def extract_meta_info(node: dict) -> dict[str, Any]:
             metadata[str(child_name)] = value
 
     return metadata
+
+
+def _read_text(path: str) -> str:
+    try:
+        return open(path, "r", encoding="utf-8").read().strip()
+    except Exception:
+        return ""
+
+
+def _list_network_interfaces() -> list[str]:
+    try:
+        names = []
+        for entry in os.listdir("/sys/class/net"):
+            name = str(entry).strip()
+            if name:
+                names.append(name)
+        return sorted(names)
+    except Exception:
+        return []
+
+
+def _interface_is_wireless(name: str) -> bool:
+    return os.path.isdir(f"/sys/class/net/{name}/wireless")
+
+
+def _interface_operstate(name: str) -> str:
+    return _read_text(f"/sys/class/net/{name}/operstate").lower()
+
+
+def _interface_has_carrier(name: str) -> bool | None:
+    raw = _read_text(f"/sys/class/net/{name}/carrier")
+    if raw == "1":
+        return True
+    if raw == "0":
+        return False
+    return None
+
+
+def _discover_ipv4_addresses() -> dict[str, list[str]]:
+    try:
+        result = subprocess.run(
+            ["ip", "-4", "-o", "addr", "show"],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=1.5,
+        )
+    except Exception:
+        return {}
+
+    if result.returncode != 0:
+        return {}
+
+    addresses: dict[str, list[str]] = {}
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        name = str(parts[1]).strip()
+        cidr = str(parts[3]).strip()
+        if not name or not cidr or "/" not in cidr:
+            continue
+        address = cidr.split("/", 1)[0].strip()
+        if not address:
+            continue
+        bucket = addresses.setdefault(name, [])
+        if address not in bucket:
+            bucket.append(address)
+    return addresses
+
+
+def _first_non_link_local(addresses: list[str]) -> str:
+    for address in addresses:
+        if not str(address).startswith("169.254."):
+            return str(address)
+    return ""
+
+
+def _first_link_local(addresses: list[str]) -> str:
+    for address in addresses:
+        if str(address).startswith("169.254."):
+            return str(address)
+    return ""
+
+
+def discover_host_network() -> dict[str, Any]:
+    interfaces = _list_network_interfaces()
+    ipv4_by_interface = _discover_ipv4_addresses()
+
+    wired_name = ""
+    wifi_name = ""
+    if DIRECT_ETHERNET_IFACE in interfaces and not _interface_is_wireless(DIRECT_ETHERNET_IFACE):
+        wired_name = DIRECT_ETHERNET_IFACE
+    for name in interfaces:
+        if name == "lo":
+            continue
+        if _interface_is_wireless(name):
+            if not wifi_name:
+                wifi_name = name
+        elif not wired_name:
+            wired_name = name
+
+    wired_ipv4_list = ipv4_by_interface.get(wired_name, []) if wired_name else []
+    wifi_ipv4_list = ipv4_by_interface.get(wifi_name, []) if wifi_name else []
+
+    wired_link = False
+    if wired_name:
+        carrier = _interface_has_carrier(wired_name)
+        operstate = _interface_operstate(wired_name)
+        wired_link = carrier is True or operstate == "up"
+
+    wifi_connected = False
+    if wifi_name:
+        operstate = _interface_operstate(wifi_name)
+        wifi_connected = operstate == "up" or bool(wifi_ipv4_list)
+
+    wired_ipv4 = _first_non_link_local(wired_ipv4_list) or _first_link_local(wired_ipv4_list)
+    wifi_ipv4 = _first_non_link_local(wifi_ipv4_list) or _first_link_local(wifi_ipv4_list)
+    primary_ipv4 = wifi_ipv4 or wired_ipv4
+    wired_link_local = _first_link_local(wired_ipv4_list)
+    direct_setup_active = DIRECT_ETHERNET_IP in {str(item).strip() for item in wired_ipv4_list if str(item).strip()}
+    direct_setup_ready = bool(
+        (wired_link and direct_setup_active)
+        or (wired_link and wired_link_local and not _first_non_link_local(wired_ipv4_list))
+    )
+
+    hostname = ""
+    hostname_local = ""
+    try:
+        hostname = socket.gethostname().strip()
+    except Exception:
+        hostname = ""
+    if hostname:
+        hostname_local = f"{hostname}.local"
+
+    return {
+        "hostname": hostname,
+        "hostname_local": hostname_local,
+        "wired_name": wired_name,
+        "wired_link": wired_link,
+        "wired_ipv4": wired_ipv4,
+        "wired_link_local": wired_link_local,
+        "wifi_name": wifi_name,
+        "wifi_connected": wifi_connected,
+        "wifi_ssid": "",
+        "wifi_ipv4": wifi_ipv4,
+        "primary_ipv4": primary_ipv4,
+        "direct_setup_available": bool(wired_name),
+        "direct_setup_active": direct_setup_active,
+        "direct_setup_ip": DIRECT_ETHERNET_IP if direct_setup_active else "",
+        "direct_setup_ready": direct_setup_ready,
+    }
 
 
 def should_keep_param(name: str, node: dict) -> bool:
@@ -625,6 +783,7 @@ def discover_system(tree: dict) -> dict:
         "set_name": sets.get("current_name", ""),
         "sets": sets,
         "set_presets": set_presets,
+        "network": discover_host_network(),
         "maint": {
             "jack_restart_path": str(jack_restart_path) if jack_restart_path is not None else "",
         },
@@ -729,6 +888,23 @@ class RNBOClient:
                         "loaded_name": "",
                         "count": 0,
                         "available_presets": [],
+                    },
+                    "network": {
+                        "hostname": "",
+                        "hostname_local": "",
+                        "wired_name": "",
+                        "wired_link": False,
+                        "wired_ipv4": "",
+                        "wired_link_local": "",
+                        "wifi_name": "",
+                        "wifi_connected": False,
+                        "wifi_ssid": "",
+                        "wifi_ipv4": "",
+                        "primary_ipv4": "",
+                        "direct_setup_available": False,
+                        "direct_setup_active": False,
+                        "direct_setup_ip": "",
+                        "direct_setup_ready": False,
                     },
                     "maint": {
                         "jack_restart_path": "",

@@ -60,6 +60,24 @@ def load_display_from_env(default_kind: str = "st7789_raw"):
             logical_height=_env_int("SHADOWBOX_LOGICAL_HEIGHT", 240),
             invert_colors=_env_bool("SHADOWBOX_ST7789_INVERT", False),
         )
+    elif kind == "st7735s_hat":
+        kwargs.update(
+            bus=_env_int("SHADOWBOX_ST7735_SPI_BUS", 0),
+            cs=_env_int("SHADOWBOX_ST7735_SPI_CS", 0),
+            dc=_env_int("SHADOWBOX_ST7735_DC", 25),
+            rst=None if os.environ.get("SHADOWBOX_ST7735_RST", "27").strip().lower() == "none" else _env_int("SHADOWBOX_ST7735_RST", 27),
+            backlight=None
+            if os.environ.get("SHADOWBOX_ST7735_BACKLIGHT", "24").strip().lower() == "none"
+            else _env_int("SHADOWBOX_ST7735_BACKLIGHT", 24),
+            spi_speed_hz=_env_int("SHADOWBOX_ST7735_SPI_SPEED_HZ", 20_000_000),
+            physical_width=_env_int("SHADOWBOX_ST7735_WIDTH", 128),
+            physical_height=_env_int("SHADOWBOX_ST7735_HEIGHT", 128),
+            offset_left=_env_int("SHADOWBOX_ST7735_OFFSET_LEFT", 2),
+            offset_top=_env_int("SHADOWBOX_ST7735_OFFSET_TOP", 3),
+            logical_width=_env_int("SHADOWBOX_LOGICAL_WIDTH", 128),
+            logical_height=_env_int("SHADOWBOX_LOGICAL_HEIGHT", 128),
+            invert_colors=_env_bool("SHADOWBOX_ST7735_INVERT", True),
+        )
     elif kind == "waveshare_2inch":
         kwargs.update(
             spi_bus=_env_int("SHADOWBOX_WAVESHARE_SPI_BUS", 0),
@@ -88,6 +106,10 @@ def create_display(kind: str = "ssd1306", **kwargs):
         from shadowbox.display.st7789_raw import ST7789RawDisplay
 
         return ST7789RawDisplay(**kwargs)
+    if kind == "st7735s_hat":
+        from shadowbox.display.st7735s_hat import ST7735SHatDisplay
+
+        return ST7735SHatDisplay(**kwargs)
     if kind == "waveshare_2inch":
         from shadowbox.display.waveshare_2inch import Waveshare2InchDisplay
 

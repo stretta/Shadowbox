@@ -14,8 +14,8 @@ It provides:
 - Basic system management
 - Saved audio-device selection
 - Startup discovery/status screen
-- Display interface for SSD1306, SSD1309, generic ST7789, and Waveshare 2-inch ST7789V hardware
-- Rotary encoder navigation
+- Display interface for SSD1306, SSD1309, generic ST7789, Waveshare 1.44-inch LCD HAT, and Waveshare 2-inch ST7789V hardware
+- Rotary encoder or Waveshare HAT navigation
 - Custom parameter editors for `step16`, TTID, and pitch display metadata
 
 Shadowbox complements the RNBO Runner web interface by providing a minimal physical control surface.
@@ -43,7 +43,16 @@ Also supported:
 
 - 128x64 I2C OLED display (SSD1309)
 - 240x320 SPI TFT display (generic ST7789, library-backed or raw backend)
+- Waveshare 1.44-inch LCD HAT (ST7735S, 128x128 SPI)
 - Waveshare 2-inch LCD Module (ST7789V, 240x320 SPI)
+
+Current Waveshare 1.44-inch LCD HAT support includes:
+
+- dedicated `st7735s_hat` backend
+- hardware-calibrated fixed panel orientation
+- joystick + `KEY1`/`KEY2`/`KEY3` input support
+- compact text-first `128x128` renderer tuned around a 4-line layout
+- simplified startup splash that just shows `SHADOWBOX`
 
 Supported display backends in code:
 
@@ -51,6 +60,7 @@ Supported display backends in code:
 - `ssd1309`
 - `st7789`
 - `st7789_raw`
+- `st7735s_hat`
 - `waveshare_2inch`
 
 If `SHADOWBOX_DISPLAY` is not set, Shadowbox now defaults to `st7789_raw`.
@@ -75,6 +85,7 @@ https://www.adafruit.com/product/4484
 - Graph set load/save from published Runner capabilities
 - Graph startup configuration through published Runner controls
 - System status display
+- Direct Ethernet rescue setup with a fixed fallback IP on `eth0`
 - Audio device switching
 - JACK restart
 - Saved top-level cursor and audio-device selection in `~/rnbo-ui/shadowbox_state.json`
@@ -83,6 +94,7 @@ Shadowbox treats the published live OSCQuery runtime tree as the source of truth
 It does not maintain its own graph model or restore graph/session state from local persistence.
 Graph load/save/startup behavior is executed only through Runner-published set and startup controls.
 A curated `NEW GRAPH` action is acceptable when it maps directly to the published set load path using a verified set named `New Graph`.
+The `SYSTEM -> NETWORK` screen also includes a local direct-Ethernet setup action that can assign a predictable fallback IP for headless rescue connections.
 
 ---
 
@@ -329,6 +341,13 @@ export SHADOWBOX_DISPLAY=st7789_raw
 python -m shadowbox.shadowbox
 ```
 
+Waveshare 1.44-inch LCD HAT example:
+
+```
+export SHADOWBOX_DISPLAY=st7735s_hat
+python -m shadowbox.shadowbox
+```
+
 Use `waveshare_2inch` instead if that matches your display wiring.
 
 If `pigpiod` is not running, startup will fail with `RuntimeError: pigpio daemon not running`.
@@ -368,9 +387,21 @@ python -m tools.st7789_raw_test
 If the raw test works but `SHADOWBOX_DISPLAY=st7789` stays blank, use
 `SHADOWBOX_DISPLAY=st7789_raw`.
 
+For the Waveshare 1.44-inch LCD HAT, use the dedicated backend:
+
+```
+SHADOWBOX_DISPLAY=st7735s_hat python -m shadowbox.shadowbox
+```
+
+To verify the panel without starting the full app:
+
+```
+python -m tools.st7735s_hat_test
+```
+
 ---
 
-# 9. Test encoder
+# 9. Test controls
 
 Run:
 
@@ -378,11 +409,11 @@ Run:
 python -m tools.encoder_test
 ```
 
-Rotating the encoder should print movement values.
+Encoder builds should print step values from the knob. Waveshare 1.44-inch LCD HAT builds should print step/press events from the joystick and keys.
 
 ---
 
-# 10. Encoder + display test
+# 10. Controls + display test
 
 Run:
 
@@ -390,7 +421,7 @@ Run:
 python -m tools.encoder_display_test
 ```
 
-Turning the encoder should update the OLED display.
+The current control input should update the display test UI.
 
 ---
 
@@ -430,6 +461,7 @@ The installer:
 - creates the virtual environment as your current user
 - upgrades `pip` and installs `requirements.txt`
 - persists the current `SHADOWBOX_*` environment variables to `/etc/default/shadowbox`
+- configures passwordless `sudo` for the direct Ethernet helper script
 - generates a systemd unit for the current repository path and current user
 - reloads systemd, enables `shadowbox`, and restarts the service
 
@@ -456,10 +488,12 @@ Display selection is controlled through environment variables. The service reads
 All currently supported `/etc/default/shadowbox` settings:
 
 - General UI/runtime: `SHADOWBOX_POST_LOAD_VIEW`, `SHADOWBOX_TURBO_FPS`, `SHADOWBOX_BRICK_PANEL_FPS`
+- Direct Ethernet rescue: `SHADOWBOX_DIRECT_ETHERNET_HELPER`, `SHADOWBOX_DIRECT_ETHERNET_IFACE`, `SHADOWBOX_DIRECT_ETHERNET_CIDR`
 - Idle/backlight: `SHADOWBOX_DIM_TIMEOUT`, `SHADOWBOX_SLEEP_TIMEOUT`, `SHADOWBOX_BRIGHTNESS_NORMAL`, `SHADOWBOX_BRIGHTNESS_DIM`
-- Encoder/buttons: `SHADOWBOX_ENCODER_CLK`, `SHADOWBOX_ENCODER_DT`, `SHADOWBOX_ENCODER_SW`, `SHADOWBOX_BACK_BUTTON_PIN`, `SHADOWBOX_ENCODER_STEPS_PER_DETENT`, `SHADOWBOX_ENCODER_LONG_PRESS_SECONDS`, `SHADOWBOX_ENCODER_AB_GLITCH_US`, `SHADOWBOX_ENCODER_SW_GLITCH_US`, `SHADOWBOX_BACK_BUTTON_GLITCH_US`, `SHADOWBOX_ENCODER_ACCEL_FAST_SECONDS`, `SHADOWBOX_ENCODER_ACCEL_FAST_MULTIPLIER`, `SHADOWBOX_ENCODER_ACCEL_TURBO_SECONDS`, `SHADOWBOX_ENCODER_ACCEL_TURBO_MULTIPLIER`
+- Encoder/buttons: `SHADOWBOX_INPUT_KIND`, `SHADOWBOX_ENCODER_CLK`, `SHADOWBOX_ENCODER_DT`, `SHADOWBOX_ENCODER_SW`, `SHADOWBOX_BACK_BUTTON_PIN`, `SHADOWBOX_ENCODER_STEPS_PER_DETENT`, `SHADOWBOX_ENCODER_LONG_PRESS_SECONDS`, `SHADOWBOX_ENCODER_AB_GLITCH_US`, `SHADOWBOX_ENCODER_SW_GLITCH_US`, `SHADOWBOX_BACK_BUTTON_GLITCH_US`, `SHADOWBOX_ENCODER_ACCEL_FAST_SECONDS`, `SHADOWBOX_ENCODER_ACCEL_FAST_MULTIPLIER`, `SHADOWBOX_ENCODER_ACCEL_TURBO_SECONDS`, `SHADOWBOX_ENCODER_ACCEL_TURBO_MULTIPLIER`, `SHADOWBOX_HAT_JOY_UP`, `SHADOWBOX_HAT_JOY_DOWN`, `SHADOWBOX_HAT_JOY_LEFT`, `SHADOWBOX_HAT_JOY_RIGHT`, `SHADOWBOX_HAT_JOY_PRESS`, `SHADOWBOX_HAT_KEY1`, `SHADOWBOX_HAT_KEY2`, `SHADOWBOX_HAT_KEY3`, `SHADOWBOX_HAT_KEY1_ACTION`, `SHADOWBOX_HAT_KEY2_ACTION`, `SHADOWBOX_HAT_KEY3_ACTION`
 - OLED backends (`ssd1306`, `ssd1309`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_I2C_BUS`, `SHADOWBOX_I2C_ADDR`
 - Generic ST7789 backends (`st7789`, `st7789_raw`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_ST7789_SPI_BUS`, `SHADOWBOX_ST7789_SPI_CS`, `SHADOWBOX_ST7789_DC`, `SHADOWBOX_ST7789_RST`, `SHADOWBOX_ST7789_BACKLIGHT`, `SHADOWBOX_ST7789_SPI_SPEED_HZ`, `SHADOWBOX_ST7789_ROTATION`, `SHADOWBOX_ST7789_WIDTH`, `SHADOWBOX_ST7789_HEIGHT`, `SHADOWBOX_ST7789_OFFSET_LEFT`, `SHADOWBOX_ST7789_OFFSET_TOP`, `SHADOWBOX_ST7789_INVERT`, `SHADOWBOX_LOGICAL_WIDTH`, `SHADOWBOX_LOGICAL_HEIGHT`
+- Waveshare 1.44-inch LCD HAT backend (`st7735s_hat`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_ST7735_SPI_BUS`, `SHADOWBOX_ST7735_SPI_CS`, `SHADOWBOX_ST7735_DC`, `SHADOWBOX_ST7735_RST`, `SHADOWBOX_ST7735_BACKLIGHT`, `SHADOWBOX_ST7735_SPI_SPEED_HZ`, `SHADOWBOX_ST7735_WIDTH`, `SHADOWBOX_ST7735_HEIGHT`, `SHADOWBOX_ST7735_OFFSET_LEFT`, `SHADOWBOX_ST7735_OFFSET_TOP`, `SHADOWBOX_ST7735_INVERT`, `SHADOWBOX_LOGICAL_WIDTH`, `SHADOWBOX_LOGICAL_HEIGHT`
 - Waveshare 2-inch backend (`waveshare_2inch`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_WAVESHARE_SPI_BUS`, `SHADOWBOX_WAVESHARE_SPI_CS`, `SHADOWBOX_WAVESHARE_DC`, `SHADOWBOX_WAVESHARE_RST`, `SHADOWBOX_WAVESHARE_BACKLIGHT`, `SHADOWBOX_WAVESHARE_SPI_SPEED_HZ`, `SHADOWBOX_LOGICAL_WIDTH`, `SHADOWBOX_LOGICAL_HEIGHT`
 
 Notes:
@@ -467,7 +501,9 @@ Notes:
 - `SHADOWBOX_DISPLAY` defaults to `st7789_raw` if unset.
 - `SHADOWBOX_BRICK_PANEL_FPS` is a legacy fallback for `SHADOWBOX_TURBO_FPS`.
 - `SHADOWBOX_ST7789_RST`, `SHADOWBOX_ST7789_BACKLIGHT`, and `SHADOWBOX_WAVESHARE_BACKLIGHT` accept `none` to disable that pin.
+- `SHADOWBOX_ST7735_RST` and `SHADOWBOX_ST7735_BACKLIGHT` accept `none` to disable that pin.
 - `SHADOWBOX_ST7789_INVERT` accepts boolean-style values such as `1`, `true`, `yes`, or `on`.
+- `SHADOWBOX_ST7735_INVERT` accepts boolean-style values such as `1`, `true`, `yes`, or `on`.
 
 You can also choose where Shadowbox lands after loading or replacing an instance:
 
@@ -546,6 +582,26 @@ SHADOWBOX_BRIGHTNESS_NORMAL=255
 SHADOWBOX_BRIGHTNESS_DIM=64
 ```
 
+Example Waveshare 1.44-inch LCD HAT configuration:
+
+```
+SHADOWBOX_DISPLAY=st7735s_hat
+SHADOWBOX_ST7735_SPI_BUS=0
+SHADOWBOX_ST7735_SPI_CS=0
+SHADOWBOX_ST7735_DC=25
+SHADOWBOX_ST7735_RST=27
+SHADOWBOX_ST7735_BACKLIGHT=24
+SHADOWBOX_ST7735_SPI_SPEED_HZ=20000000
+SHADOWBOX_ST7735_WIDTH=128
+SHADOWBOX_ST7735_HEIGHT=128
+SHADOWBOX_ST7735_OFFSET_LEFT=2
+SHADOWBOX_ST7735_OFFSET_TOP=3
+SHADOWBOX_LOGICAL_WIDTH=128
+SHADOWBOX_LOGICAL_HEIGHT=128
+SHADOWBOX_BRIGHTNESS_NORMAL=255
+SHADOWBOX_BRIGHTNESS_DIM=64
+```
+
 Known-good Raspberry Pi config:
 
 `<pi-host>`, raw ST7789 backend, `/home/pi/Shadowbox`
@@ -612,6 +668,48 @@ SHADOWBOX_LOGICAL_WIDTH=320
 SHADOWBOX_LOGICAL_HEIGHT=240
 SHADOWBOX_BRIGHTNESS_NORMAL=255
 SHADOWBOX_BRIGHTNESS_DIM=64
+```
+
+Example Waveshare 1.44-inch LCD HAT configuration:
+
+```
+SHADOWBOX_DISPLAY=st7735s_hat
+SHADOWBOX_ST7735_SPI_BUS=0
+SHADOWBOX_ST7735_SPI_CS=0
+SHADOWBOX_ST7735_DC=25
+SHADOWBOX_ST7735_RST=27
+SHADOWBOX_ST7735_BACKLIGHT=24
+SHADOWBOX_ST7735_WIDTH=128
+SHADOWBOX_ST7735_HEIGHT=128
+SHADOWBOX_ST7735_OFFSET_LEFT=2
+SHADOWBOX_ST7735_OFFSET_TOP=3
+SHADOWBOX_ST7735_INVERT=true
+SHADOWBOX_HAT_JOY_UP=6
+SHADOWBOX_HAT_JOY_DOWN=19
+SHADOWBOX_HAT_JOY_LEFT=5
+SHADOWBOX_HAT_JOY_RIGHT=26
+SHADOWBOX_HAT_JOY_PRESS=13
+SHADOWBOX_HAT_KEY1=21
+SHADOWBOX_HAT_KEY2=20
+SHADOWBOX_HAT_KEY3=16
+SHADOWBOX_HAT_KEY1_ACTION=long_press
+SHADOWBOX_HAT_KEY2_ACTION=short_press
+SHADOWBOX_HAT_KEY3_ACTION=none
+SHADOWBOX_BRIGHTNESS_NORMAL=255
+SHADOWBOX_BRIGHTNESS_DIM=64
+```
+
+Notes for the Waveshare 1.44-inch LCD HAT:
+
+- Shadowbox now uses a hardware-calibrated fixed panel mapping for this HAT. There is no `SHADOWBOX_ST7735_ROTATION` setting anymore.
+- The `st7735s_hat` renderer is intentionally text-first and uses a compact 4-line `128x128` layout instead of the larger TFT card/icon treatment.
+- The startup screen on this HAT is a simple `SHADOWBOX` splash rather than the denser TFT startup status block.
+
+On Raspberry Pi Bookworm, Waveshare also recommends enabling pull-ups for the
+HAT buttons in `/boot/firmware/config.txt`:
+
+```
+gpio=6,19,5,26,13,21,20,16=pu
 ```
 
 The TFT backends default to a full `320x240` logical framebuffer. You can still override `SHADOWBOX_LOGICAL_WIDTH` and `SHADOWBOX_LOGICAL_HEIGHT` if you want the older scaled-up rendering behavior while tuning layouts.
@@ -690,6 +788,7 @@ Why rerun `./install.sh` after pulling:
 - it refreshes system packages if new ones were added
 - it updates the Python virtual environment
 - it rewrites the systemd unit for the current checkout path and user
+- it refreshes the direct Ethernet helper sudoers entry
 - it preserves existing `/etc/default/shadowbox` settings and only updates
   `SHADOWBOX_*` variables you exported before running it
 - it restarts the `shadowbox` service

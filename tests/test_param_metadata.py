@@ -12,7 +12,14 @@ sys.modules.setdefault("pythonosc", pythonosc_module)
 sys.modules.setdefault("pythonosc.udp_client", udp_client_module)
 
 from shadowbox.renderer import ShadowboxRenderer, format_param_value, routing_port_display_name
-from shadowbox.rnbo import discover_instances, discover_set_presets, discover_sets, discover_system, extract_meta_info
+from shadowbox.rnbo import (
+    discover_host_network,
+    discover_instances,
+    discover_set_presets,
+    discover_sets,
+    discover_system,
+    extract_meta_info,
+)
 from shadowbox.ui import ShadowboxUI, apply_edit_delta, edit_as_int, is_boolish, normalize_current_value_for_edit, numeric_step
 
 
@@ -40,6 +47,92 @@ class _DummyDisplay:
 
 
 class ParamMetadataTests(unittest.TestCase):
+    def test_discover_host_network_prefers_wifi_primary_and_marks_direct_setup_when_wired_is_link_local(self) -> None:
+        completed = mock.Mock()
+        completed.returncode = 0
+        completed.stdout = (
+            "2: eth0    inet 169.254.12.34/16 brd 169.254.255.255 scope global noprefixroute eth0\n"
+            "3: wlan0   inet 10.0.0.55/24 brd 10.0.0.255 scope global dynamic wlan0\n"
+        )
+
+        with (
+            mock.patch("shadowbox.rnbo.os.listdir", return_value=["lo", "eth0", "wlan0"]),
+            mock.patch(
+                "shadowbox.rnbo.os.path.isdir",
+                side_effect=lambda path: path == "/sys/class/net/wlan0/wireless",
+            ),
+            mock.patch(
+                "shadowbox.rnbo._read_text",
+                side_effect=lambda path: {
+                    "/sys/class/net/eth0/carrier": "1",
+                    "/sys/class/net/eth0/operstate": "up",
+                    "/sys/class/net/wlan0/carrier": "",
+                    "/sys/class/net/wlan0/operstate": "up",
+                }.get(path, ""),
+            ),
+            mock.patch("shadowbox.rnbo.subprocess.run", return_value=completed),
+            mock.patch("shadowbox.rnbo.socket.gethostname", return_value="shadowbox"),
+        ):
+            info = discover_host_network()
+
+        self.assertEqual(info["wired_name"], "eth0")
+        self.assertTrue(info["wired_link"])
+        self.assertEqual(info["wired_ipv4"], "169.254.12.34")
+        self.assertEqual(info["wired_link_local"], "169.254.12.34")
+        self.assertEqual(info["wifi_name"], "wlan0")
+        self.assertTrue(info["wifi_connected"])
+        self.assertEqual(info["wifi_ipv4"], "10.0.0.55")
+        self.assertEqual(info["primary_ipv4"], "10.0.0.55")
+        self.assertTrue(info["direct_setup_available"])
+        self.assertFalse(info["direct_setup_active"])
+        self.assertEqual(info["direct_setup_ip"], "")
+        self.assertTrue(info["direct_setup_ready"])
+        self.assertEqual(info["hostname_local"], "shadowbox.local")
+
+    def test_discover_host_network_marks_direct_setup_active_when_fallback_ip_present(self) -> None:
+        completed = mock.Mock()
+        completed.returncode = 0
+        completed.stdout = "2: eth0    inet 10.42.0.1/24 brd 10.42.0.255 scope global eth0\n"
+
+        with (
+            mock.patch("shadowbox.rnbo.os.listdir", return_value=["lo", "eth0"]),
+            mock.patch("shadowbox.rnbo.os.path.isdir", return_value=False),
+            mock.patch(
+                "shadowbox.rnbo._read_text",
+                side_effect=lambda path: {
+                    "/sys/class/net/eth0/carrier": "1",
+                    "/sys/class/net/eth0/operstate": "up",
+                }.get(path, ""),
+            ),
+            mock.patch("shadowbox.rnbo.subprocess.run", return_value=completed),
+            mock.patch("shadowbox.rnbo.socket.gethostname", return_value="shadowbox"),
+            mock.patch("shadowbox.rnbo.DIRECT_ETHERNET_IP", "10.42.0.1"),
+            mock.patch("shadowbox.rnbo.DIRECT_ETHERNET_IFACE", "eth0"),
+        ):
+            info = discover_host_network()
+
+        self.assertTrue(info["direct_setup_available"])
+        self.assertTrue(info["direct_setup_active"])
+        self.assertEqual(info["direct_setup_ip"], "10.42.0.1")
+        self.assertTrue(info["direct_setup_ready"])
+
+    def test_discover_host_network_returns_empty_defaults_when_ip_command_fails(self) -> None:
+        with (
+            mock.patch("shadowbox.rnbo.os.listdir", return_value=[]),
+            mock.patch("shadowbox.rnbo.subprocess.run", side_effect=OSError("missing ip")),
+            mock.patch("shadowbox.rnbo.socket.gethostname", return_value="shadowbox"),
+        ):
+            info = discover_host_network()
+
+        self.assertEqual(info["primary_ipv4"], "")
+        self.assertFalse(info["wired_link"])
+        self.assertFalse(info["wifi_connected"])
+        self.assertFalse(info["direct_setup_available"])
+        self.assertFalse(info["direct_setup_active"])
+        self.assertEqual(info["direct_setup_ip"], "")
+        self.assertFalse(info["direct_setup_ready"])
+        self.assertEqual(info["hostname_local"], "shadowbox.local")
+
     def test_numeric_step_prefers_metadata_edit_step(self) -> None:
         param = {"type": "f", "min": 0, "max": 100, "metadata": {"edit_step": 2.5}}
         self.assertEqual(numeric_step(param), 2.5)

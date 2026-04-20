@@ -19,6 +19,7 @@ class DisplayDefaultsTests(unittest.TestCase):
             "shadowbox.display.ssd1306",
             "shadowbox.display.ssd1309",
             "shadowbox.display.st7789_raw",
+            "shadowbox.display.st7735s_hat",
         ):
             self._saved_modules[name] = sys.modules.get(name)
             sys.modules.pop(name, None)
@@ -35,6 +36,10 @@ class DisplayDefaultsTests(unittest.TestCase):
         st7789_raw_module.ST7789RawDisplay = _FakeDisplay
         sys.modules["shadowbox.display.st7789_raw"] = st7789_raw_module
 
+        st7735s_hat_module = types.ModuleType("shadowbox.display.st7735s_hat")
+        st7735s_hat_module.ST7735SHatDisplay = _FakeDisplay
+        sys.modules["shadowbox.display.st7735s_hat"] = st7735s_hat_module
+
         self.display_module = importlib.import_module("shadowbox.display")
 
     def tearDown(self) -> None:
@@ -43,6 +48,7 @@ class DisplayDefaultsTests(unittest.TestCase):
             "shadowbox.display.ssd1306",
             "shadowbox.display.ssd1309",
             "shadowbox.display.st7789_raw",
+            "shadowbox.display.st7735s_hat",
         ):
             sys.modules.pop(name, None)
 
@@ -72,6 +78,30 @@ class DisplayDefaultsTests(unittest.TestCase):
                 "logical_width": 320,
                 "logical_height": 240,
                 "invert_colors": False,
+            },
+        )
+
+    def test_st7735s_hat_profile_matches_waveshare_144_hat_defaults(self) -> None:
+        with mock.patch.dict(os.environ, {"SHADOWBOX_DISPLAY": "st7735s_hat"}, clear=True):
+            display = self.display_module.load_display_from_env()
+
+        self.assertEqual(type(display).__name__, "_FakeDisplay")
+        self.assertEqual(
+            display.kwargs,
+            {
+                "bus": 0,
+                "cs": 0,
+                "dc": 25,
+                "rst": 27,
+                "backlight": 24,
+                "spi_speed_hz": 20_000_000,
+                "physical_width": 128,
+                "physical_height": 128,
+                "offset_left": 2,
+                "offset_top": 3,
+                "logical_width": 128,
+                "logical_height": 128,
+                "invert_colors": True,
             },
         )
 
