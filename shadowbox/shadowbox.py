@@ -30,6 +30,10 @@ STARTUP_DISCOVERY_TIMEOUT = 15.0
 STARTUP_DISCOVERY_POLL_SECONDS = 0.4
 STARTUP_STABLE_PASSES = 2
 STARTUP_FOUND_HOLD_SECONDS = 1.0
+STARTUP_AUDIO_RECOVERY_HOLD_SECONDS = 3.0
+STARTUP_AUDIO_RECOVERY_DEVICE = "hw:Dummy"
+JACK_CARD_PATH_DEFAULT = "/rnbo/jack/config/card"
+JACK_RESTART_PATH_DEFAULT = "/rnbo/jack/restart"
 
 DIM_TIMEOUT = 120.0
 SLEEP_TIMEOUT = 600.0
@@ -73,6 +77,15 @@ DIM_TIMEOUT = max(0.0, _env_float("SHADOWBOX_DIM_TIMEOUT", DIM_TIMEOUT))
 SLEEP_TIMEOUT = max(DIM_TIMEOUT, _env_float("SHADOWBOX_SLEEP_TIMEOUT", SLEEP_TIMEOUT))
 BRIGHTNESS_NORMAL = max(0, min(255, _env_int("SHADOWBOX_BRIGHTNESS_NORMAL", BRIGHTNESS_NORMAL)))
 BRIGHTNESS_DIM = max(0, min(BRIGHTNESS_NORMAL, _env_int("SHADOWBOX_BRIGHTNESS_DIM", BRIGHTNESS_DIM)))
+STARTUP_DISCOVERY_TIMEOUT = max(0.0, _env_float("SHADOWBOX_STARTUP_DISCOVERY_TIMEOUT", STARTUP_DISCOVERY_TIMEOUT))
+STARTUP_AUDIO_RECOVERY_HOLD_SECONDS = max(
+    0.0,
+    _env_float("SHADOWBOX_STARTUP_AUDIO_RECOVERY_HOLD_SECONDS", STARTUP_AUDIO_RECOVERY_HOLD_SECONDS),
+)
+STARTUP_AUDIO_RECOVERY_DEVICE = _env_text(
+    "SHADOWBOX_STARTUP_AUDIO_RECOVERY_DEVICE",
+    STARTUP_AUDIO_RECOVERY_DEVICE,
+)
 TURBO_FPS = max(1, _env_int("SHADOWBOX_TURBO_FPS", _env_int("SHADOWBOX_BRICK_PANEL_FPS", TURBO_FPS)))
 TURBO_FRAME_DT = 1.0 / TURBO_FPS
 
@@ -248,9 +261,18 @@ def _find_dummy_audio_device(ui) -> str:
     return ""
 
 
+def _audio_needs_dummy_fallback(audio: dict) -> bool:
+    if not audio.get("input_targets") and not audio.get("output_targets"):
+        return True
+
+    current_card = str(audio.get("current_card", "")).strip()
+    card_options = {str(option).strip() for option in audio.get("card_options", []) if str(option).strip()}
+    return bool(current_card and card_options and current_card not in card_options)
+
+
 def _try_dummy_audio_fallback(ui, rnbo) -> bool:
     audio = ui.state.system.get("audio", {})
-    if audio.get("input_targets") or audio.get("output_targets"):
+    if not _audio_needs_dummy_fallback(audio):
         return False
 
     dummy_device = _find_dummy_audio_device(ui)
@@ -262,10 +284,26 @@ def _try_dummy_audio_fallback(ui, rnbo) -> bool:
         return False
 
     rnbo.set_audio_device(dummy_device)
-    rnbo.restart_jack(ui.state.system.get("maint", {}).get("jack_restart_path", ""))
+    restart_path = ui.state.system.get("maint", {}).get("jack_restart_path", "") or JACK_RESTART_PATH_DEFAULT
+    rnbo.restart_jack(restart_path)
     sleep(0.6)
     ui.apply_runner_snapshot(rnbo.discover())
     return True
+
+
+def _try_startup_audio_recovery(rnbo, device_name: str = STARTUP_AUDIO_RECOVERY_DEVICE) -> bool:
+    device_name = str(device_name or "").strip()
+    if not device_name:
+        return False
+
+    try:
+        print(f"Startup discovery timed out; trying audio recovery with {device_name!r}")
+        rnbo.send_value(JACK_CARD_PATH_DEFAULT, device_name)
+        rnbo.restart_jack(JACK_RESTART_PATH_DEFAULT)
+        return True
+    except Exception as exc:
+        print("Startup audio recovery failed:", exc)
+        return False
 
 
 def _discover_new_instance_ids(ui, rnbo, before_ids: list[str], attempts: int = 5, delay: float = 0.2) -> tuple[list[str], list[str]]:
@@ -405,6 +443,9 @@ def main():
     startup_stable_passes = 0
     startup_signature = None
     startup_found_at = None
+    startup_dummy_fallback_attempted = False
+    startup_recovery_attempted = False
+    startup_recovery_started = None
 
     current_snapshot = None
     proceed_from_startup = False
@@ -425,6 +466,13 @@ def main():
                 current_snapshot = rnbo.discover()
                 ui.apply_runner_snapshot(current_snapshot)
                 ui.set_busy(False)
+
+                if not startup_dummy_fallback_attempted and _try_dummy_audio_fallback(ui, rnbo):
+                    startup_dummy_fallback_attempted = True
+                    startup_signature = None
+                    startup_stable_passes = 0
+                    startup_found_at = None
+                    continue
 
                 if _snapshot_ready(current_snapshot):
                     signature = _snapshot_signature(current_snapshot)
@@ -447,6 +495,23 @@ def main():
 
             if startup_found_at is not None and (now - startup_found_at) >= STARTUP_FOUND_HOLD_SECONDS:
                 break
+
+            if (
+                STARTUP_DISCOVERY_TIMEOUT > 0.0
+                and (now - startup_started) >= STARTUP_DISCOVERY_TIMEOUT
+                and not _snapshot_ready(current_snapshot)
+            ):
+                if not startup_recovery_attempted:
+                    startup_recovery_attempted = True
+                    startup_recovery_started = now
+                    _try_startup_audio_recovery(rnbo)
+                elif (
+                    startup_recovery_started is not None
+                    and (now - startup_recovery_started) >= STARTUP_AUDIO_RECOVERY_HOLD_SECONDS
+                ):
+                    print("Startup discovery timed out; continuing without a ready RNBO snapshot")
+                    break
+
             status_line, hint_line = _startup_status_lines(current_snapshot)
             renderer.draw_startup_status(
                 "SHADOWBOX",
@@ -466,6 +531,7 @@ def main():
 
     is_dimmed = False
     is_sleeping = False
+    dummy_audio_fallback_attempted = False
 
     def mark_activity() -> None:
         nonlocal last_activity, is_dimmed, is_sleeping
@@ -761,6 +827,8 @@ def main():
                 if not ui.should_pause_refresh():
                     ui.set_busy(True, "refresh")
                     ui.apply_runner_snapshot(rnbo.discover())
+                    if not dummy_audio_fallback_attempted and _try_dummy_audio_fallback(ui, rnbo):
+                        dummy_audio_fallback_attempted = True
                     ui.set_busy(False)
 
             # OLED dim / sleep policy

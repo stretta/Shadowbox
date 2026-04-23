@@ -52,7 +52,7 @@ class ST7735SHatDisplay(ST7789RawDisplay):
     def _madctl(self) -> int:
         return 0x68
 
-    def init(self) -> None:
+    def _initialize_panel(self) -> None:
         self._hardware_reset()
         self._command(0x01)
         time.sleep(0.15)
@@ -81,6 +81,9 @@ class ST7735SHatDisplay(ST7789RawDisplay):
             self._command(command, data)
 
         time.sleep(0.05)
+
+    def init(self) -> None:
+        self._initialize_panel()
         self.is_sleeping = False
         self._set_backlight(self._backlight_level)
         self.clear()

@@ -56,6 +56,7 @@ class Waveshare2InchDisplay(DisplayBackend):
         self._canvas = Image.new("L", (self.width, self.height), 0)
         self._draw = ImageDraw.Draw(self._canvas)
         self.is_sleeping = False
+        self._backlight_level = 1.0
         self.fg_color = fg_color
         self.bg_color = bg_color
 
@@ -93,12 +94,13 @@ class Waveshare2InchDisplay(DisplayBackend):
         sleep(0.01)
 
     def _set_backlight(self, duty_cycle: float) -> None:
+        self._backlight_level = max(0.0, min(1.0, duty_cycle))
         if self._backlight is not None:
-            self._backlight.value = max(0.0, min(1.0, duty_cycle))
+            self._backlight.value = self._backlight_level
 
-    def init(self) -> None:
+    def _initialize_panel(self) -> None:
         self._reset()
-        self._set_backlight(1.0)
+        self._set_backlight(self._backlight_level)
 
         init_sequence = [
             # Landscape orientation that matches the OLED reading direction.
@@ -127,6 +129,8 @@ class Waveshare2InchDisplay(DisplayBackend):
             self._command(cmd)
             self._data(data)
 
+    def init(self) -> None:
+        self._initialize_panel()
         self.is_sleeping = False
         self.clear()
         self.show()
@@ -188,8 +192,8 @@ class Waveshare2InchDisplay(DisplayBackend):
 
     def wake(self) -> None:
         if self.is_sleeping:
-            self._command(0x29)
-            self._set_backlight(1.0)
+            # Reinitialize on wake so the panel reliably resumes after deep idle.
+            self._initialize_panel()
             self.is_sleeping = False
             self.show()
 

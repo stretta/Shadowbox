@@ -1,5 +1,7 @@
 import importlib
+import importlib.util
 import os
+from pathlib import Path
 import sys
 import types
 import unittest
@@ -104,6 +106,107 @@ class DisplayDefaultsTests(unittest.TestCase):
                 "invert_colors": True,
             },
         )
+
+
+class DisplayWakeTests(unittest.TestCase):
+    @staticmethod
+    def _load_display_class(module_name: str, relative_path: str, class_name: str):
+        root = Path(__file__).resolve().parents[1]
+        module_path = root / relative_path
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec is not None
+        assert spec.loader is not None
+
+        shadowbox_module = types.ModuleType("shadowbox")
+        display_package = types.ModuleType("shadowbox.display")
+        base_module = types.ModuleType("shadowbox.display.base")
+        base_module.DisplayBackend = object
+        tft_text_module = types.ModuleType("shadowbox.display.tft_text")
+        tft_text_module.line_height = lambda scale=1, weight="regular": 8 * scale
+        tft_text_module.measure_text = lambda text, scale=1, weight="regular": (len(str(text)) * 6 * scale, 8 * scale)
+        tft_text_module.render_text_mask = lambda text, scale=1, weight="regular": types.SimpleNamespace(width=0, height=0)
+        tft_text_module.mask_to_rgb = lambda image, fg, bg: image
+
+        pil_module = types.ModuleType("PIL")
+        pil_module.Image = types.SimpleNamespace(
+            new=lambda *args, **kwargs: None,
+            Resampling=types.SimpleNamespace(NEAREST=0),
+            Transpose=types.SimpleNamespace(ROTATE_270=0, ROTATE_180=1, ROTATE_90=2),
+        )
+        pil_module.ImageDraw = types.SimpleNamespace(Draw=lambda image: None)
+
+        stubs = {
+            "shadowbox": shadowbox_module,
+            "shadowbox.display": display_package,
+            "shadowbox.display.base": base_module,
+            "shadowbox.display.tft_text": tft_text_module,
+            "PIL": pil_module,
+            "spidev": types.ModuleType("spidev"),
+            "gpiozero": types.SimpleNamespace(PWMOutputDevice=object, DigitalOutputDevice=object),
+            "numpy": types.ModuleType("numpy"),
+        }
+
+        with mock.patch.dict(sys.modules, stubs, clear=False):
+            spec.loader.exec_module(module)
+        return getattr(module, class_name)
+
+    def test_st7789_raw_wake_reinitializes_panel_and_replays_framebuffer(self) -> None:
+        ST7789RawDisplay = self._load_display_class(
+            "shadowbox.display.st7789_raw_testcopy",
+            "shadowbox/display/st7789_raw.py",
+            "ST7789RawDisplay",
+        )
+        display = ST7789RawDisplay.__new__(ST7789RawDisplay)
+        display.is_sleeping = True
+        display._backlight_level = 0.5
+        calls: list[object] = []
+        display._initialize_panel = lambda: calls.append("init")
+        display._set_backlight = lambda level: calls.append(("backlight", level))
+        display.show = lambda: calls.append("show")
+
+        display.wake()
+
+        self.assertFalse(display.is_sleeping)
+        self.assertEqual(calls, ["init", ("backlight", 0.5), "show"])
+
+    def test_st7789_raw_init_power_cycles_backlight_before_panel_init(self) -> None:
+        ST7789RawDisplay = self._load_display_class(
+            "shadowbox.display.st7789_raw_testcopy",
+            "shadowbox/display/st7789_raw.py",
+            "ST7789RawDisplay",
+        )
+        display = ST7789RawDisplay.__new__(ST7789RawDisplay)
+        display._backlight_level = 0.75
+        calls: list[object] = []
+        display._power_cycle_backlight = lambda: calls.append("power")
+        display._initialize_panel = lambda: calls.append("init")
+        display._set_backlight = lambda level: calls.append(("backlight", level))
+        display.clear = lambda: calls.append("clear")
+        display.show = lambda: calls.append("show")
+
+        display.init()
+
+        self.assertFalse(display.is_sleeping)
+        self.assertEqual(calls, ["power", "init", ("backlight", 0.75), "clear", "show"])
+
+    def test_waveshare_wake_reinitializes_panel_and_replays_framebuffer(self) -> None:
+        Waveshare2InchDisplay = self._load_display_class(
+            "shadowbox.display.waveshare_2inch_testcopy",
+            "shadowbox/display/waveshare_2inch.py",
+            "Waveshare2InchDisplay",
+        )
+        display = Waveshare2InchDisplay.__new__(Waveshare2InchDisplay)
+        display.is_sleeping = True
+        display._backlight_level = 0.25
+        calls: list[object] = []
+        display._initialize_panel = lambda: calls.append("init")
+        display.show = lambda: calls.append("show")
+
+        display.wake()
+
+        self.assertFalse(display.is_sleeping)
+        self.assertEqual(calls, ["init", "show"])
 
 
 if __name__ == "__main__":

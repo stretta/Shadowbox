@@ -148,6 +148,15 @@ class ST7789RawDisplay(DisplayBackend):
         for i in range(0, len(data), chunk):
             self._spi.xfer3(list(data[i : i + chunk]))
 
+    def _power_cycle_backlight(self) -> None:
+        if self._backlight is None:
+            return
+        target_level = self._backlight_level
+        self._set_backlight(0.0)
+        time.sleep(0.25)
+        self._set_backlight(target_level)
+        time.sleep(0.05)
+
     def _hardware_reset(self) -> None:
         if self._rst is None:
             return
@@ -167,7 +176,7 @@ class ST7789RawDisplay(DisplayBackend):
         # Variant B from the raw test was the working sequence on the custom pt4 module.
         return 0x70 if self.rotation == 0 else 0xE0
 
-    def init(self) -> None:
+    def _initialize_panel(self) -> None:
         self._hardware_reset()
         self._command(0x01)
         time.sleep(0.15)
@@ -187,6 +196,10 @@ class ST7789RawDisplay(DisplayBackend):
         self._command(0x21 if self.invert_colors else 0x20)
         self._command(0x29)
         time.sleep(0.05)
+
+    def init(self) -> None:
+        self._power_cycle_backlight()
+        self._initialize_panel()
         self.is_sleeping = False
         self._set_backlight(self._backlight_level)
         self.clear()
@@ -272,7 +285,9 @@ class ST7789RawDisplay(DisplayBackend):
 
     def wake(self) -> None:
         if self.is_sleeping:
-            self._command(0x29)
+            # Some TFT modules fail to restore GRAM access after long idle periods
+            # unless the controller is fully reinitialized.
+            self._initialize_panel()
             self.is_sleeping = False
             self._set_backlight(self._backlight_level)
             self.show()
