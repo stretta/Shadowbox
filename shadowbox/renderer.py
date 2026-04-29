@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from shadowbox.editors.pitch_display import is_pitch_display_param, normalize_pitch_to_midi_note
+from shadowbox.editors.scope import is_scope_param, scope_time_seconds
 from shadowbox.editors.step16 import build_cells, is_step16_param
 from shadowbox.editors.ttid import get_root_names, is_pc_on, is_ttid_param, note_name
 from shadowbox.rnbo import RNBO_HOST
@@ -1116,6 +1117,37 @@ class ShadowboxRenderer:
             is_in_tune,
         )
 
+    def _draw_polyline(self, points: list[tuple[int, int]], on: bool = True) -> None:
+        if len(points) < 2:
+            return
+        for (x0, y0), (x1, y1) in zip(points, points[1:]):
+            dx = abs(x1 - x0)
+            dy = -abs(y1 - y0)
+            sx = 1 if x0 < x1 else -1
+            sy = 1 if y0 < y1 else -1
+            err = dx + dy
+            x = x0
+            y = y0
+            while True:
+                self.display.pixel(x, y, on)
+                if x == x1 and y == y1:
+                    break
+                e2 = 2 * err
+                if e2 >= dy:
+                    err += dy
+                    x += sx
+                if e2 <= dx:
+                    err += dx
+                    y += sy
+
+    def _scope_time_label(self, sample_count: int, sample_rate: Any) -> str:
+        seconds = scope_time_seconds(sample_count, sample_rate)
+        if seconds is None:
+            return "--"
+        if seconds < 1.0:
+            return f"{seconds * 1000:.1f}ms"
+        return f"{seconds:.3f}s"
+
     def _draw_continuous_bar(self, norm: float, x: int, y: int, w: int, h: int) -> None:
         norm = max(0.0, min(1.0, norm))
         fill_w = int(norm * (w - 2))
@@ -1495,6 +1527,45 @@ class ShadowboxRenderer:
                 status_text = "SHARP"
             self.text_center_scaled(status_text, status_y, status_scale)
 
+    def draw_edit_scope(self, ui, param, state) -> None:
+        samples = list(getattr(state, "edit_scope_samples", []) or [])
+        if self.is_full_tft:
+            x, y, w, h = 16, 48, self.display.width - 32, 126
+            label_scale = 2
+            value_y = y + h + 18
+        elif self.is_tall:
+            x, y, w, h = 6, 30, self.display.width - 12, 62 if self.is_tft else 54
+            label_scale = 1
+            value_y = y + h + 8
+        else:
+            x, y, w, h = 4, 13, self.display.width - 8, 14
+            label_scale = 1
+            value_y = y + h + 1
+
+        self.display.rect(x, y, w, h, True, False)
+        mid_y = y + h // 2
+        self.display.hline(x + 1, mid_y, max(0, w - 2), True)
+
+        if samples and w > 2 and h > 2:
+            visible = samples[-max(1, w - 2):]
+            if len(visible) == 1:
+                visible = visible * 2
+            points: list[tuple[int, int]] = []
+            denom = max(1, len(visible) - 1)
+            for idx, sample in enumerate(visible):
+                sx = x + 1 + int(round(idx * (w - 3) / denom))
+                sy = mid_y - int(round(max(-1.0, min(1.0, float(sample))) * ((h - 3) / 2)))
+                points.append((sx, max(y + 1, min(y + h - 2, sy))))
+            self._draw_polyline(points, True)
+        else:
+            self.text_center("waiting", mid_y - 4)
+
+        sample_rate = getattr(state, "edit_value", None)
+        time_label = self._scope_time_label(min(len(samples), max(0, w - 2)), sample_rate)
+        value_text = format_param_value(param, sample_rate)
+        footer = f"{value_text}  {time_label}"
+        self.text_center_scaled(shorten(footer, 28 if self.is_full_tft else 20), value_y, label_scale)
+
     def draw_edit(self, ui, selected_param: dict, state) -> None:
         if selected_param is None:
             self.text_center("no param", 16)
@@ -1507,6 +1578,9 @@ class ShadowboxRenderer:
             return
         if is_pitch_display_param(selected_param):
             self.draw_edit_pitch_display(ui, selected_param)
+            return
+        if is_scope_param(selected_param):
+            self.draw_edit_scope(ui, selected_param, state)
             return
 
         if self.is_full_tft:

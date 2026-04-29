@@ -104,7 +104,7 @@ def extract_meta_info(node: dict) -> dict[str, Any]:
             metadata[key] = parsed
             return
 
-        if text.lower() in {"ttid", "step16", "pitch_display"} and "editor" not in metadata:
+        if text.lower() in {"ttid", "step16", "pitch_display", "scope", "scope_display", "time_domain_scope"} and "editor" not in metadata:
             metadata["editor"] = text
 
     meta_node = contents.get("meta", {})

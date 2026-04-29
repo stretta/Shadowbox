@@ -132,6 +132,26 @@ Shadowbox behavior:
 - incoming OSC state updates keep the screen current in real time
 - short press or long press exits back to the parameter list
 
+5b. Time domain scope editor contract
+
+The `scope` editor is a live oscilloscope-style viewer for scalar amplitude samples. It is intended for a parameter such as `SamplingRate` tagged with scope metadata, so turning the encoder adjusts that parameter while the waveform remains visible.
+
+Expected published structure:
+- editable sample-rate param: `/rnbo/inst/<id>/params/SamplingRate`
+- param metadata: `{"editor":"scope"}`
+- runtime sample value: `/rnbo/inst/<id>/messages/out/scope`
+
+Optional metadata overrides:
+- `scope_state`: alternate state key for the incoming sample stream
+
+Shadowbox behavior:
+- opening the tagged parameter enters a live waveform editor
+- `/scope` values are treated as amplitudes in the `-1.0..1.0` range and clipped to that range
+- incoming samples are drawn left-to-right with the newest sample at the right edge, like a scrolling oscilloscope trace
+- the displayed time window is derived from the number of visible samples and the current parameter value
+- encoder turns continue to update the tagged parameter while the waveform is visible
+- short press exits back to the parameter list; long press exits and restores the original parameter value
+
 6. RNBO authoring guidelines
 
 For metadata-driven UI integration, the RNBO side should follow these rules:
