@@ -56,6 +56,26 @@ class _FullTftDisplay(_StubDisplay):
     height = 240
 
 
+class _TouchPitchDisplay(_StubDisplay):
+    width = 800
+    height = 480
+
+    def fill_rect_color(self, x: int, y: int, w: int, h: int, color) -> None:
+        self.ops.append(("fill_rect_color", x, y, w, h, color))
+
+    def rect_color(self, x: int, y: int, w: int, h: int, color, fill: bool = False) -> None:
+        self.ops.append(("rect_color", x, y, w, h, color, fill))
+
+    def rounded_rect_color(self, x: int, y: int, w: int, h: int, radius: int, color, fill: bool = False) -> None:
+        self.ops.append(("rounded_rect_color", x, y, w, h, radius, color, fill))
+
+    def hline_color(self, x: int, y: int, w: int, color) -> None:
+        self.ops.append(("hline_color", x, y, w, color))
+
+    def text_color(self, text: str, x: int, y: int, color, scale: int = 1, weight: str = "regular") -> None:
+        self.ops.append(("text_color", text, x, y, color, scale, weight))
+
+
 class _HatDisplay(_StubDisplay):
     width = 128
     height = 128
@@ -177,6 +197,24 @@ class PitchDisplayTests(unittest.TestCase):
         self.assertNotIn("waiting for OSCQuery Runner", rendered)
         self.assertFalse(any("waiting" in text.lower() for text in rendered))
         self.assertFalse(any("press" in text.lower() for text in rendered))
+
+    def test_touch_tuner_uses_card_style_and_larger_readout(self) -> None:
+        display = _TouchPitchDisplay()
+        renderer = ShadowboxRenderer(display)
+        renderer.set_touch_mode(True)
+        ui = SimpleNamespace(
+            active_pitch_display_pitch={"value": "69.8"},
+            active_pitch_display_cents={"value": "+1.7"},
+        )
+
+        renderer.draw_edit_pitch_display(ui, {"name": "pitch"})
+
+        rounded = [op for op in display.ops if op[0] == "rounded_rect_color"]
+        text_ops = [op for op in display.ops if isinstance(op[0], str)]
+        self.assertTrue(rounded)
+        self.assertIn("TUNER", [op[1] for op in display.ops if op[0] == "text_color"])
+        self.assertTrue(any(op[0] == "text" and op[1] in {"70", "A#4"} and op[4] == 6 for op in text_ops))
+        self.assertTrue(any(op[0] == "text" and op[1] == "+1.7c" and op[4] == 2 for op in display.ops))
 
 
 if __name__ == "__main__":

@@ -25,6 +25,17 @@ GND → GND
 SDA → GPIO2
 SCL → GPIO3
 
+Waveshare 5-inch DSI LCD
+
+Connect the panel to the Raspberry Pi DSI ribbon connector. Pi 4B/3B-class
+boards use the 15-pin DSI connector. Pi 5, CM4, CM3+, and CM3 builds should use
+the 22-pin DSI1 connector by default unless the OS config explicitly enables
+DSI0.
+
+Shadowbox backend:
+
+SHADOWBOX_DISPLAY=waveshare_5inch_dsi
+
 Waveshare 1.44-inch LCD HAT
 
 Display

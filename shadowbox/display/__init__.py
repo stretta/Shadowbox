@@ -89,6 +89,16 @@ def load_display_from_env(default_kind: str = "st7789_raw"):
             logical_width=_env_int("SHADOWBOX_LOGICAL_WIDTH", 320),
             logical_height=_env_int("SHADOWBOX_LOGICAL_HEIGHT", 240),
         )
+    elif kind == "waveshare_5inch_dsi":
+        kwargs.update(
+            framebuffer=os.environ.get("SHADOWBOX_DSI_FRAMEBUFFER", "/dev/fb0"),
+            physical_width=_env_int("SHADOWBOX_DSI_WIDTH", 800),
+            physical_height=_env_int("SHADOWBOX_DSI_HEIGHT", 480),
+            logical_width=_env_int("SHADOWBOX_LOGICAL_WIDTH", 800),
+            logical_height=_env_int("SHADOWBOX_LOGICAL_HEIGHT", 480),
+            pixel_format=os.environ.get("SHADOWBOX_DSI_PIXEL_FORMAT", "auto"),
+            backlight_path=os.environ.get("SHADOWBOX_DSI_BACKLIGHT_PATH") or None,
+        )
 
     return create_display(kind, **kwargs)
 
@@ -114,6 +124,10 @@ def create_display(kind: str = "ssd1306", **kwargs):
         from shadowbox.display.waveshare_2inch import Waveshare2InchDisplay
 
         return Waveshare2InchDisplay(**kwargs)
+    if kind == "waveshare_5inch_dsi":
+        from shadowbox.display.waveshare_5inch_dsi import Waveshare5InchDSIDisplay
+
+        return Waveshare5InchDSIDisplay(**kwargs)
     raise ValueError(f"Unknown display backend: {kind}")
 
 

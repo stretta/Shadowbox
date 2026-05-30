@@ -1,3 +1,4 @@
+import json
 import sys
 import types
 import unittest
@@ -11,7 +12,7 @@ pythonosc_module.udp_client = udp_client_module
 sys.modules.setdefault("pythonosc", pythonosc_module)
 sys.modules.setdefault("pythonosc.udp_client", udp_client_module)
 
-from shadowbox.renderer import ShadowboxRenderer, format_param_value, routing_port_display_name
+from shadowbox.renderer import ShadowboxRenderer, format_param_value, param_midi_mapping_marker, routing_port_display_name
 from shadowbox.rnbo import (
     discover_host_network,
     discover_instances,
@@ -20,7 +21,7 @@ from shadowbox.rnbo import (
     discover_system,
     extract_meta_info,
 )
-from shadowbox.ui import ShadowboxUI, apply_edit_delta, edit_as_int, is_boolish, normalize_current_value_for_edit, numeric_step
+from shadowbox.ui import UIEvent, ShadowboxUI, apply_edit_delta, edit_as_int, is_boolish, normalize_current_value_for_edit, numeric_step
 
 
 class _DummyDisplay:
@@ -182,6 +183,148 @@ class ParamMetadataTests(unittest.TestCase):
         self.assertFalse(renderer._is_bool_param({"type": "f", "min": 0, "max": 1, "metadata": {}}, 1))
         self.assertTrue(renderer._is_bool_param({"type": "f", "min": 0, "max": 1, "metadata": {"bool": True}}, 1))
 
+    def test_bool_params_toggle_directly_from_parameter_list(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.ui_mode = "PARAM_LIST"
+        ui.state.instances = [
+            {
+                "id": "1",
+                "params": [
+                    {"name": "enabled", "value": 0, "path": "/params/enabled", "metadata": {"bool": True}},
+                ],
+            }
+        ]
+        ui.state.active_instance_id = "1"
+        ui.state.param_cursor = 1
+
+        ui.handle_event(UIEvent(kind="short_press"))
+
+        self.assertEqual(ui.state.ui_mode, "PARAM_LIST")
+        self.assertEqual(ui.selected_param.get("value"), 1)
+        queued_kinds = [action.kind for action in ui.pop_actions()]
+        self.assertIn("set_param", queued_kinds)
+        self.assertIn("save_state", queued_kinds)
+
+    def test_enum_params_still_open_the_enum_list(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.ui_mode = "PARAM_LIST"
+        ui.state.instances = [
+            {
+                "id": "1",
+                "params": [
+                    {"name": "mode", "value": "A", "path": "/params/mode", "vals": ["A", "B", "C"]},
+                ],
+            }
+        ]
+        ui.state.active_instance_id = "1"
+        ui.state.param_cursor = 1
+
+        ui.handle_event(UIEvent(kind="short_press"))
+
+        self.assertEqual(ui.state.ui_mode, "ENUM_LIST")
+        self.assertEqual(ui.state.edit_value, "A")
+
+    def test_live_param_update_refreshes_matching_param(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.instances = [
+            {
+                "id": "1",
+                "params": [
+                    {"name": "cutoff", "value": 10.0, "path": "/rnbo/inst/1/params/cutoff"},
+                    {"name": "resonance", "value": 0.0, "path": "/rnbo/inst/1/params/resonance"},
+                ],
+            }
+        ]
+
+        self.assertTrue(ui.apply_instance_param_update("1", "/rnbo/inst/1/params/cutoff", 42.0))
+
+        self.assertEqual(ui.state.instances[0]["params"][0]["value"], 42.0)
+        self.assertEqual(ui.state.instances[0]["params"][1]["value"], 0.0)
+
+    def test_live_param_update_refreshes_open_edit_value(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.instances = [
+            {
+                "id": "1",
+                "params": [
+                    {
+                        "name": "WavetableA",
+                        "value": 3.0,
+                        "path": "/rnbo/inst/1/params/WavetableA",
+                        "metadata": {"edit_as": "int"},
+                    },
+                ],
+            }
+        ]
+        ui.state.active_instance_id = "1"
+        ui.state.param_cursor = 1
+        ui.state.ui_mode = "EDIT"
+        ui.state.edit_value = 3
+
+        self.assertTrue(ui.apply_instance_param_update("1", "/rnbo/inst/1/params/WavetableA", 11.7))
+
+        self.assertEqual(ui.selected_param.get("value"), 11.7)
+        self.assertEqual(ui.state.edit_value, 12)
+
+    def test_midi_learn_button_enables_last_message_reporting(self) -> None:
+        ui = ShadowboxUI()
+        param = {"name": "WaveBiasA", "value": 0, "path": "/rnbo/inst/5/params/WaveBiasA", "metadata": {}}
+        ui.state.instances = [{"id": "5", "params": [param]}]
+        ui.state.active_instance_id = "5"
+        ui.state.param_cursor = 1
+        ui.state.ui_mode = "EDIT"
+
+        ui.handle_event(UIEvent(kind="tap_button", button_id="learn"))
+
+        actions = [action for action in ui.pop_actions() if action.kind != "save_state"]
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0].kind, "send_osc")
+        self.assertEqual(actions[0].path, "/rnbo/inst/5/midi/last/report")
+        self.assertTrue(actions[0].value)
+        self.assertEqual(ui.state.midi_learn_param_path, "/rnbo/inst/5/params/WaveBiasA")
+
+    def test_midi_learn_update_writes_selected_param_metadata(self) -> None:
+        ui = ShadowboxUI()
+        param = {"name": "WaveBiasA", "value": 0, "path": "/rnbo/inst/5/params/WaveBiasA", "metadata": {"edit_as": "int"}}
+        ui.state.instances = [{"id": "5", "params": [param]}]
+        ui.state.active_instance_id = "5"
+        ui.state.param_cursor = 1
+        ui.state.ui_mode = "EDIT"
+        ui.state.midi_learn_instance_id = "5"
+        ui.state.midi_learn_param_path = "/rnbo/inst/5/params/WaveBiasA"
+
+        self.assertTrue(ui.apply_instance_midi_learn_update("5", "/rnbo/inst/5/midi/last/value", '{"chan":4,"ctrl":16}'))
+
+        actions = [action for action in ui.pop_actions() if action.kind != "save_state"]
+        self.assertEqual(actions[0].kind, "send_osc")
+        self.assertEqual(actions[0].path, "/rnbo/inst/5/params/WaveBiasA/meta")
+        self.assertEqual(json.loads(actions[0].value), {"edit_as": "int", "midi": {"chan": 4, "ctrl": 16}})
+        self.assertEqual(actions[1].kind, "save_midi_profile")
+        self.assertEqual(actions[2].path, "/rnbo/inst/5/midi/last/report")
+        self.assertFalse(actions[2].value)
+        self.assertEqual(param["metadata"]["midi"], {"chan": 4, "ctrl": 16})
+        self.assertEqual(ui.state.midi_learn_param_path, "")
+
+    def test_midi_clear_button_removes_mapping_metadata(self) -> None:
+        ui = ShadowboxUI()
+        param = {
+            "name": "WaveBiasA",
+            "value": 0,
+            "path": "/rnbo/inst/5/params/WaveBiasA",
+            "metadata": {"edit_as": "int", "midi": {"chan": 4, "ctrl": 16}},
+        }
+        ui.state.instances = [{"id": "5", "params": [param]}]
+        ui.state.active_instance_id = "5"
+        ui.state.param_cursor = 1
+        ui.state.ui_mode = "EDIT"
+
+        ui.handle_event(UIEvent(kind="tap_button", button_id="clear"))
+
+        actions = [action for action in ui.pop_actions() if action.kind != "save_state"]
+        self.assertEqual(actions[0].path, "/rnbo/inst/5/params/WaveBiasA/meta")
+        self.assertEqual(json.loads(actions[0].value), {"edit_as": "int"})
+        self.assertNotIn("midi", param["metadata"])
+
     def test_format_param_value_uses_display_precision(self) -> None:
         param = {"metadata": {"display_precision": 2}}
         self.assertEqual(format_param_value(param, 1.234), "1.23")
@@ -193,6 +336,10 @@ class ParamMetadataTests(unittest.TestCase):
     def test_format_param_value_appends_units_after_precision_formatting(self) -> None:
         param = {"metadata": {"display_precision": 1, "unit": "Hz"}}
         self.assertEqual(format_param_value(param, 42.34), "42.3Hz")
+
+    def test_param_midi_mapping_marker_formats_channel_and_cc(self) -> None:
+        param = {"metadata": {"midi": {"chan": 4.0, "ctrl": 28.0}}}
+        self.assertEqual(param_midi_mapping_marker(param), "4:28")
 
     def test_extract_meta_info_parses_editor_and_precision_from_tag_list(self) -> None:
         node = {
@@ -223,6 +370,15 @@ class ParamMetadataTests(unittest.TestCase):
         }
 
         self.assertEqual(extract_meta_info(node).get("editor"), "step16")
+
+    def test_extract_meta_info_promotes_trigger_sequencer_tag_to_editor(self) -> None:
+        node = {
+            "CONTENTS": {
+                "meta": {"VALUE": '["trigger sequencer"]'},
+            }
+        }
+
+        self.assertEqual(extract_meta_info(node).get("editor"), "trigger sequencer")
 
     def test_extract_meta_info_preserves_direct_unit_children(self) -> None:
         node = {
@@ -461,6 +617,7 @@ class ParamMetadataTests(unittest.TestCase):
                                                 "load": {"FULL_PATH": "/rnbo/inst/1/presets/load"},
                                                 "save": {"FULL_PATH": "/rnbo/inst/1/presets/save"},
                                                 "rename": {"FULL_PATH": "/rnbo/inst/1/presets/rename"},
+                                                "destroy": {"FULL_PATH": "/rnbo/inst/1/presets/destroy"},
                                                 "current": {"CONTENTS": {"name": {"VALUE": "Bass"}}},
                                             }
                                         },
@@ -477,6 +634,7 @@ class ParamMetadataTests(unittest.TestCase):
 
         self.assertEqual(instances[0]["preset_save_path"], "/rnbo/inst/1/presets/save")
         self.assertEqual(instances[0]["preset_rename_path"], "/rnbo/inst/1/presets/rename")
+        self.assertEqual(instances[0]["preset_destroy_path"], "/rnbo/inst/1/presets/destroy")
         self.assertEqual(instances[0]["current_preset_name"], "Bass")
 
     def test_discover_system_includes_set_name_and_sets_section(self) -> None:

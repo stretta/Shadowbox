@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass
 
 import pigpio
+from shadowbox.touch import TouchLayout, TouchZoneReader, direct_action_for_point
 
 
 # ============================================================
@@ -24,6 +25,10 @@ import pigpio
 class EncoderEvent:
     kind: str
     delta: int = 0
+    index: int | None = None
+    button_id: str = ""
+    value: float | None = None
+    pressed: bool = False
 
 
 # ============================================================
@@ -39,6 +44,11 @@ class EncoderInput:
     - EncoderEvent(kind="step", delta=-1)
     - EncoderEvent(kind="short_press")
     - EncoderEvent(kind="long_press")
+    - EncoderEvent(kind="tap_row", index=0)
+    - EncoderEvent(kind="tap_back")
+    - EncoderEvent(kind="tap_button", button_id="primary")
+    - EncoderEvent(kind="page_up")
+    - EncoderEvent(kind="page_down")
     """
 
     # Full-step quadrature decode table
@@ -69,6 +79,12 @@ class EncoderInput:
         self.back_glitch_us = _env_int("SHADOWBOX_BACK_BUTTON_GLITCH_US", back_glitch_us)
 
         self._events: list[EncoderEvent] = []
+        self._touch_reader: TouchZoneReader | None = None
+        self._touch_layout: TouchLayout | None = None
+
+        if self.input_kind in {"touch_zones", "touch_direct"}:
+            self._init_touch_reader()
+            return
 
         self._pi = pigpio.pi()
         if not self._pi.connected:
@@ -180,6 +196,26 @@ class EncoderInput:
             if action == "long_press" and self._back_pressed_reader is None:
                 self._back_pressed_reader = lambda pin=pin: self._pi.read(pin) == 0
 
+    def _init_touch_reader(self) -> None:
+        self.clk_pin = None
+        self.dt_pin = None
+        self.sw_pin = None
+        self.back_pin = None
+        self._pi = None
+        self._touch_reader = TouchZoneReader(
+            device=os.environ.get("SHADOWBOX_TOUCH_DEVICE") or None,
+            width=_env_int("SHADOWBOX_TOUCH_WIDTH", 800),
+            height=_env_int("SHADOWBOX_TOUCH_HEIGHT", 480),
+        )
+
+    def set_touch_layout(self, layout: TouchLayout | None) -> None:
+        self._touch_layout = layout
+
+    def touch_sample(self):
+        if self._touch_reader is None:
+            return None
+        return self._touch_reader.current_sample()
+
     # --------------------------------------------------------
     # low-level reads
     # --------------------------------------------------------
@@ -190,9 +226,13 @@ class EncoderInput:
         return (a << 1) | b
 
     def _button_pressed(self) -> bool:
+        if self.input_kind in {"touch_zones", "touch_direct"}:
+            return bool(self._touch_reader and self._touch_reader.pressed)
         return self._pi.read(self.sw_pin) == 0
 
     def _back_button_pressed(self) -> bool:
+        if self.input_kind in {"touch_zones", "touch_direct"}:
+            return False
         if self.input_kind == "waveshare_144_hat":
             return bool(self._back_pressed_reader and self._back_pressed_reader())
         return self.back_pin is not None and self._pi.read(self.back_pin) == 0
@@ -294,6 +334,53 @@ class EncoderInput:
     # --------------------------------------------------------
 
     def get_events(self) -> list[EncoderEvent]:
+        if self.input_kind == "touch_zones":
+            if self._touch_reader is not None:
+                for sample in self._touch_reader.read_samples():
+                    if sample.action == "long_press":
+                        self._events.append(EncoderEvent(kind="long_press"))
+                    elif sample.action == "short_press":
+                        self._events.append(EncoderEvent(kind="short_press"))
+                    elif sample.action == "step:-1":
+                        self._events.append(EncoderEvent(kind="step", delta=-1))
+                    elif sample.action == "step:+1":
+                        self._events.append(EncoderEvent(kind="step", delta=+1))
+            events = self._events[:]
+            self._events.clear()
+            return events
+
+        if self.input_kind == "touch_direct":
+            if self._touch_reader is not None:
+                latest_slider_event: EncoderEvent | None = None
+                for sample in self._touch_reader.read_samples():
+                    action = direct_action_for_point(
+                        sample.normalized_x,
+                        sample.normalized_y,
+                        layout=self._touch_layout,
+                    )
+                    sample_pressed = bool(getattr(sample, "pressed", False))
+                    if sample_pressed and action.kind != "set_edit_value":
+                        continue
+                    event = EncoderEvent(
+                        kind=action.kind,
+                        index=action.index,
+                        button_id=action.button_id,
+                        value=action.value,
+                        pressed=sample_pressed,
+                    )
+                    if action.kind in {"set_edit_value"} and sample_pressed:
+                        latest_slider_event = event
+                        continue
+                    if latest_slider_event is not None:
+                        self._events.append(latest_slider_event)
+                        latest_slider_event = None
+                    self._events.append(event)
+                if latest_slider_event is not None:
+                    self._events.append(latest_slider_event)
+            events = self._events[:]
+            self._events.clear()
+            return events
+
         if self.input_kind == "waveshare_144_hat":
             self._poll_waveshare_hat()
         self._poll_button()
@@ -306,6 +393,8 @@ class EncoderInput:
         return self._button_pressed()
 
     def is_back_button_configured(self) -> bool:
+        if self.input_kind in {"touch_zones", "touch_direct"}:
+            return True
         if self.input_kind == "waveshare_144_hat":
             return self._back_pressed_reader is not None
         return self.back_pin is not None
@@ -318,6 +407,8 @@ class EncoderInput:
             self._cb_a.cancel()
         if hasattr(self, "_cb_b") and self._cb_b is not None:
             self._cb_b.cancel()
+        if hasattr(self, "_touch_reader") and self._touch_reader is not None:
+            self._touch_reader.close()
         if hasattr(self, "_pi") and self._pi is not None:
             self._pi.stop()
 
@@ -356,8 +447,10 @@ def _env_text(name: str, default: str) -> str:
 
 def _detect_input_kind() -> str:
     configured = _env_text("SHADOWBOX_INPUT_KIND", "").lower()
-    if configured in {"encoder", "waveshare_144_hat"}:
+    if configured in {"encoder", "waveshare_144_hat", "touch_zones", "touch_direct"}:
         return configured
+    if os.environ.get("SHADOWBOX_DISPLAY", "").strip().lower() == "waveshare_5inch_dsi":
+        return "touch_direct"
     if os.environ.get("SHADOWBOX_DISPLAY", "").strip().lower() == "st7735s_hat":
         return "waveshare_144_hat"
     return "encoder"

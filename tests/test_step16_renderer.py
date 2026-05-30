@@ -12,6 +12,7 @@ sys.modules.setdefault("pythonosc", pythonosc_module)
 sys.modules.setdefault("pythonosc.udp_client", udp_client_module)
 
 from shadowbox.renderer import STEP16_ENABLED_FILL_LEVEL, ShadowboxRenderer
+from shadowbox.editors.step16 import is_step16_param
 
 
 class _Step16Display:
@@ -21,9 +22,11 @@ class _Step16Display:
     def __init__(self) -> None:
         self.rect_calls: list[tuple[int, int, int, int, bool, bool]] = []
         self.fill_level_calls: list[tuple[int, int, int, int, int]] = []
+        self.hline_calls: list[tuple[int, int, int, bool]] = []
+        self.text_calls: list[str] = []
 
     def text_with_style(self, s: str, x: int, y: int, scale: int = 1, weight: str = "regular", on: bool = True) -> None:
-        pass
+        self.text_calls.append(str(s))
 
     def measure_text(self, s: str, scale: int = 1, weight: str = "regular") -> tuple[int, int]:
         return (len(str(s)) * 8 * scale, 8 * scale)
@@ -32,7 +35,7 @@ class _Step16Display:
         return 8 * scale
 
     def hline(self, x: int, y: int, w: int, on: bool = True) -> None:
-        pass
+        self.hline_calls.append((x, y, w, on))
 
     def vline(self, x: int, y: int, h: int, on: bool = True) -> None:
         pass
@@ -45,6 +48,10 @@ class _Step16Display:
 
 
 class Step16RendererTests(unittest.TestCase):
+    def test_trigger_sequencer_editor_alias_selects_step16(self) -> None:
+        self.assertTrue(is_step16_param({"metadata": {"editor": "trigger sequencer"}}))
+        self.assertTrue(is_step16_param({"metadata": {"editor": "trigger_sequencer"}}))
+
     def test_tft_active_steps_use_70_percent_fill_level(self) -> None:
         display = _Step16Display()
         renderer = ShadowboxRenderer(display)
@@ -56,6 +63,31 @@ class Step16RendererTests(unittest.TestCase):
         self.assertEqual(len(display.fill_level_calls), 2)
         self.assertTrue(all(call[-1] == STEP16_ENABLED_FILL_LEVEL for call in display.fill_level_calls))
         self.assertTrue(all(fill is False for *_rest, fill in display.rect_calls[:16]))
+
+    def test_encoder_step16_uses_two_sequential_rows_of_eight(self) -> None:
+        display = _Step16Display()
+        renderer = ShadowboxRenderer(display)
+        ui = SimpleNamespace(active_step16_playhead=None)
+        state = SimpleNamespace(edit_value=0, edit_step16_focus=0)
+
+        renderer.draw_edit_step16(ui, {"name": "step16"}, state)
+
+        cell_rects = [call for call in display.rect_calls if call[2:4] == (30, 48)]
+        self.assertEqual(len(cell_rects), 16)
+        self.assertEqual(len({y for _x, y, _w, _h, _on, _fill in cell_rects}), 2)
+        self.assertEqual([x for x, _y, _w, _h, _on, _fill in cell_rects[:8]], [20, 56, 92, 128, 164, 200, 236, 272])
+        self.assertEqual([x for x, _y, _w, _h, _on, _fill in cell_rects[8:]], [20, 56, 92, 128, 164, 200, 236, 272])
+
+    def test_encoder_step16_draws_playhead_marker(self) -> None:
+        display = _Step16Display()
+        renderer = ShadowboxRenderer(display)
+        ui = SimpleNamespace(active_step16_playhead=9)
+        state = SimpleNamespace(edit_value=0, edit_step16_focus=0)
+
+        renderer.draw_edit_step16(ui, {"name": "step16"}, state)
+
+        self.assertTrue(any(call[2] == 22 and call[3] is True for call in display.hline_calls))
+        self.assertIn("F01 P10 0", display.text_calls)
 
 
 if __name__ == "__main__":

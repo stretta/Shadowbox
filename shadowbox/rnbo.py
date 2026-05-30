@@ -104,7 +104,21 @@ def extract_meta_info(node: dict) -> dict[str, Any]:
             metadata[key] = parsed
             return
 
-        if text.lower() in {"ttid", "step16", "pitch_display", "scope", "scope_display", "time_domain_scope"} and "editor" not in metadata:
+        editor_tag = text.lower()
+        if editor_tag in {
+            "ttid",
+            "step16",
+            "step 16",
+            "trigger_sequencer",
+            "trigger sequencer",
+            "trigger_sequence",
+            "trigger sequence",
+            "trigseq",
+            "pitch_display",
+            "scope",
+            "scope_display",
+            "time_domain_scope",
+        } and "editor" not in metadata:
             metadata["editor"] = text
 
     meta_node = contents.get("meta", {})
@@ -415,6 +429,7 @@ def _discover_instance_preset_capabilities(instance_root: dict) -> dict[str, str
         return {
             "save_path": "",
             "rename_path": "",
+            "destroy_path": "",
             "current_name": "",
         }
 
@@ -425,6 +440,7 @@ def _discover_instance_preset_capabilities(instance_root: dict) -> dict[str, str
     return {
         "save_path": str(safe_get(presets_root, ["save", "FULL_PATH"], "") or ""),
         "rename_path": str(safe_get(presets_root, ["rename", "FULL_PATH"], "") or ""),
+        "destroy_path": str(safe_get(presets_root, ["destroy", "FULL_PATH"], "") or ""),
         "current_name": str(current_name or ""),
     }
 
@@ -681,6 +697,7 @@ def discover_instances(tree: dict) -> list[dict]:
                 "presets": _discover_instance_presets(contents),
                 "preset_save_path": preset_capabilities["save_path"],
                 "preset_rename_path": preset_capabilities["rename_path"],
+                "preset_destroy_path": preset_capabilities["destroy_path"],
                 "current_preset_name": preset_capabilities["current_name"],
                 "routing": _discover_instance_routing(contents, system_ports),
             }

@@ -52,12 +52,13 @@ class _CaptureRenderer(ShadowboxRenderer):
         self.last_selected_idx: int | None = None
         self.last_current_indices: set[int] | None = None
         self.last_item_weights: dict[int, str] | None = None
+        self.last_action_indices: set[int] | None = None
         self.last_value_rows: list[tuple[str, object]] | None = None
         self.last_value_weights: list[str | None] | None = None
         self.last_header: str | None = None
         self.last_selectable_value_rows: list[tuple[str, object, bool]] | None = None
 
-    def draw_header(self, title: str, busy: bool = False, ticks: int = 0) -> None:
+    def draw_header(self, title: str, busy: bool = False, ticks: int = 0, show_back_button: bool = False) -> None:
         self.last_header = title
 
     def draw_string_list(
@@ -66,11 +67,13 @@ class _CaptureRenderer(ShadowboxRenderer):
         selected_idx: int,
         current_indices: set[int] | None = None,
         item_weights: dict[int, str] | None = None,
+        action_indices: set[int] | None = None,
     ) -> None:
         self.last_items = items
         self.last_selected_idx = selected_idx
         self.last_current_indices = current_indices
         self.last_item_weights = item_weights
+        self.last_action_indices = action_indices
 
     def draw_value_row(
         self,
@@ -174,6 +177,7 @@ class InstanceActionTests(unittest.TestCase):
                     ],
                     "preset_save_path": "/rnbo/inst/1/presets/save",
                     "preset_rename_path": "/rnbo/inst/1/presets/rename",
+                    "preset_destroy_path": "/rnbo/inst/1/presets/destroy",
                     "current_preset_name": "Bass",
                     "params": [],
                     "routing": {"audio": {"inputs": [], "outputs": []}, "midi": {"inputs": [], "outputs": []}},
@@ -644,17 +648,19 @@ class InstanceActionTests(unittest.TestCase):
         )
         self.assertEqual(renderer.last_selected_idx, 2)
 
-    def test_graph_menu_shows_audio_and_midi_overview_entries(self) -> None:
+    def test_system_menu_keeps_startup_but_not_graph_detail_entries(self) -> None:
         ui = ShadowboxUI()
-        ui.apply_runner_snapshot(self._snapshot_with_routing_overview())
-        ui.state.ui_mode = "GRAPH_MENU"
-        ui.state.graph_menu_cursor = 1
+        ui.apply_runner_snapshot(self._snapshot_with_graph_preset_capabilities())
+        ui.state.ui_mode = "SYSTEM_MENU"
+        ui.state.system_cursor = 1
 
         renderer = _CaptureRenderer()
         renderer.draw(ui)
 
-        self.assertIn("AUDIO OVERVIEW", renderer.last_items or [])
-        self.assertIn("MIDI OVERVIEW", renderer.last_items or [])
+        self.assertIn("STARTUP", renderer.last_items or [])
+        self.assertNotIn("AUDIO OVERVIEW", renderer.last_items or [])
+        self.assertNotIn("MIDI OVERVIEW", renderer.last_items or [])
+        self.assertNotIn("GRAPH PRESETS", renderer.last_items or [])
 
     def test_graph_menu_audio_overview_selects_active_instance_row(self) -> None:
         ui = ShadowboxUI()
@@ -695,7 +701,7 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(ui.state.ui_mode, "INSTANCE_MENU")
         self.assertEqual(ui.state.instance_menu_cursor, 1)
 
-    def test_overview_long_press_returns_to_instance_menu(self) -> None:
+    def test_overview_long_press_returns_to_graph_menu(self) -> None:
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_routing_overview())
         ui.state.ui_mode = "MIDI_ROUTING_OVERVIEW"
@@ -704,15 +710,15 @@ class InstanceActionTests(unittest.TestCase):
 
         self.assertEqual(ui.state.ui_mode, "GRAPH_MENU")
 
-    def test_top_level_graphs_enters_graph_menu(self) -> None:
+    def test_top_level_graphs_enters_graph_list(self) -> None:
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_sets())
         ui.state.top_index = 0
 
         ui.handle_event(type("Evt", (), {"kind": "short_press"})())
 
-        self.assertEqual(ui.state.ui_mode, "GRAPH_MENU")
-        self.assertEqual(ui.state.graph_menu_cursor, 1)
+        self.assertEqual(ui.state.ui_mode, "GRAPH_SET_LIST")
+        self.assertEqual(ui.state.graph_set_cursor, ui.graph_set_initial_cursor())
 
     def test_graph_menu_renders_expected_items(self) -> None:
         ui = ShadowboxUI()
@@ -725,7 +731,7 @@ class InstanceActionTests(unittest.TestCase):
 
         self.assertEqual(
             renderer.last_items,
-            ["..", "CURRENT GRAPH", "LOAD GRAPH", "AUDIO OVERVIEW", "MIDI OVERVIEW", "SAVE GRAPH", "STARTUP"],
+            ["..", "AUDIO OVERVIEW", "MIDI OVERVIEW"],
         )
         self.assertEqual(renderer.last_selected_idx, 1)
 
@@ -740,7 +746,7 @@ class InstanceActionTests(unittest.TestCase):
 
         self.assertEqual(
             renderer.last_items,
-            ["..", "CURRENT GRAPH", "NEW GRAPH", "LOAD GRAPH", "AUDIO OVERVIEW", "MIDI OVERVIEW", "SAVE GRAPH", "STARTUP"],
+            ["..", "AUDIO OVERVIEW", "MIDI OVERVIEW"],
         )
 
     def test_network_properties_use_snapshot_network_info_and_rnbo_port(self) -> None:
@@ -778,12 +784,12 @@ class InstanceActionTests(unittest.TestCase):
         renderer = _CaptureRenderer()
         renderer.draw(ui)
 
-        self.assertEqual(renderer.last_items, ["..", "StudioA", "StudioB"])
+        self.assertEqual(renderer.last_items, ["..", "SAVE", "SAVE AS...", "StudioA", "StudioB"])
         self.assertEqual(renderer.last_selected_idx, 1)
-        self.assertEqual(renderer.last_current_indices, {1})
-        self.assertEqual(renderer.last_item_weights, {1: "italic"})
+        self.assertEqual(renderer.last_current_indices, {3})
+        self.assertEqual(renderer.last_item_weights, {1: "semibold", 2: "semibold", 3: "italic"})
 
-    def test_graph_menu_shows_rename_set_when_published(self) -> None:
+    def test_graph_menu_does_not_show_graph_save_or_rename_actions(self) -> None:
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_set_rename())
         ui.state.ui_mode = "GRAPH_MENU"
@@ -794,7 +800,7 @@ class InstanceActionTests(unittest.TestCase):
 
         self.assertEqual(
             renderer.last_items,
-            ["..", "CURRENT GRAPH", "LOAD GRAPH", "AUDIO OVERVIEW", "MIDI OVERVIEW", "SAVE GRAPH", "RENAME GRAPH", "STARTUP"],
+            ["..", "AUDIO OVERVIEW", "MIDI OVERVIEW"],
         )
 
     def test_graph_menu_shows_presets_when_published(self) -> None:
@@ -808,7 +814,7 @@ class InstanceActionTests(unittest.TestCase):
 
         self.assertEqual(
             renderer.last_items,
-            ["..", "CURRENT GRAPH", "LOAD GRAPH", "AUDIO OVERVIEW", "MIDI OVERVIEW", "GRAPH PRESETS", "SAVE GRAPH", "STARTUP"],
+            ["..", "PRESETS", "AUDIO OVERVIEW", "MIDI OVERVIEW"],
         )
 
     def test_graph_status_marks_current_set_and_dirty_state_in_value_rows(self) -> None:
@@ -835,7 +841,7 @@ class InstanceActionTests(unittest.TestCase):
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_sets())
         ui.state.ui_mode = "GRAPH_SET_LIST"
-        ui.state.graph_set_cursor = 2
+        ui.state.graph_set_cursor = 4
 
         ui.handle_event(type("Evt", (), {"kind": "short_press"})())
 
@@ -848,8 +854,8 @@ class InstanceActionTests(unittest.TestCase):
     def test_new_graph_action_queues_load_new_graph_set(self) -> None:
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_new_graph_set())
-        ui.state.ui_mode = "GRAPH_MENU"
-        ui.state.graph_menu_cursor = 2
+        ui.state.ui_mode = "GRAPH_SET_LIST"
+        ui.state.graph_set_cursor = 3
 
         ui.handle_event(type("Evt", (), {"kind": "short_press"})())
 
@@ -859,11 +865,11 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(actions[0].path, "/rnbo/inst/control/sets/load")
         self.assertEqual(actions[0].value, "New Graph")
 
-    def test_graph_save_set_opens_name_editor_with_generated_name(self) -> None:
+    def test_graph_save_as_set_opens_name_editor_with_generated_name(self) -> None:
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_sets())
-        ui.state.ui_mode = "GRAPH_MENU"
-        ui.state.graph_menu_cursor = 5
+        ui.state.ui_mode = "GRAPH_SET_LIST"
+        ui.state.graph_set_cursor = 2
 
         with mock.patch("shadowbox.ui.time.strftime", return_value="20260401-120000"):
             ui.handle_event(type("Evt", (), {"kind": "short_press"})())
@@ -876,6 +882,20 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(ui.state.name_editor_draft, "studioa-20260401-120000")
         self.assertEqual(ui.state.name_editor_cursor, 1)
 
+    def test_graph_save_action_overwrites_current_graph(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_sets())
+        ui.state.ui_mode = "GRAPH_SET_LIST"
+        ui.state.graph_set_cursor = 1
+
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+
+        actions = [action for action in ui.pop_actions() if action.kind != "save_state"]
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0].kind, "save_set")
+        self.assertEqual(actions[0].path, "/rnbo/inst/control/sets/save")
+        self.assertEqual(actions[0].value, "StudioA")
+
     def test_graph_preset_list_shows_actions_and_current_selection(self) -> None:
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_graph_preset_capabilities())
@@ -887,7 +907,7 @@ class InstanceActionTests(unittest.TestCase):
 
         self.assertEqual(
             renderer.last_items,
-            ["..", "SAVE PRESET", "RENAME PRESET", "DELETE PRESET", "Unipolar Positive", "linke synce"],
+            ["..", "SAVE", "SAVE AS...", "REMOVE", "Unipolar Positive", "linke synce"],
         )
         self.assertEqual(renderer.last_current_indices, {5})
         self.assertEqual(renderer.last_selected_idx, 4)
@@ -906,11 +926,25 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(actions[0].path, "/rnbo/inst/control/sets/presets/load")
         self.assertEqual(actions[0].value, "Unipolar Positive")
 
-    def test_save_graph_preset_action_opens_name_editor(self) -> None:
+    def test_save_graph_preset_action_overwrites_current_name(self) -> None:
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_graph_preset_capabilities())
         ui.state.ui_mode = "GRAPH_PRESET_LIST"
         ui.state.graph_preset_cursor = 1
+
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+
+        actions = [action for action in ui.pop_actions() if action.kind != "save_state"]
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0].kind, "save_graph_preset")
+        self.assertEqual(actions[0].path, "/rnbo/inst/control/sets/presets/save")
+        self.assertEqual(actions[0].value, "linke synce")
+
+    def test_save_as_graph_preset_action_opens_name_editor(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_graph_preset_capabilities())
+        ui.state.ui_mode = "GRAPH_PRESET_LIST"
+        ui.state.graph_preset_cursor = 2
 
         with mock.patch("shadowbox.ui.time.strftime", return_value="20260404-111500"):
             ui.handle_event(type("Evt", (), {"kind": "short_press"})())
@@ -922,35 +956,15 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(ui.state.name_editor_path, "/rnbo/inst/control/sets/presets/save")
         self.assertEqual(ui.state.name_editor_draft, "linke-synce-20260404-111")
 
-    def test_rename_graph_preset_action_opens_name_editor_and_submits_pair(self) -> None:
-        ui = ShadowboxUI()
-        ui.apply_runner_snapshot(self._snapshot_with_graph_preset_capabilities())
-        ui.state.ui_mode = "GRAPH_PRESET_LIST"
-        ui.state.graph_preset_cursor = 2
-
-        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
-
-        self.assertEqual(ui.state.ui_mode, "NAME_EDITOR")
-        self.assertEqual(ui.state.name_editor_context, "rename_graph_preset")
-        self.assertEqual(ui.state.name_editor_draft, "linke synce")
-        self.assertEqual(ui.state.name_editor_target_name, "linke synce")
-
-        ui.state.name_editor_draft = "linke synce 2"
-        ui.state.name_editor_cursor = 1
-        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
-
-        actions = [action for action in ui.pop_actions() if action.kind != "save_state"]
-        self.assertEqual(len(actions), 1)
-        self.assertEqual(actions[0].kind, "rename_graph_preset")
-        self.assertEqual(actions[0].path, "/rnbo/inst/control/sets/presets/rename")
-        self.assertEqual(actions[0].value, ["linke synce", "linke synce 2"])
-
-    def test_delete_graph_preset_action_queues_delete(self) -> None:
+    def test_remove_graph_preset_action_opens_picker_and_queues_selected_delete(self) -> None:
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_graph_preset_capabilities())
         ui.state.ui_mode = "GRAPH_PRESET_LIST"
         ui.state.graph_preset_cursor = 3
 
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+        self.assertEqual(ui.state.ui_mode, "GRAPH_PRESET_REMOVE_PICKER")
+        ui.state.graph_preset_remove_cursor = 2
         ui.handle_event(type("Evt", (), {"kind": "short_press"})())
 
         actions = [action for action in ui.pop_actions() if action.kind != "save_state"]
@@ -1004,6 +1018,16 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(ui.state.ui_mode, "NAME_ERROR")
         self.assertEqual(ui.state.name_error_message, "ENTER NAME")
 
+    def test_name_error_edit_name_button_returns_to_editor(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_sets())
+        ui._begin_name_editor("save_set", "/rnbo/inst/control/sets/save", "", "GRAPH_MENU")
+        ui.state.ui_mode = "NAME_ERROR"
+
+        ui.handle_event(type("Evt", (), {"kind": "tap_button", "button_id": "edit_name"})())
+
+        self.assertEqual(ui.state.ui_mode, "NAME_EDITOR")
+
     def test_name_editor_save_queues_save_set_action(self) -> None:
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_sets())
@@ -1031,6 +1055,16 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(ui.state.ui_mode, "NAME_OVERWRITE_CONFIRM")
         self.assertEqual(ui.state.name_editor_draft, "StudioB")
 
+    def test_name_overwrite_cancel_button_returns_to_editor(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_sets())
+        ui._begin_name_editor("save_set", "/rnbo/inst/control/sets/save", "StudioB", "GRAPH_MENU")
+        ui.state.ui_mode = "NAME_OVERWRITE_CONFIRM"
+
+        ui.handle_event(type("Evt", (), {"kind": "tap_button", "button_id": "cancel"})())
+
+        self.assertEqual(ui.state.ui_mode, "NAME_EDITOR")
+
     def test_name_overwrite_confirm_queues_save_action(self) -> None:
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_sets())
@@ -1045,6 +1079,53 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(len(actions), 1)
         self.assertEqual(actions[0].kind, "save_set")
         self.assertEqual(actions[0].value, "StudioB")
+
+    def test_remove_instance_confirm_remove_button_queues_remove_action(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(
+            RNBOSnapshot(
+                instances=[{"id": "1", "label": "Synth A", "params": [], "presets": [], "routing": {"audio": {"inputs": [], "outputs": []}, "midi": {"inputs": [], "outputs": []}}}],
+                patchers=[],
+                add_instance_path="",
+                remove_instance_path="/rnbo/inst/control/unload",
+                system={},
+            )
+        )
+        ui.state.active_instance_id = "1"
+        ui.state.ui_mode = "REMOVE_INSTANCE_CONFIRM"
+        ui.state.pending_remove_instance_id = "1"
+        ui.state.remove_instance_origin = "instance_menu"
+
+        ui.handle_event(type("Evt", (), {"kind": "tap_button", "button_id": "remove"})())
+
+        actions = [action for action in ui.pop_actions() if action.kind != "save_state"]
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0].kind, "remove_instance")
+        self.assertEqual(actions[0].path, "/rnbo/inst/control/unload")
+        self.assertEqual(actions[0].value, 1)
+        self.assertEqual(ui.state.ui_mode, "INSTANCE_MENU")
+        self.assertEqual(ui.state.pending_remove_instance_id, "")
+
+    def test_remove_instance_confirm_cancel_button_returns_to_parent(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(
+            RNBOSnapshot(
+                instances=[{"id": "1", "label": "Synth A", "params": [], "presets": [], "routing": {"audio": {"inputs": [], "outputs": []}, "midi": {"inputs": [], "outputs": []}}}],
+                patchers=[],
+                add_instance_path="",
+                remove_instance_path="/rnbo/inst/control/unload",
+                system={},
+            )
+        )
+        ui.state.active_instance_id = "1"
+        ui.state.ui_mode = "REMOVE_INSTANCE_CONFIRM"
+        ui.state.pending_remove_instance_id = "1"
+        ui.state.remove_instance_origin = "instance_list"
+
+        ui.handle_event(type("Evt", (), {"kind": "tap_button", "button_id": "cancel"})())
+
+        self.assertEqual(ui.state.ui_mode, "REMOVE_INSTANCE_PICKER")
+        self.assertEqual(ui.state.pending_remove_instance_id, "")
 
     def test_name_editor_long_press_cancels_to_graph_menu(self) -> None:
         ui = ShadowboxUI()
@@ -1133,21 +1214,18 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(ui.state.name_inline_cursor, 1)
         self.assertFalse(ui.state.name_inline_edit_mode)
 
-    def test_graph_rename_set_opens_name_editor_with_current_name(self) -> None:
+    def test_graph_menu_presets_opens_graph_preset_list(self) -> None:
         ui = ShadowboxUI()
-        ui.apply_runner_snapshot(self._snapshot_with_set_rename())
+        ui.apply_runner_snapshot(self._snapshot_with_graph_preset_capabilities())
         ui.state.ui_mode = "GRAPH_MENU"
-        ui.state.graph_menu_cursor = 6
+        ui.state.graph_menu_cursor = ui.graph_menu_items.index("PRESETS") + 1
 
         ui.handle_event(type("Evt", (), {"kind": "short_press"})())
 
         actions = [action for action in ui.pop_actions() if action.kind != "save_state"]
         self.assertEqual(actions, [])
-        self.assertEqual(ui.state.ui_mode, "NAME_EDITOR")
-        self.assertEqual(ui.state.name_editor_context, "rename_set")
-        self.assertEqual(ui.state.name_editor_path, "/rnbo/inst/control/sets/rename")
-        self.assertEqual(ui.state.name_editor_draft, "StudioA")
-        self.assertEqual(ui.state.name_editor_target_name, "StudioA")
+        self.assertEqual(ui.state.ui_mode, "GRAPH_PRESET_LIST")
+        self.assertEqual(ui.state.graph_preset_cursor, ui.graph_preset_initial_cursor())
 
     def test_name_editor_rename_label_and_action_for_rename_set(self) -> None:
         ui = ShadowboxUI()
@@ -1195,17 +1273,32 @@ class InstanceActionTests(unittest.TestCase):
 
         self.assertEqual(
             renderer.last_items,
-            ["..", "SAVE PRESET", "RENAME PRESET", "Init", "Bass"],
+            ["..", "SAVE", "SAVE AS...", "REMOVE", "Init", "Bass"],
         )
-        self.assertEqual(renderer.last_current_indices, {4})
-        self.assertEqual(renderer.last_selected_idx, 3)
+        self.assertEqual(renderer.last_current_indices, {5})
+        self.assertEqual(renderer.last_selected_idx, 4)
 
-    def test_save_preset_action_opens_name_editor(self) -> None:
+    def test_save_preset_action_overwrites_current_name(self) -> None:
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_preset_capabilities())
         ui.state.active_instance_id = "1"
         ui.state.ui_mode = "PRESET_LIST"
         ui.state.preset_cursor = 1
+
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+
+        actions = [action for action in ui.pop_actions() if action.kind != "save_state"]
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0].kind, "save_preset")
+        self.assertEqual(actions[0].path, "/rnbo/inst/1/presets/save")
+        self.assertEqual(actions[0].value, "Bass")
+
+    def test_save_as_preset_action_opens_name_editor(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_preset_capabilities())
+        ui.state.active_instance_id = "1"
+        ui.state.ui_mode = "PRESET_LIST"
+        ui.state.preset_cursor = 2
 
         with mock.patch("shadowbox.ui.time.strftime", return_value="20260404-111500"):
             ui.handle_event(type("Evt", (), {"kind": "short_press"})())
@@ -1217,29 +1310,23 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(ui.state.name_editor_path, "/rnbo/inst/1/presets/save")
         self.assertEqual(ui.state.name_editor_draft, "bass-20260404-111500")
 
-    def test_rename_preset_action_opens_name_editor_and_submits(self) -> None:
+    def test_remove_preset_action_opens_picker_and_queues_selected_delete(self) -> None:
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_preset_capabilities())
         ui.state.active_instance_id = "1"
         ui.state.ui_mode = "PRESET_LIST"
-        ui.state.preset_cursor = 2
+        ui.state.preset_cursor = 3
 
         ui.handle_event(type("Evt", (), {"kind": "short_press"})())
-
-        self.assertEqual(ui.state.ui_mode, "NAME_EDITOR")
-        self.assertEqual(ui.state.name_editor_context, "rename_preset")
-        self.assertEqual(ui.state.name_editor_draft, "Bass")
-        self.assertEqual(ui.state.name_editor_target_name, "Bass")
-
-        ui.state.name_editor_draft = "Bass 2"
-        ui.state.name_editor_cursor = 1
+        self.assertEqual(ui.state.ui_mode, "PRESET_REMOVE_PICKER")
+        ui.state.preset_remove_cursor = 2
         ui.handle_event(type("Evt", (), {"kind": "short_press"})())
 
         actions = [action for action in ui.pop_actions() if action.kind != "save_state"]
         self.assertEqual(len(actions), 1)
-        self.assertEqual(actions[0].kind, "rename_preset")
-        self.assertEqual(actions[0].path, "/rnbo/inst/1/presets/rename")
-        self.assertEqual(actions[0].value, "Bass 2")
+        self.assertEqual(actions[0].kind, "delete_preset")
+        self.assertEqual(actions[0].path, "/rnbo/inst/1/presets/destroy")
+        self.assertEqual(actions[0].value, "Bass")
 
     def test_duplicate_preset_save_shows_overwrite_confirm(self) -> None:
         ui = ShadowboxUI()

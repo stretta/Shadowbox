@@ -14,7 +14,7 @@ It provides:
 - Basic system management
 - Saved audio-device selection
 - Startup discovery/status screen
-- Display interface for SSD1306, SSD1309, generic ST7789, Waveshare 1.44-inch LCD HAT, and Waveshare 2-inch ST7789V hardware
+- Display interface for SSD1306, SSD1309, generic ST7789, Waveshare 1.44-inch LCD HAT, Waveshare 2-inch ST7789V, and Waveshare 5-inch DSI hardware
 - Rotary encoder or Waveshare HAT navigation
 - Custom parameter editors for `step16`, TTID, and pitch display metadata
 
@@ -45,6 +45,7 @@ Also supported:
 - 240x320 SPI TFT display (generic ST7789, library-backed or raw backend)
 - Waveshare 1.44-inch LCD HAT (ST7735S, 128x128 SPI)
 - Waveshare 2-inch LCD Module (ST7789V, 240x320 SPI)
+- Waveshare 5-inch DSI LCD (800x480 framebuffer)
 
 Current Waveshare 1.44-inch LCD HAT support includes:
 
@@ -62,6 +63,7 @@ Supported display backends in code:
 - `st7789_raw`
 - `st7735s_hat`
 - `waveshare_2inch`
+- `waveshare_5inch_dsi`
 
 If `SHADOWBOX_DISPLAY` is not set, Shadowbox now defaults to `st7789_raw`.
 
@@ -144,6 +146,7 @@ for you with noninteractive `raspi-config` calls:
 
 - `ssd1306` / `ssd1309`: enables I2C and SPI
 - `st7789` / `st7789_raw` / `waveshare_2inch`: enables SPI and skips I2C setup
+- `waveshare_5inch_dsi`: skips both I2C and SPI setup; configure the DSI overlay in `/boot/firmware/config.txt`
 
 You can still do the interface setup manually first if you prefer.
 
@@ -163,6 +166,7 @@ python3-venv \
 python3-pip \
 git \
 pigpio \
+fontconfig \
 libopenjp2-7 \
 python3-spidev \
 python3-rpi.gpio
@@ -350,6 +354,37 @@ python -m shadowbox.shadowbox
 
 Use `waveshare_2inch` instead if that matches your display wiring.
 
+Waveshare 5-inch DSI LCD example:
+
+```
+export SHADOWBOX_DISPLAY=waveshare_5inch_dsi
+python -m shadowbox.shadowbox
+```
+
+This backend writes Shadowbox frames to the Linux framebuffer, `/dev/fb0` by
+default, and controls brightness through `/sys/class/backlight` when the OS
+exposes it. The DSI panel itself must already be enabled by the Raspberry Pi OS
+display overlay. The 5-inch renderer uses the full 800x480 logical framebuffer
+by default; only set `SHADOWBOX_LOGICAL_WIDTH` and `SHADOWBOX_LOGICAL_HEIGHT`
+when you intentionally want scaled compatibility output. Waveshare's setup for
+the 800x480 DSI panel uses:
+
+```
+dtoverlay=vc4-kms-v3d
+dtoverlay=vc4-kms-dsi-7inch
+```
+
+On Pi 5 or CM4/CM3 systems using DSI0 instead of DSI1, use the matching overlay
+variant:
+
+```
+dtoverlay=vc4-kms-dsi-7inch,dsi0
+```
+
+If the framebuffer is not `/dev/fb0`, set `SHADOWBOX_DSI_FRAMEBUFFER`. If your
+OS exposes a non-default framebuffer pixel layout, set
+`SHADOWBOX_DSI_PIXEL_FORMAT` to `bgrx8888`, `rgbx8888`, `rgb565`, or `rgb888`.
+
 If `pigpiod` is not running, startup will fail with `RuntimeError: pigpio daemon not running`.
 
 ---
@@ -437,8 +472,8 @@ Do not run the installer with `sudo`. Run it as your normal user from the
 repository root and let it prompt for `sudo` only when needed.
 
 The installer checks `SHADOWBOX_DISPLAY` to decide whether I2C setup is needed.
-For TFT builds, export the display backend before running it so the installer can
-skip OLED/I2C setup:
+For TFT and DSI builds, export the display backend before running it so the
+installer can skip OLED/I2C setup:
 
 ```
 export SHADOWBOX_DISPLAY=st7789_raw
@@ -456,7 +491,10 @@ The installer:
 - runs `apt update`
 - installs the required system packages
 - enables I2C automatically for OLED backends
-- enables SPI automatically
+- enables SPI automatically for SPI display backends
+- suppresses Raspberry Pi firmware splash, Plymouth graphics, kernel boot log,
+  and systemd status output on the touch display so Shadowbox owns the visible
+  boot screen
 - enables and starts `pigpiod`
 - creates the virtual environment as your current user
 - upgrades `pip` and installs `requirements.txt`
@@ -490,15 +528,18 @@ All currently supported `/etc/default/shadowbox` settings:
 - General UI/runtime: `SHADOWBOX_POST_LOAD_VIEW`, `SHADOWBOX_TURBO_FPS`, `SHADOWBOX_BRICK_PANEL_FPS`
 - Direct Ethernet rescue: `SHADOWBOX_DIRECT_ETHERNET_HELPER`, `SHADOWBOX_DIRECT_ETHERNET_IFACE`, `SHADOWBOX_DIRECT_ETHERNET_CIDR`
 - Idle/backlight: `SHADOWBOX_DIM_TIMEOUT`, `SHADOWBOX_SLEEP_TIMEOUT`, `SHADOWBOX_BRIGHTNESS_NORMAL`, `SHADOWBOX_BRIGHTNESS_DIM`
-- Encoder/buttons: `SHADOWBOX_INPUT_KIND`, `SHADOWBOX_ENCODER_CLK`, `SHADOWBOX_ENCODER_DT`, `SHADOWBOX_ENCODER_SW`, `SHADOWBOX_BACK_BUTTON_PIN`, `SHADOWBOX_ENCODER_STEPS_PER_DETENT`, `SHADOWBOX_ENCODER_LONG_PRESS_SECONDS`, `SHADOWBOX_ENCODER_AB_GLITCH_US`, `SHADOWBOX_ENCODER_SW_GLITCH_US`, `SHADOWBOX_BACK_BUTTON_GLITCH_US`, `SHADOWBOX_ENCODER_ACCEL_FAST_SECONDS`, `SHADOWBOX_ENCODER_ACCEL_FAST_MULTIPLIER`, `SHADOWBOX_ENCODER_ACCEL_TURBO_SECONDS`, `SHADOWBOX_ENCODER_ACCEL_TURBO_MULTIPLIER`, `SHADOWBOX_HAT_JOY_UP`, `SHADOWBOX_HAT_JOY_DOWN`, `SHADOWBOX_HAT_JOY_LEFT`, `SHADOWBOX_HAT_JOY_RIGHT`, `SHADOWBOX_HAT_JOY_PRESS`, `SHADOWBOX_HAT_KEY1`, `SHADOWBOX_HAT_KEY2`, `SHADOWBOX_HAT_KEY3`, `SHADOWBOX_HAT_KEY1_ACTION`, `SHADOWBOX_HAT_KEY2_ACTION`, `SHADOWBOX_HAT_KEY3_ACTION`
+- Encoder/buttons/touch: `SHADOWBOX_INPUT_KIND`, `SHADOWBOX_ENCODER_CLK`, `SHADOWBOX_ENCODER_DT`, `SHADOWBOX_ENCODER_SW`, `SHADOWBOX_BACK_BUTTON_PIN`, `SHADOWBOX_ENCODER_STEPS_PER_DETENT`, `SHADOWBOX_ENCODER_LONG_PRESS_SECONDS`, `SHADOWBOX_ENCODER_AB_GLITCH_US`, `SHADOWBOX_ENCODER_SW_GLITCH_US`, `SHADOWBOX_BACK_BUTTON_GLITCH_US`, `SHADOWBOX_ENCODER_ACCEL_FAST_SECONDS`, `SHADOWBOX_ENCODER_ACCEL_FAST_MULTIPLIER`, `SHADOWBOX_ENCODER_ACCEL_TURBO_SECONDS`, `SHADOWBOX_ENCODER_ACCEL_TURBO_MULTIPLIER`, `SHADOWBOX_HAT_JOY_UP`, `SHADOWBOX_HAT_JOY_DOWN`, `SHADOWBOX_HAT_JOY_LEFT`, `SHADOWBOX_HAT_JOY_RIGHT`, `SHADOWBOX_HAT_JOY_PRESS`, `SHADOWBOX_HAT_KEY1`, `SHADOWBOX_HAT_KEY2`, `SHADOWBOX_HAT_KEY3`, `SHADOWBOX_HAT_KEY1_ACTION`, `SHADOWBOX_HAT_KEY2_ACTION`, `SHADOWBOX_HAT_KEY3_ACTION`, `SHADOWBOX_TOUCH_DEVICE`, `SHADOWBOX_TOUCH_WIDTH`, `SHADOWBOX_TOUCH_HEIGHT`
 - OLED backends (`ssd1306`, `ssd1309`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_I2C_BUS`, `SHADOWBOX_I2C_ADDR`
 - Generic ST7789 backends (`st7789`, `st7789_raw`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_ST7789_SPI_BUS`, `SHADOWBOX_ST7789_SPI_CS`, `SHADOWBOX_ST7789_DC`, `SHADOWBOX_ST7789_RST`, `SHADOWBOX_ST7789_BACKLIGHT`, `SHADOWBOX_ST7789_SPI_SPEED_HZ`, `SHADOWBOX_ST7789_ROTATION`, `SHADOWBOX_ST7789_WIDTH`, `SHADOWBOX_ST7789_HEIGHT`, `SHADOWBOX_ST7789_OFFSET_LEFT`, `SHADOWBOX_ST7789_OFFSET_TOP`, `SHADOWBOX_ST7789_INVERT`, `SHADOWBOX_LOGICAL_WIDTH`, `SHADOWBOX_LOGICAL_HEIGHT`
 - Waveshare 1.44-inch LCD HAT backend (`st7735s_hat`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_ST7735_SPI_BUS`, `SHADOWBOX_ST7735_SPI_CS`, `SHADOWBOX_ST7735_DC`, `SHADOWBOX_ST7735_RST`, `SHADOWBOX_ST7735_BACKLIGHT`, `SHADOWBOX_ST7735_SPI_SPEED_HZ`, `SHADOWBOX_ST7735_WIDTH`, `SHADOWBOX_ST7735_HEIGHT`, `SHADOWBOX_ST7735_OFFSET_LEFT`, `SHADOWBOX_ST7735_OFFSET_TOP`, `SHADOWBOX_ST7735_INVERT`, `SHADOWBOX_LOGICAL_WIDTH`, `SHADOWBOX_LOGICAL_HEIGHT`
 - Waveshare 2-inch backend (`waveshare_2inch`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_WAVESHARE_SPI_BUS`, `SHADOWBOX_WAVESHARE_SPI_CS`, `SHADOWBOX_WAVESHARE_DC`, `SHADOWBOX_WAVESHARE_RST`, `SHADOWBOX_WAVESHARE_BACKLIGHT`, `SHADOWBOX_WAVESHARE_SPI_SPEED_HZ`, `SHADOWBOX_LOGICAL_WIDTH`, `SHADOWBOX_LOGICAL_HEIGHT`
+- Waveshare 5-inch DSI backend (`waveshare_5inch_dsi`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_DSI_FRAMEBUFFER`, `SHADOWBOX_DSI_WIDTH`, `SHADOWBOX_DSI_HEIGHT`, `SHADOWBOX_DSI_PIXEL_FORMAT`, `SHADOWBOX_DSI_BACKLIGHT_PATH`, `SHADOWBOX_LOGICAL_WIDTH`, `SHADOWBOX_LOGICAL_HEIGHT`
 
 Notes:
 
 - `SHADOWBOX_DISPLAY` defaults to `st7789_raw` if unset.
+- `SHADOWBOX_INPUT_KIND=touch_zones` maps top-left to back, top-right to enter, bottom-left to previous, and bottom-right to next.
+- `SHADOWBOX_INPUT_KIND=touch_direct` enables the first-pass direct-touch action model for the 5-inch prototype. It emits semantic actions (`tap_row`, `tap_back`, `tap_button`, `page_up`, `page_down`) and enables the touch layout/hit-target renderer. `waveshare_5inch_dsi` defaults to this input mode unless `SHADOWBOX_INPUT_KIND` is set explicitly.
 - `SHADOWBOX_BRICK_PANEL_FPS` is a legacy fallback for `SHADOWBOX_TURBO_FPS`.
 - `SHADOWBOX_ST7789_RST`, `SHADOWBOX_ST7789_BACKLIGHT`, and `SHADOWBOX_WAVESHARE_BACKLIGHT` accept `none` to disable that pin.
 - `SHADOWBOX_ST7735_RST` and `SHADOWBOX_ST7735_BACKLIGHT` accept `none` to disable that pin.
@@ -537,7 +578,7 @@ SHADOWBOX_BRIGHTNESS_NORMAL=255
 SHADOWBOX_BRIGHTNESS_DIM=64
 ```
 
-That makes the display dim after 3 seconds of no encoder activity and sleep after 6 seconds. On TFT backends, use `255/64`-style brightness values rather than OLED-style `127/16`, or the display can look dim immediately at startup.
+That makes the display dim after 3 seconds of no encoder activity and sleep after 6 seconds. On TFT/DSI backends, use `255/64`-style brightness values rather than OLED-style `127/16`, or the display can look dim immediately at startup.
 
 Example ST7789 configuration:
 
@@ -581,6 +622,12 @@ SHADOWBOX_ST7789_INVERT=0
 SHADOWBOX_BRIGHTNESS_NORMAL=255
 SHADOWBOX_BRIGHTNESS_DIM=64
 ```
+
+For touch input on the 5-inch panel, Shadowbox defaults to
+`SHADOWBOX_INPUT_KIND=touch_direct`. Set `SHADOWBOX_TOUCH_DEVICE` if automatic
+touchscreen discovery picks the wrong `/dev/input/event*` device. The
+diagnostic helpers `tools/touch_test.py` and `tools/touch_raw_test.py` can be
+used to confirm normalized touch events before running the full UI.
 
 Example Waveshare 1.44-inch LCD HAT configuration:
 
@@ -666,6 +713,20 @@ SHADOWBOX_WAVESHARE_BACKLIGHT=18
 SHADOWBOX_WAVESHARE_SPI_SPEED_HZ=40000000
 SHADOWBOX_LOGICAL_WIDTH=320
 SHADOWBOX_LOGICAL_HEIGHT=240
+SHADOWBOX_BRIGHTNESS_NORMAL=255
+SHADOWBOX_BRIGHTNESS_DIM=64
+```
+
+Example Waveshare 5-inch DSI configuration:
+
+```
+SHADOWBOX_DISPLAY=waveshare_5inch_dsi
+SHADOWBOX_DSI_FRAMEBUFFER=/dev/fb0
+SHADOWBOX_DSI_WIDTH=800
+SHADOWBOX_DSI_HEIGHT=480
+SHADOWBOX_DSI_PIXEL_FORMAT=auto
+SHADOWBOX_LOGICAL_WIDTH=800
+SHADOWBOX_LOGICAL_HEIGHT=480
 SHADOWBOX_BRIGHTNESS_NORMAL=255
 SHADOWBOX_BRIGHTNESS_DIM=64
 ```
@@ -900,11 +961,14 @@ shadowbox/
 │   ├── brick_panel.py
 │   ├── data/
 │   ├── display/
+│   │   └── waveshare_5inch_dsi.py
 │   ├── editors/
 │   ├── encoder.py
+│   ├── midi_mappings.py
 │   ├── renderer.py
 │   ├── rnbo.py
 │   ├── shadowbox.py
+│   ├── touch.py
 │   ├── ui.py
 │   └── version.py
 ├── tests/
@@ -916,15 +980,21 @@ shadowbox/
 │   ├── test_pitch_display.py
 │   ├── test_step16_renderer.py
 │   ├── test_tft_text.py
+│   ├── test_touch_direct_ui.py
+│   ├── test_touch_zones.py
 │   ├── test_ttid_renderer.py
+│   ├── test_waveshare_5inch_dsi.py
 │   └── test_version.py
 └── tools/
     ├── deploy_pi.sh
     ├── display_test.py
     ├── encoder_display_test.py
     ├── encoder_test.py
+    ├── rnbo_runner_presets_to_maxsnap.py
     ├── st7789_raw_test.py
-    └── st7789_test.py
+    ├── st7789_test.py
+    ├── touch_raw_test.py
+    └── touch_test.py
 ```
 
 ---

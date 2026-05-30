@@ -8,6 +8,15 @@ from typing import Any
 
 STEP16_COUNT = 16
 STEP16_MAX_MASK = (1 << STEP16_COUNT) - 1
+STEP16_EDITOR_NAMES = {
+    "step16",
+    "step 16",
+    "trigger_sequencer",
+    "trigger sequencer",
+    "trigger_sequence",
+    "trigger sequence",
+    "trigseq",
+}
 
 
 @dataclass(frozen=True)
@@ -24,7 +33,7 @@ def is_step16_param(param: dict | None) -> bool:
     metadata = param.get("metadata", {})
     if not isinstance(metadata, dict):
         return False
-    return str(metadata.get("editor", "")).strip().lower() == "step16"
+    return str(metadata.get("editor", "")).strip().lower() in STEP16_EDITOR_NAMES
 
 
 def playhead_state_key(param: dict | None) -> str:

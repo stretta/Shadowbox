@@ -237,6 +237,19 @@ def render_text_mask(text: str, scale: int = 1, weight: str = "regular") -> Imag
     return image
 
 
+def render_text_line_mask(text: str, scale: int = 1, weight: str = "regular", reference: str = "Ag") -> Image.Image:
+    text = str(text)
+    font = load_font(weight, scale)
+    bbox = _MEASURE_DRAW.textbbox((0, 0), text, font=font)
+    reference_bbox = _MEASURE_DRAW.textbbox((0, 0), str(reference or "Ag"), font=font)
+    width = max(1, bbox[2] - bbox[0])
+    height = max(1, reference_bbox[3] - reference_bbox[1])
+    image = Image.new("L", (width, height), 0)
+    draw = ImageDraw.Draw(image)
+    draw.text((-bbox[0], -reference_bbox[1]), text, font=font, fill=255)
+    return image
+
+
 def mask_to_rgb(mask: Image.Image, fg_color: tuple[int, int, int], bg_color: tuple[int, int, int]) -> Image.Image:
     canvas = Image.new("RGB", mask.size, bg_color)
     canvas.paste(Image.new("RGB", mask.size, fg_color), (0, 0), mask)

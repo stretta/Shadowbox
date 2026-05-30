@@ -15,9 +15,10 @@ from pythonosc.osc_server import ThreadingOSCUDPServer
 
 from shadowbox.display import load_display_from_env
 from shadowbox.encoder import EncoderInput
+from shadowbox.midi_mappings import apply_midi_profile_to_instance, save_instance_midi_profile
 from shadowbox.rnbo import RNBOClient
 from shadowbox.ui import ShadowboxUI
-from shadowbox.renderer import create_renderer
+from shadowbox.renderer import create_renderer, should_enable_touch_layout
 
 
 FPS = 20
@@ -92,7 +93,11 @@ TURBO_FRAME_DT = 1.0 / TURBO_FPS
 
 def _is_tft_display(display) -> bool:
     module = type(display).__module__
-    return module.startswith("shadowbox.display.st7789") or module.startswith("shadowbox.display.waveshare_2inch")
+    return (
+        module.startswith("shadowbox.display.st7789")
+        or module.startswith("shadowbox.display.waveshare_2inch")
+        or module.startswith("shadowbox.display.waveshare_5inch_dsi")
+    )
 
 
 def _direct_ethernet_helper_path() -> str:
@@ -178,7 +183,7 @@ class RunnerOSCListener:
 
 
 def _parse_instance_state_path(path: str) -> tuple[str, str] | None:
-    match = re.fullmatch(r"(/rnbo/inst/(\d+)/(?:state/.+|messages/out/.+))", str(path))
+    match = re.fullmatch(r"(/rnbo/inst/(\d+)/(?:midi/last/value|params/.+|state/.+|messages/out/.+))", str(path))
     if not match:
         return None
     return match.group(2), match.group(1)
@@ -323,6 +328,21 @@ def _discover_new_instance_ids(ui, rnbo, before_ids: list[str], attempts: int = 
     return after_ids, []
 
 
+def _instance_by_id(ui, instance_id: str) -> dict | None:
+    for instance in ui.state.instances:
+        if str(instance.get("id", "")) == str(instance_id):
+            return instance
+    return None
+
+
+def _apply_saved_midi_profile(ui, rnbo, instance_id: str) -> int:
+    applied = apply_midi_profile_to_instance(_instance_by_id(ui, instance_id), rnbo)
+    if applied:
+        sleep(0.1)
+        ui.apply_runner_snapshot(rnbo.discover())
+    return applied
+
+
 def _startup_status_lines(snapshot) -> tuple[str, str]:
     if _snapshot_ready(snapshot):
         return "OSCQuery Runner found!", "Launching..."
@@ -433,6 +453,7 @@ def main():
     encoder = EncoderInput()
     ui = ShadowboxUI(rnbo=rnbo)
     renderer = create_renderer(display=display)
+    renderer.set_touch_mode(should_enable_touch_layout(encoder.input_kind))
     ui.restore_from_saved_state()
     osc_listener.start()
     rnbo.send_value("/rnbo/listeners/add", osc_listener.listener_spec)
@@ -562,7 +583,11 @@ def main():
                 if parsed is None:
                     continue
                 instance_id, full_path = parsed
-                if ui.apply_instance_state_update(instance_id, full_path, value):
+                if (
+                    ui.apply_instance_state_update(instance_id, full_path, value)
+                    or ui.apply_instance_param_update(instance_id, full_path, value)
+                    or ui.apply_instance_midi_learn_update(instance_id, full_path, value)
+                ):
                     ui.state.activity_ticks += 1
 
             # Pull pending RNBO actions requested by UI
@@ -575,12 +600,17 @@ def main():
                     if action.path is not None:
                         rnbo.send_value(action.path, action.value)
 
+                elif action.kind == "save_midi_profile":
+                    instance = _instance_by_id(ui, str(action.value or ui.state.active_instance_id))
+                    save_instance_midi_profile(instance, allow_empty=True)
+
                 elif action.kind == "load_preset":
                     if action.path is not None:
                         ui.set_busy(True, "load")
                         rnbo.send_value(action.path, action.value)
                         sleep(0.2)
                         ui.apply_runner_snapshot(rnbo.discover())
+                        ui.set_status_message(f"Loaded {action.value}")
                         ui.set_busy(False)
 
                 elif action.kind == "load_set":
@@ -594,8 +624,9 @@ def main():
                         rnbo.send_value(action.path, action.value)
                         sleep(0.2)
                         ui.apply_runner_snapshot(rnbo.discover())
-                        ui.state.ui_mode = "GRAPH_STATUS"
-                        ui.state.graph_menu_cursor = 1
+                        ui.state.ui_mode = "GRAPH_MENU"
+                        ui.state.graph_menu_cursor = 1 if ui.graph_menu_items else 0
+                        ui.set_status_message(f"Loaded {action.value}")
                         ui.set_busy(False)
 
                 elif action.kind == "load_graph_preset":
@@ -606,6 +637,7 @@ def main():
                         ui.apply_runner_snapshot(rnbo.discover())
                         ui.state.ui_mode = "GRAPH_PRESET_LIST"
                         ui.state.graph_preset_cursor = ui.graph_preset_initial_cursor()
+                        ui.set_status_message(f"Loaded {action.value}")
                         ui.set_busy(False)
 
                 elif action.kind == "save_graph_preset":
@@ -616,6 +648,7 @@ def main():
                         ui.apply_runner_snapshot(rnbo.discover())
                         ui.state.ui_mode = "GRAPH_PRESET_LIST"
                         ui.state.graph_preset_cursor = ui.graph_preset_initial_cursor()
+                        ui.set_status_message(f"Saved {action.value}")
                         ui.set_busy(False)
 
                 elif action.kind == "rename_graph_preset":
@@ -636,6 +669,7 @@ def main():
                         ui.apply_runner_snapshot(rnbo.discover())
                         ui.state.ui_mode = "GRAPH_PRESET_LIST"
                         ui.state.graph_preset_cursor = ui.graph_preset_initial_cursor()
+                        ui.set_status_message(f"Removed {action.value}")
                         ui.set_busy(False)
 
                 elif action.kind == "save_set":
@@ -644,8 +678,9 @@ def main():
                         rnbo.send_value(action.path, action.value)
                         sleep(0.2)
                         ui.apply_runner_snapshot(rnbo.discover())
-                        ui.state.ui_mode = "GRAPH_STATUS"
-                        ui.state.graph_menu_cursor = 1
+                        ui.state.ui_mode = "GRAPH_SET_LIST"
+                        ui.state.graph_set_cursor = ui.graph_set_initial_cursor()
+                        ui.set_status_message(f"Saved {action.value}")
                         ui.set_busy(False)
 
                 elif action.kind == "rename_set":
@@ -666,6 +701,7 @@ def main():
                         ui.apply_runner_snapshot(rnbo.discover())
                         ui.state.ui_mode = "PRESET_LIST"
                         ui.state.preset_cursor = ui.preset_initial_cursor()
+                        ui.set_status_message(f"Saved {action.value}")
                         ui.set_busy(False)
 
                 elif action.kind == "rename_preset":
@@ -676,6 +712,17 @@ def main():
                         ui.apply_runner_snapshot(rnbo.discover())
                         ui.state.ui_mode = "PRESET_LIST"
                         ui.state.preset_cursor = ui.preset_initial_cursor()
+                        ui.set_busy(False)
+
+                elif action.kind == "delete_preset":
+                    if action.path is not None:
+                        ui.set_busy(True, "delete")
+                        rnbo.send_value(action.path, action.value)
+                        sleep(0.2)
+                        ui.apply_runner_snapshot(rnbo.discover())
+                        ui.state.ui_mode = "PRESET_LIST"
+                        ui.state.preset_cursor = ui.preset_initial_cursor()
+                        ui.set_status_message(f"Removed {action.value}")
                         ui.set_busy(False)
 
                 elif action.kind == "set_graph_startup":
@@ -718,6 +765,8 @@ def main():
                                 sleep(0.1)
                                 ui.apply_runner_snapshot(rnbo.discover())
                                 after_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
+                            _apply_saved_midi_profile(ui, rnbo, new_ids[-1])
+                            after_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
                             ui.state.active_instance_id = str(new_ids[-1])
                             ui.state.instance_cursor = after_ids.index(new_ids[-1]) + 1
                             _apply_post_load_view(ui)
@@ -733,22 +782,24 @@ def main():
                         sleep(0.2)
                         ui.apply_runner_snapshot(rnbo.discover())
                         after_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
+                        replacement_id = ""
                         if target_id in after_ids:
-                            ui.state.active_instance_id = str(target_id)
-                            ui.state.instance_cursor = after_ids.index(target_id) + 1
+                            replacement_id = str(target_id)
                         else:
                             new_ids = [item for item in after_ids if item not in before_ids]
                             if new_ids:
                                 replacement_id = new_ids[-1]
-                                ui.state.active_instance_id = str(replacement_id)
-                                ui.state.instance_cursor = after_ids.index(replacement_id) + 1
                             elif after_ids:
                                 fallback_index = min(target_index, len(after_ids) - 1)
-                                ui.state.active_instance_id = str(after_ids[fallback_index])
-                                ui.state.instance_cursor = fallback_index + 1
+                                replacement_id = str(after_ids[fallback_index])
                             else:
                                 ui.state.active_instance_id = ""
                                 ui.state.instance_cursor = 0
+                        if replacement_id:
+                            _apply_saved_midi_profile(ui, rnbo, replacement_id)
+                            after_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
+                            ui.state.active_instance_id = replacement_id
+                            ui.state.instance_cursor = after_ids.index(replacement_id) + 1 if replacement_id in after_ids else 1
                         _apply_post_load_view(ui)
                         ui.set_busy(False)
 
@@ -849,7 +900,8 @@ def main():
             if (not is_sleeping) and (now - last_frame) >= target_frame_dt:
                 last_frame = now
                 ui.advance_frame(frame_scale=frame_scale)
-                renderer.draw(ui)
+                renderer.draw(ui, touch_state=encoder.touch_sample())
+                encoder.set_touch_layout(renderer.touch_layout)
 
             sleep(0.001)
 

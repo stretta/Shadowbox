@@ -252,7 +252,7 @@ Editor behavior:
 - Long press in a deferred editor cancels and restores the original value
 - Some custom editors may commit changes immediately during editing
 - Long press in a live editor exits the editor and does not revert already committed changes
-- Bool parameters use a dedicated boolean editor only when metadata explicitly marks them as bool
+- Boolean parameters can toggle directly from the parameter list when explicitly marked as bool; they stay opt-in via metadata and do not need the deeper edit screen in the first pass
 - Enum parameters use a list selector when RNBO publishes an explicit enum value list
 - TTID uses a specialized editor only when the parameter metadata explicitly includes `editor: "ttid"`
 - `step16` uses a specialized live editor when the parameter metadata explicitly includes `editor: "step16"`; its default runtime state key is `step16_playhead` and may be overridden with `playhead_state`
@@ -387,10 +387,13 @@ MIDI UI should expose:
 - instance MIDI outputs
 - current connections
 - available JACK MIDI targets/sources
+- parameter MIDI learn and clear actions when RNBO publishes learn/report state
 
 Rules:
 - empty MIDI branches are valid
 - absence of current connections is not the same as absence of ports
+- learned CC mappings should be displayed beside mapped parameters without replacing the parameter label or value
+- saved instance MIDI mapping profiles may be reapplied when an instance is added or replaced, but only for parameters that still match by name
 
 11. System
 

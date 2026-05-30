@@ -15,8 +15,91 @@ VENV_PYTHON="${REPO_DIR}/.venv/bin/python"
 SERVICE_PATH="/etc/systemd/system/shadowbox.service"
 DEFAULT_ENV_PATH="/etc/default/shadowbox"
 DISPLAY_KIND="${SHADOWBOX_DISPLAY:-st7789_raw}"
+ENABLE_SPI=1
+FONT_SOURCE_DIR="${REPO_DIR}/assets/fonts"
+FONT_INSTALL_DIR="/usr/local/share/fonts/shadowbox/ibm-plex"
 DIRECT_ETHERNET_HELPER="${REPO_DIR}/tools/direct_ethernet.sh"
 SUDOERS_PATH="/etc/sudoers.d/shadowbox-direct-ethernet"
+
+boot_file_path() {
+    local basename="$1"
+
+    if sudo test -e "/boot/firmware/${basename}"; then
+        printf '/boot/firmware/%s\n' "${basename}"
+    elif sudo test -e "/boot/${basename}"; then
+        printf '/boot/%s\n' "${basename}"
+    else
+        printf '/boot/firmware/%s\n' "${basename}"
+    fi
+}
+
+configure_quiet_boot() {
+    local boot_config_path
+    local boot_cmdline_path
+    local tmp_config
+    local tmp_cmdline
+    local current_cmdline
+    local token
+    local -a filtered_tokens
+
+    boot_config_path="$(boot_file_path config.txt)"
+    boot_cmdline_path="$(boot_file_path cmdline.txt)"
+
+    echo "Suppressing Raspberry Pi boot graphics and console output..."
+
+    tmp_config="$(mktemp)"
+    if sudo test -f "${boot_config_path}"; then
+        sudo cat "${boot_config_path}" > "${tmp_config}"
+    fi
+    if grep -q '^disable_splash=' "${tmp_config}"; then
+        sed -i.bak 's/^disable_splash=.*/disable_splash=1/' "${tmp_config}"
+        rm -f "${tmp_config}.bak"
+    else
+        {
+            printf '\n'
+            printf '# Shadowbox quiet boot\n'
+            printf 'disable_splash=1\n'
+        } >> "${tmp_config}"
+    fi
+    sudo install -m 0755 -d "$(dirname "${boot_config_path}")"
+    sudo install -m 0644 "${tmp_config}" "${boot_config_path}"
+    rm -f "${tmp_config}"
+
+    if ! sudo test -f "${boot_cmdline_path}"; then
+        echo "No boot cmdline found at ${boot_cmdline_path}; skipping console suppression."
+        return
+    fi
+
+    current_cmdline="$(sudo cat "${boot_cmdline_path}")"
+    filtered_tokens=()
+    for token in ${current_cmdline}; do
+        case "${token}" in
+            console=tty0|console=tty1|console=tty2|console=tty3|console=tty4|console=tty5|console=tty6|quiet|splash|loglevel=*|logo.nologo|vt.global_cursor_default=*|systemd.show_status=*|rd.systemd.show_status=*|rd.udev.log_level=*|plymouth.enable=*|consoleblank=*)
+                ;;
+            *)
+                filtered_tokens+=("${token}")
+                ;;
+        esac
+    done
+
+    filtered_tokens+=(
+        "console=tty3"
+        "quiet"
+        "loglevel=0"
+        "logo.nologo"
+        "vt.global_cursor_default=0"
+        "systemd.show_status=false"
+        "rd.systemd.show_status=false"
+        "rd.udev.log_level=0"
+        "plymouth.enable=0"
+        "consoleblank=0"
+    )
+
+    tmp_cmdline="$(mktemp)"
+    printf '%s\n' "${filtered_tokens[*]}" > "${tmp_cmdline}"
+    sudo install -m 0644 "${tmp_cmdline}" "${boot_cmdline_path}"
+    rm -f "${tmp_cmdline}"
+}
 
 echo "Shadowbox installer"
 echo "==================="
@@ -30,9 +113,21 @@ sudo apt install -y \
     python3-venv \
     python3-pip \
     pigpio \
+    fontconfig \
     libopenjp2-7 \
+    libopenblas0 \
     python3-spidev \
     python3-rpi.gpio
+
+echo "Installing bundled IBM Plex fonts..."
+if compgen -G "${FONT_SOURCE_DIR}/*.ttf" >/dev/null; then
+    sudo install -d -m 0755 "${FONT_INSTALL_DIR}"
+    sudo install -m 0644 "${FONT_SOURCE_DIR}"/*.ttf "${FONT_INSTALL_DIR}/"
+    sudo fc-cache -f "${FONT_INSTALL_DIR}"
+else
+    echo "No bundled fonts found in ${FONT_SOURCE_DIR}."
+    exit 1
+fi
 
 case "${DISPLAY_KIND}" in
     ssd1306|ssd1309)
@@ -47,14 +142,22 @@ case "${DISPLAY_KIND}" in
     st7789|st7789_raw|st7735s_hat|waveshare_2inch)
         echo "Skipping I2C setup for TFT display backend."
         ;;
+    waveshare_5inch_dsi)
+        echo "Skipping I2C/SPI setup for DSI display backend."
+        ENABLE_SPI=0
+        ;;
     *)
         echo "Unknown SHADOWBOX_DISPLAY='${DISPLAY_KIND}'."
         echo "Skipping display-specific I2C setup."
         ;;
 esac
 
-echo "Enabling SPI..."
-sudo raspi-config nonint do_spi 0
+if [[ "${ENABLE_SPI}" -eq 1 ]]; then
+    echo "Enabling SPI..."
+    sudo raspi-config nonint do_spi 0
+fi
+
+configure_quiet_boot
 
 echo "Starting pigpio daemon..."
 sudo systemctl enable pigpiod

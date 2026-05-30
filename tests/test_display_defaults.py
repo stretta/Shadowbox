@@ -22,6 +22,7 @@ class DisplayDefaultsTests(unittest.TestCase):
             "shadowbox.display.ssd1309",
             "shadowbox.display.st7789_raw",
             "shadowbox.display.st7735s_hat",
+            "shadowbox.display.waveshare_5inch_dsi",
         ):
             self._saved_modules[name] = sys.modules.get(name)
             sys.modules.pop(name, None)
@@ -42,6 +43,10 @@ class DisplayDefaultsTests(unittest.TestCase):
         st7735s_hat_module.ST7735SHatDisplay = _FakeDisplay
         sys.modules["shadowbox.display.st7735s_hat"] = st7735s_hat_module
 
+        waveshare_5inch_dsi_module = types.ModuleType("shadowbox.display.waveshare_5inch_dsi")
+        waveshare_5inch_dsi_module.Waveshare5InchDSIDisplay = _FakeDisplay
+        sys.modules["shadowbox.display.waveshare_5inch_dsi"] = waveshare_5inch_dsi_module
+
         self.display_module = importlib.import_module("shadowbox.display")
 
     def tearDown(self) -> None:
@@ -51,6 +56,7 @@ class DisplayDefaultsTests(unittest.TestCase):
             "shadowbox.display.ssd1309",
             "shadowbox.display.st7789_raw",
             "shadowbox.display.st7735s_hat",
+            "shadowbox.display.waveshare_5inch_dsi",
         ):
             sys.modules.pop(name, None)
 
@@ -104,6 +110,51 @@ class DisplayDefaultsTests(unittest.TestCase):
                 "logical_width": 128,
                 "logical_height": 128,
                 "invert_colors": True,
+            },
+        )
+
+    def test_waveshare_5inch_dsi_profile_matches_panel_defaults(self) -> None:
+        with mock.patch.dict(os.environ, {"SHADOWBOX_DISPLAY": "waveshare_5inch_dsi"}, clear=True):
+            display = self.display_module.load_display_from_env()
+
+        self.assertEqual(type(display).__name__, "_FakeDisplay")
+        self.assertEqual(
+            display.kwargs,
+            {
+                "framebuffer": "/dev/fb0",
+                "physical_width": 800,
+                "physical_height": 480,
+                "logical_width": 800,
+                "logical_height": 480,
+                "pixel_format": "auto",
+                "backlight_path": None,
+            },
+        )
+
+    def test_waveshare_5inch_dsi_profile_accepts_framebuffer_overrides(self) -> None:
+        env = {
+            "SHADOWBOX_DISPLAY": "waveshare_5inch_dsi",
+            "SHADOWBOX_DSI_FRAMEBUFFER": "/dev/fb1",
+            "SHADOWBOX_DSI_WIDTH": "480",
+            "SHADOWBOX_DSI_HEIGHT": "800",
+            "SHADOWBOX_LOGICAL_WIDTH": "240",
+            "SHADOWBOX_LOGICAL_HEIGHT": "320",
+            "SHADOWBOX_DSI_PIXEL_FORMAT": "rgb565",
+            "SHADOWBOX_DSI_BACKLIGHT_PATH": "/sys/class/backlight/10-0045",
+        }
+        with mock.patch.dict(os.environ, env, clear=True):
+            display = self.display_module.load_display_from_env()
+
+        self.assertEqual(
+            display.kwargs,
+            {
+                "framebuffer": "/dev/fb1",
+                "physical_width": 480,
+                "physical_height": 800,
+                "logical_width": 240,
+                "logical_height": 320,
+                "pixel_format": "rgb565",
+                "backlight_path": "/sys/class/backlight/10-0045",
             },
         )
 

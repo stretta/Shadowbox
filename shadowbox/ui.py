@@ -50,6 +50,7 @@ STATE_PATH = Path.home() / "rnbo-ui" / "shadowbox_state.json"
 ROUTING_GROUP_ITEMS = ["INPUTS", "OUTPUTS"]
 SYSTEM_AUDIO_ITEMS = ["DEVICE", "SAMPLE RATE", "BUFFER SIZE"]
 REMOVE_INSTANCE_CONFIRM_ITEMS = ["..", "REMOVE"]
+REMOVE_INSTANCE_CONFIRM_BUTTONS = ["CANCEL", "REMOVE"]
 MAINT_ITEMS_REFRESH = "REFRESH"
 MAINT_ITEMS_RESTART_JACK = "RESTART JACK"
 NAME_EDITOR_EDIT = "EDIT NAME"
@@ -60,15 +61,31 @@ NAME_EDITOR_CLEAR = "CLEAR NAME"
 NAME_EDITOR_SAVE = "SAVE"
 NAME_EDITOR_CANCEL = "CANCEL"
 NAME_OVERWRITE_CONFIRM_ITEMS = ["..", "OVERWRITE"]
+NAME_OVERWRITE_CONFIRM_BUTTONS = ["CANCEL", "OVERWRITE"]
 NAME_ERROR_DISMISS = "EDIT NAME"
+NAME_ERROR_BUTTONS = ["EDIT NAME"]
+PRESET_ACTION_SAVE = "SAVE"
+PRESET_ACTION_SAVE_AS = "SAVE AS..."
+PRESET_ACTION_REMOVE = "REMOVE"
 NAME_EDITOR_MAX_LEN = 24
 NAME_EDITOR_CHAR_OPTIONS: list[tuple[str, str]] = [
     ("SPACE", " "),
     ("-", "-"),
     ("_", "_"),
 ] + [(char, char) for char in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"]
+NAME_TOUCH_LETTER_ROWS: list[list[str]] = [
+    list("qwertyuiop"),
+    list("asdfghjkl"),
+    list("zxcvbnm"),
+]
+NAME_TOUCH_NUMBER_ROWS: list[list[str]] = [
+    list("1234567890"),
+    list("-_."),
+]
+NAME_TOUCH_KEY_VALUES: list[str] = list(dict.fromkeys([char for row in NAME_TOUCH_LETTER_ROWS + NAME_TOUCH_NUMBER_ROWS for char in row]))
 NAME_INLINE_DELETE_LABEL = "DEL"
 NEW_GRAPH_SET_NAME = "New Graph"
+TOUCH_PAGE_ROWS = 5
 
 
 @dataclass
@@ -95,15 +112,18 @@ class UIState:
     remove_instance_confirm_cursor: int = 0
     remove_instance_picker_cursor: int = 0
     preset_cursor: int = 0
+    preset_remove_cursor: int = 0
     param_cursor: int = 0
     enum_cursor: int = 0
     routing_group_cursor: int = 0
     routing_port_cursor: int = 0
     routing_target_cursor: int = 0
+    routing_disconnect_cursor: int = 0
     routing_overview_cursor: int = 0
     graph_menu_cursor: int = 0
     graph_set_cursor: int = 0
     graph_preset_cursor: int = 0
+    graph_preset_remove_cursor: int = 0
     graph_startup_cursor: int = 0
     graph_startup_set_cursor: int = 0
     system_cursor: int = 0
@@ -120,6 +140,9 @@ class UIState:
     patcher_picker_context: str = "add"
     pending_remove_instance_id: str = ""
     remove_instance_origin: str = ""
+    pending_add_instance_count: int = 0
+    midi_learn_instance_id: str = ""
+    midi_learn_param_path: str = ""
 
     edit_value: Any = None
     edit_ttid_mode: str = "keyboard"
@@ -138,9 +161,13 @@ class UIState:
     name_inline_cursor: int = 0
     name_inline_edit_mode: bool = False
     name_inline_preview_index: int = 0
+    name_keyboard_shift: bool = False
+    name_keyboard_mode: str = "letters"
     name_overwrite_cursor: int = 1
     name_error_message: str = ""
     network_error_message: str = ""
+    status_message: str = ""
+    status_frames: int = 0
 
     busy: bool = False
     busy_reason: str = ""
@@ -352,6 +379,10 @@ def is_enum_param(param: dict) -> bool:
 class UIEvent:
     kind: str
     delta: int = 0
+    index: int | None = None
+    button_id: str = ""
+    value: float | None = None
+    pressed: bool = False
 
 
 @dataclass
@@ -414,6 +445,13 @@ class ShadowboxUI:
         self._last_float_edit_detent_at = now
         return delta * multiplier
 
+    def _toggle_bool_param(self, param: dict) -> None:
+        current_value = normalize_current_value_for_edit(param)
+        toggled_value = 0 if bool(current_value) else 1
+        param["value"] = toggled_value
+        self.state.edit_value = toggled_value
+        self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=toggled_value))
+
     def restore_from_saved_state(self) -> None:
         saved = self._saved_state_cache
         self.state.top_index = clamp_index(int(saved.get("top_index", 0)), len(self.top_level_items))
@@ -443,8 +481,9 @@ class ShadowboxUI:
         self.state.routing_target_cursor = 0
         self.state.routing_overview_cursor = 1 if self.state.instances else 0
         self.state.graph_menu_cursor = 1 if self.graph_menu_items else 0
-        self.state.graph_set_cursor = 1 if self.available_set_names else 0
+        self.state.graph_set_cursor = self.graph_set_initial_cursor()
         self.state.graph_preset_cursor = self.graph_preset_initial_cursor()
+        self.state.graph_preset_remove_cursor = 1 if self.available_graph_preset_names else 0
         self.state.graph_startup_cursor = 1 if self.graph_startup_menu_items else 0
         self.state.graph_startup_set_cursor = 1 if self.available_set_names else 0
         self.state.system_cursor = 1
@@ -460,6 +499,8 @@ class ShadowboxUI:
         self.state.patcher_picker_context = "add"
         self.state.pending_remove_instance_id = ""
         self.state.remove_instance_origin = ""
+        self.state.midi_learn_instance_id = ""
+        self.state.midi_learn_param_path = ""
         self.state.edit_value = None
         self.state.edit_ttid_mode = "keyboard"
         self.state.edit_ttid_selected_pc = 0
@@ -480,6 +521,8 @@ class ShadowboxUI:
         self.state.name_overwrite_cursor = 1
         self.state.name_error_message = ""
         self.state.network_error_message = ""
+        self.state.status_message = ""
+        self.state.status_frames = 0
         self._edit_original_value = None
         self._about_press_count = 0
         self._reset_float_edit_acceleration()
@@ -491,9 +534,16 @@ class ShadowboxUI:
         if busy:
             self.state.activity_ticks += 1
 
+    def set_status_message(self, message: str, frames: int = 36) -> None:
+        self.state.status_message = str(message or "")
+        self.state.status_frames = max(0, int(frames))
+        if self.state.status_message:
+            self.state.activity_ticks += 1
+
     def apply_runner_snapshot(self, snapshot) -> None:
         current_id = str(self.state.active_instance_id)
         current_param_path = self.selected_param.get("path") if self.selected_param else ""
+        pending_add_instance_count = self.state.pending_add_instance_count
 
         self.state.instances = snapshot.instances
         self.state.patchers = snapshot.patchers
@@ -503,7 +553,12 @@ class ShadowboxUI:
         self._sync_audio_index()
         self._cleanup_current_presets()
 
-        if self.state.instances:
+        if pending_add_instance_count > 0 and len(self.state.instances) > pending_add_instance_count - 1:
+            new_index = len(self.state.instances) - 1
+            self.state.active_instance_id = str(self.state.instances[new_index].get("id", ""))
+            self.state.instance_cursor = new_index + 1
+            self.state.pending_add_instance_count = 0
+        elif self.state.instances:
             instance_ids = [str(item.get("id", "")) for item in self.state.instances]
             if current_id in instance_ids:
                 self.state.active_instance_id = current_id
@@ -524,6 +579,7 @@ class ShadowboxUI:
 
         self.state.param_cursor = clamp_index(self.state.param_cursor, len(self.active_params) + 1)
         self.state.preset_cursor = clamp_index(self.state.preset_cursor, len(self.preset_menu_items))
+        self.state.preset_remove_cursor = clamp_index(self.state.preset_remove_cursor, len(self.active_presets) + 1)
         self.state.maint_cursor = clamp_index(self.state.maint_cursor, len(self.maint_menu_items) + 1)
         self.state.network_cursor = clamp_index(
             self.state.network_cursor if self.state.network_cursor > 0 else 1,
@@ -536,8 +592,9 @@ class ShadowboxUI:
             len(self.routing_overview_rows),
         )
         self.state.graph_menu_cursor = clamp_index(self.state.graph_menu_cursor, len(self.graph_menu_items) + 1)
-        self.state.graph_set_cursor = clamp_index(self.state.graph_set_cursor, len(self.available_set_names) + 1)
+        self.state.graph_set_cursor = clamp_index(self.state.graph_set_cursor, len(self.graph_set_menu_items))
         self.state.graph_preset_cursor = clamp_index(self.state.graph_preset_cursor, len(self.graph_preset_menu_items))
+        self.state.graph_preset_remove_cursor = clamp_index(self.state.graph_preset_remove_cursor, len(self.available_graph_preset_names) + 1)
         self.state.graph_startup_cursor = clamp_index(self.state.graph_startup_cursor, len(self.graph_startup_menu_items) + 1)
         self.state.graph_startup_set_cursor = clamp_index(self.state.graph_startup_set_cursor, len(self.available_set_names) + 1)
 
@@ -573,6 +630,92 @@ class ShadowboxUI:
                     ):
                         self.state.edit_scope_samples = append_scope_samples(self.state.edit_scope_samples, value)
                     return True
+        return False
+
+    def apply_instance_param_update(self, instance_id: str, path: str, value: Any) -> bool:
+        instance_id = str(instance_id)
+        path = str(path)
+        if not instance_id or not path:
+            return False
+
+        for instance in self.state.instances:
+            if str(instance.get("id", "")) != instance_id:
+                continue
+            for param in instance.get("params", []):
+                param_path = str(param.get("path", ""))
+                if param_path != path:
+                    continue
+                param["value"] = value
+                if self.state.ui_mode == "EDIT" and self.selected_param is param:
+                    self.state.edit_value = normalize_current_value_for_edit(param)
+                return True
+        return False
+
+    def _selected_param_meta_path(self) -> str:
+        param = self.selected_param
+        path = str(param.get("path", "") or "") if isinstance(param, dict) else ""
+        return f"{path}/meta" if path else ""
+
+    def _selected_instance_midi_report_path(self) -> str:
+        instance_id = str(self.state.active_instance_id or "").strip()
+        return f"/rnbo/inst/{instance_id}/midi/last/report" if instance_id else ""
+
+    def _replace_selected_param_midi_mapping(self, mapping: dict[str, Any] | None) -> bool:
+        param = self.selected_param
+        if not isinstance(param, dict):
+            return False
+        meta_path = self._selected_param_meta_path()
+        if not meta_path:
+            return False
+
+        metadata = param.get("metadata", {})
+        next_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+        if mapping:
+            next_metadata["midi"] = mapping
+        else:
+            next_metadata.pop("midi", None)
+        param["metadata"] = next_metadata
+        self.queue_action(UIAction(kind="send_osc", path=meta_path, value=json.dumps(next_metadata, separators=(",", ":"))))
+        self.queue_action(UIAction(kind="save_midi_profile", value=str(self.state.active_instance_id or "")))
+        return True
+
+    def apply_instance_midi_learn_update(self, instance_id: str, path: str, value: Any) -> bool:
+        instance_id = str(instance_id)
+        if not self.state.midi_learn_param_path or instance_id != str(self.state.midi_learn_instance_id):
+            return False
+        if str(path) != f"/rnbo/inst/{instance_id}/midi/last/value":
+            return False
+
+        if isinstance(value, str):
+            try:
+                mapping = json.loads(value)
+            except Exception:
+                return False
+        elif isinstance(value, dict):
+            mapping = value
+        else:
+            return False
+        if not isinstance(mapping, dict) or "chan" not in mapping or "ctrl" not in mapping:
+            return False
+
+        target_path = self.state.midi_learn_param_path
+        previous_cursor = self.state.param_cursor
+        for instance in self.state.instances:
+            if str(instance.get("id", "")) != instance_id:
+                continue
+            for idx, param in enumerate(instance.get("params", []), start=1):
+                if str(param.get("path", "")) != target_path:
+                    continue
+                self.state.active_instance_id = instance_id
+                self.state.param_cursor = idx
+                normalized = {"chan": mapping.get("chan"), "ctrl": mapping.get("ctrl")}
+                self._replace_selected_param_midi_mapping(normalized)
+                self.state.midi_learn_instance_id = ""
+                self.state.midi_learn_param_path = ""
+                report_path = f"/rnbo/inst/{instance_id}/midi/last/report"
+                self.queue_action(UIAction(kind="send_osc", path=report_path, value=False))
+                return True
+        self.state.param_cursor = previous_cursor
         return False
 
     def _cleanup_current_presets(self) -> None:
@@ -618,24 +761,20 @@ class ShadowboxUI:
 
     @property
     def system_menu_items(self) -> list[str]:
-        items = ["STATUS", "AUDIO", "NETWORK", "ABOUT"]
+        items = ["STATUS", "AUDIO"]
+        if self.graph_startup_menu_items:
+            items.append("STARTUP")
+        items.extend(["NETWORK", "ABOUT"])
         if self.maint_menu_items:
             items.append("MAINT")
         return items
 
     @property
     def graph_menu_items(self) -> list[str]:
-        items = ["CURRENT GRAPH", "LOAD GRAPH"]
-        if self.new_graph_available:
-            items.insert(1, "NEW GRAPH")
-        items.extend(["AUDIO OVERVIEW", "MIDI OVERVIEW"])
+        items: list[str] = []
         if self.graph_preset_menu_enabled:
-            items.append("GRAPH PRESETS")
-        if self.graph_save_path:
-            items.append("SAVE GRAPH")
-        if self.graph_rename_path and self.current_set_name != "(untitled)":
-            items.append("RENAME GRAPH")
-        items.append("STARTUP")
+            items.append("PRESETS")
+        items.extend(["AUDIO OVERVIEW", "MIDI OVERVIEW"])
         return items
 
     @property
@@ -667,21 +806,44 @@ class ShadowboxUI:
         }
 
     @property
+    def graph_action_items(self) -> list[str]:
+        if not self.graph_save_path:
+            return []
+        return [PRESET_ACTION_SAVE, PRESET_ACTION_SAVE_AS]
+
+    @property
+    def graph_set_menu_items(self) -> list[str]:
+        return [".."] + self.graph_action_items + self.available_set_names
+
+    @property
     def graph_set_rows(self) -> list[MenuRow]:
         rows = [MenuRow("..")]
+        for item in self.graph_action_items:
+            rows.append(MenuRow(str(item), action=True))
         current_indices = self.graph_set_current_indices
-        dirty_weights = self.graph_set_item_weights
+        offset = len(self.graph_action_items)
+        dirty_weights = {
+            idx + offset: weight
+            for idx, weight in self.graph_set_item_weights.items()
+        }
         for idx, item in enumerate(self.available_set_names, start=1):
             rows.append(
                 MenuRow(
                     str(item),
-                    current=idx in current_indices,
-                    emphasis="italic" if dirty_weights.get(idx) == "italic" else "",
+                    current=(idx + offset) in {item_idx + offset for item_idx in current_indices},
+                    emphasis="italic" if dirty_weights.get(idx + offset) == "italic" else "",
                 )
             )
         if len(rows) == 1:
             rows.append(MenuRow("no saved graphs"))
         return rows
+
+    def graph_set_initial_cursor(self) -> int:
+        if self.available_set_names:
+            return 1 + len(self.graph_action_items)
+        if self.graph_action_items:
+            return 1
+        return 0
 
     @property
     def set_presets(self) -> dict:
@@ -726,11 +888,9 @@ class ShadowboxUI:
     def graph_preset_action_items(self) -> list[str]:
         items: list[str] = []
         if self.graph_preset_save_path:
-            items.append("SAVE PRESET")
-        if self.graph_preset_rename_path and self.current_graph_preset_name:
-            items.append("RENAME PRESET")
-        if self.graph_preset_destroy_path and self.current_graph_preset_name:
-            items.append("DELETE PRESET")
+            items.extend([PRESET_ACTION_SAVE, PRESET_ACTION_SAVE_AS])
+        if self.graph_preset_destroy_path and self.available_graph_preset_names:
+            items.append(PRESET_ACTION_REMOVE)
         return items
 
     @property
@@ -1023,6 +1183,8 @@ class ShadowboxUI:
         self.state.name_inline_cursor = max(0, len(self.state.name_editor_draft) - 1)
         self.state.name_inline_edit_mode = False
         self.state.name_inline_preview_index = 0
+        self.state.name_keyboard_shift = False
+        self.state.name_keyboard_mode = "letters"
         self.state.name_overwrite_cursor = 1
         self.state.name_error_message = ""
         self.state.ui_mode = "NAME_EDITOR"
@@ -1114,6 +1276,61 @@ class ShadowboxUI:
     def _exit_inline_name_editor(self) -> None:
         self.state.name_inline_edit_mode = False
         self.state.ui_mode = "NAME_EDITOR"
+
+    def _append_name_keyboard_text(self, text: str) -> None:
+        if not text:
+            return
+        draft = self.state.name_editor_draft
+        if not draft and str(text).isspace():
+            return
+        remaining = max(0, NAME_EDITOR_MAX_LEN - len(draft))
+        if remaining <= 0:
+            return
+        self.state.name_editor_draft = re.sub(r"\s+", " ", draft + str(text)[:remaining])[:NAME_EDITOR_MAX_LEN]
+        self.state.name_inline_cursor = max(0, len(self.state.name_editor_draft) - 1)
+
+    def _handle_name_keyboard_key(self, key_index: int | None) -> None:
+        if self.state.ui_mode != "NAME_EDITOR" or key_index is None:
+            return
+        idx = int(key_index)
+        if idx < 0 or idx >= len(NAME_TOUCH_KEY_VALUES):
+            return
+        char = NAME_TOUCH_KEY_VALUES[idx]
+        if self.state.name_keyboard_shift and char.isalpha():
+            char = char.upper()
+            self.state.name_keyboard_shift = False
+        self._append_name_keyboard_text(char)
+        self.state.activity_ticks += 1
+        self.queue_action(UIAction(kind="save_state"))
+
+    def _handle_name_keyboard_backspace(self) -> None:
+        if self.state.ui_mode != "NAME_EDITOR":
+            return
+        self.state.name_editor_draft = self.state.name_editor_draft[:-1]
+        self.state.name_inline_cursor = max(0, len(self.state.name_editor_draft) - 1)
+        self.state.activity_ticks += 1
+        self.queue_action(UIAction(kind="save_state"))
+
+    def _handle_name_keyboard_space(self) -> None:
+        if self.state.ui_mode != "NAME_EDITOR":
+            return
+        self._append_name_keyboard_text(" ")
+        self.state.activity_ticks += 1
+        self.queue_action(UIAction(kind="save_state"))
+
+    def _handle_name_keyboard_shift(self) -> None:
+        if self.state.ui_mode != "NAME_EDITOR":
+            return
+        self.state.name_keyboard_shift = not self.state.name_keyboard_shift
+        self.state.name_keyboard_mode = "letters"
+        self.queue_action(UIAction(kind="save_state"))
+
+    def _handle_name_keyboard_mode(self) -> None:
+        if self.state.ui_mode != "NAME_EDITOR":
+            return
+        self.state.name_keyboard_mode = "numbers" if self.state.name_keyboard_mode == "letters" else "letters"
+        self.state.name_keyboard_shift = False
+        self.queue_action(UIAction(kind="save_state"))
 
     def _regenerate_name_draft(self) -> None:
         if self.state.name_editor_context == "save_set":
@@ -1233,12 +1450,18 @@ class ShadowboxUI:
         return str(self.active_instance.get("preset_rename_path", "") or "")
 
     @property
+    def active_preset_destroy_path(self) -> str:
+        if not self.active_instance:
+            return ""
+        return str(self.active_instance.get("preset_destroy_path", "") or "")
+
+    @property
     def preset_action_items(self) -> list[str]:
         items: list[str] = []
         if self.active_preset_save_path:
-            items.append("SAVE PRESET")
-        if self.active_preset_rename_path and self.current_preset_name:
-            items.append("RENAME PRESET")
+            items.extend([PRESET_ACTION_SAVE, PRESET_ACTION_SAVE_AS])
+        if self.active_preset_destroy_path and self.active_presets:
+            items.append(PRESET_ACTION_REMOVE)
         return items
 
     @property
@@ -1407,6 +1630,20 @@ class ShadowboxUI:
         idx = self.state.graph_preset_cursor - 1 - len(self.graph_preset_action_items)
         if 0 <= idx < len(self.available_graph_preset_names):
             return str(self.available_graph_preset_names[idx])
+        return ""
+
+    @property
+    def selected_graph_preset_remove_name(self) -> str:
+        idx = self.state.graph_preset_remove_cursor - 1
+        if 0 <= idx < len(self.available_graph_preset_names):
+            return str(self.available_graph_preset_names[idx])
+        return ""
+
+    @property
+    def selected_preset_remove_name(self) -> str:
+        idx = self.state.preset_remove_cursor - 1
+        if 0 <= idx < len(self.active_presets):
+            return str(self.active_presets[idx].get("name", "") or "")
         return ""
 
     @property
@@ -1831,6 +2068,8 @@ class ShadowboxUI:
         return self.state.ui_mode in {
             "GRAPH_MENU",
             "GRAPH_SET_LIST",
+            "GRAPH_PRESET_LIST",
+            "GRAPH_PRESET_REMOVE_PICKER",
             "GRAPH_STARTUP",
             "GRAPH_STARTUP_SET_LIST",
             "NAME_EDITOR",
@@ -1843,6 +2082,7 @@ class ShadowboxUI:
             "REMOVE_INSTANCE_PICKER",
             "REMOVE_INSTANCE_CONFIRM",
             "PRESET_LIST",
+            "PRESET_REMOVE_PICKER",
             "ROUTING_GROUP",
             "ROUTING_PORTS",
             "AUDIO_ROUTING_OVERVIEW",
@@ -1850,6 +2090,7 @@ class ShadowboxUI:
             "EDIT",
             "ENUM_LIST",
             "ROUTING_TARGETS",
+            "ROUTING_DISCONNECT_PICKER",
             "SYSTEM_AUDIO_DEVICE",
             "SYSTEM_AUDIO_RATE",
             "SYSTEM_AUDIO_BUFFER",
@@ -1859,6 +2100,10 @@ class ShadowboxUI:
     def advance_frame(self, frame_scale: float = 1.0) -> None:
         if self.state.ui_mode == "BRICK_PANEL":
             self.brick_panel.update(frame_scale=frame_scale)
+        if self.state.status_frames > 0:
+            self.state.status_frames = max(0, self.state.status_frames - max(1, int(round(frame_scale))))
+            if self.state.status_frames == 0:
+                self.state.status_message = ""
 
     def handle_event(self, event: UIEvent) -> None:
         if event.kind == "step":
@@ -1867,6 +2112,566 @@ class ShadowboxUI:
             self._handle_short_press()
         elif event.kind == "long_press":
             self._handle_long_press()
+        elif event.kind == "tap_row":
+            self._handle_tap_row(event.index)
+        elif event.kind == "tap_back":
+            self._handle_tap_back()
+        elif event.kind == "tap_button":
+            self._handle_tap_button(event.button_id)
+        elif event.kind == "page_up":
+            self._handle_touch_page(-1)
+        elif event.kind == "page_down":
+            self._handle_touch_page(1)
+        elif event.kind == "set_edit_value":
+            self._handle_touch_edit_value(event.value, pressed=bool(getattr(event, "pressed", False)))
+        elif event.kind == "set_ttid_pc":
+            self._handle_touch_ttid_pc(event.index)
+        elif event.kind == "set_ttid_root":
+            self._handle_touch_ttid_root(event.index)
+        elif event.kind == "set_ttid_scale":
+            self._handle_touch_ttid_scale(event.index)
+        elif event.kind == "step_ttid_scale":
+            self._handle_touch_ttid_scale_step(event.index)
+        elif event.kind == "load_ttid_scale":
+            self._handle_touch_ttid_load()
+        elif event.kind == "tap_step16":
+            self._handle_touch_step16_cell(event.index)
+        elif event.kind == "tap_name_key":
+            self._handle_name_keyboard_key(event.index)
+        elif event.kind == "name_backspace":
+            self._handle_name_keyboard_backspace()
+        elif event.kind == "name_space":
+            self._handle_name_keyboard_space()
+        elif event.kind == "name_shift":
+            self._handle_name_keyboard_shift()
+        elif event.kind == "name_keyboard_mode":
+            self._handle_name_keyboard_mode()
+
+    def _handle_touch_edit_value(self, normalized_value: float | None, *, pressed: bool = False) -> None:
+        if self.state.ui_mode != "EDIT" or normalized_value is None:
+            return
+        param = self.selected_param
+        if param is None or is_ttid_param(param) or is_step16_param(param) or is_pitch_display_param(param) or is_scope_param(param) or is_enum_param(param):
+            return
+        pmin = param.get("min")
+        pmax = param.get("max")
+        if not isinstance(pmin, (int, float)) or not isinstance(pmax, (int, float)) or pmax <= pmin:
+            return
+
+        fraction = max(0.0, min(1.0, float(normalized_value)))
+        value: Any = pmin + ((pmax - pmin) * fraction)
+        if edit_as_int(param):
+            value = int(round(value))
+        value = clamp(value, pmin, pmax)
+
+        previous = self.state.edit_value
+        if isinstance(previous, (int, float)) and abs(float(previous) - float(value)) < 1e-9:
+            if not pressed:
+                self.queue_action(UIAction(kind="save_state"))
+            return
+
+        self.state.edit_value = value
+        param["value"] = value
+        self.state.activity_ticks += 1
+        if not is_discrete_param(param):
+            self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
+        if not pressed:
+            self.queue_action(UIAction(kind="save_state"))
+
+    def _handle_touch_ttid_pc(self, pc_index: int | None) -> None:
+        param = self.selected_param
+        if self.state.ui_mode != "EDIT" or param is None or not is_ttid_param(param) or self.state.edit_ttid_mode != "keyboard":
+            return
+        if pc_index is None:
+            return
+        pc = int(pc_index)
+        if pc == 12:
+            self._handle_touch_ttid_load()
+            return
+        if pc < 0 or pc > 11:
+            return
+        self.state.activity_ticks += 1
+        self.state.edit_ttid_selected_pc = pc
+        self.state.edit_value = toggle_bit(normalize_ttid(self.state.edit_value), pc)
+        param["value"] = self.state.edit_value
+        self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=self.state.edit_value))
+        self.queue_action(UIAction(kind="save_state"))
+
+    def _handle_touch_ttid_root(self, root_index: int | None) -> None:
+        param = self.selected_param
+        if self.state.ui_mode != "EDIT" or param is None or not is_ttid_param(param):
+            return
+        if root_index is None:
+            return
+        self.state.edit_ttid_load_root = int(root_index) % 12
+        self.state.edit_ttid_mode = "keyboard"
+        self.state.activity_ticks += 1
+        self.queue_action(UIAction(kind="save_state"))
+
+    def _handle_touch_ttid_scale(self, scale_index: int | None) -> None:
+        param = self.selected_param
+        if self.state.ui_mode != "EDIT" or param is None or not is_ttid_param(param):
+            return
+        names = self.state.edit_ttid_scale_names or ["major"]
+        if scale_index is None or not names:
+            return
+        self.state.edit_ttid_scale_index = max(0, min(len(names) - 1, int(scale_index)))
+        self.state.edit_ttid_mode = "keyboard"
+        self.state.activity_ticks += 1
+        self.queue_action(UIAction(kind="save_state"))
+
+    def _handle_touch_ttid_scale_step(self, direction: int | None) -> None:
+        param = self.selected_param
+        if self.state.ui_mode != "EDIT" or param is None or not is_ttid_param(param):
+            return
+        names = self.state.edit_ttid_scale_names or ["major"]
+        if not names:
+            return
+        step = -1 if direction is not None and int(direction) < 0 else 1
+        self.state.edit_ttid_scale_index = (self.state.edit_ttid_scale_index + step) % len(names)
+        self.state.edit_ttid_mode = "keyboard"
+        self.state.activity_ticks += 1
+        self.queue_action(UIAction(kind="save_state"))
+
+    def _handle_touch_ttid_load(self) -> None:
+        param = self.selected_param
+        if self.state.ui_mode != "EDIT" or param is None or not is_ttid_param(param):
+            return
+        self._apply_ttid_scale_load()
+        self.state.edit_ttid_mode = "keyboard"
+        self.state.edit_ttid_selected_pc = self.state.edit_ttid_load_root
+        self.state.activity_ticks += 1
+        self.queue_action(UIAction(kind="save_state"))
+
+    def _handle_touch_step16_cell(self, step_index: int | None) -> None:
+        param = self.selected_param
+        if self.state.ui_mode != "EDIT" or param is None or not is_step16_param(param) or step_index is None:
+            return
+        step = int(step_index) % 16
+        self.state.edit_step16_focus = step
+        self.state.edit_value = toggle_step16(normalize_step16_mask(self.state.edit_value), step)
+        param["value"] = self.state.edit_value
+        self.state.activity_ticks += 1
+        self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=self.state.edit_value))
+        self.queue_action(UIAction(kind="save_state"))
+
+    def _handle_tap_back(self) -> None:
+        if self.state.ui_mode == "EDIT":
+            self.state.edit_value = None
+            self.state.edit_ttid_mode = "keyboard"
+            self.state.edit_ttid_selected_pc = 0
+            self.state.edit_ttid_load_root = 0
+            self.state.edit_ttid_scale_index = 0
+            self.state.edit_step16_focus = 0
+            self.state.edit_scope_samples = []
+            self._edit_original_value = None
+            self._reset_float_edit_acceleration()
+            self.state.ui_mode = "PARAM_LIST"
+            self.queue_action(UIAction(kind="save_state"))
+            return
+
+        self._handle_long_press()
+
+    def _handle_tap_button(self, button_id: str) -> None:
+        button = re.sub(r"\s+", "_", str(button_id or "").strip().lower())
+
+        if self.state.ui_mode == "EDIT":
+            if button == "learn":
+                param = self.selected_param
+                report_path = self._selected_instance_midi_report_path()
+                if isinstance(param, dict) and report_path:
+                    self.state.midi_learn_instance_id = str(self.state.active_instance_id or "")
+                    self.state.midi_learn_param_path = str(param.get("path", "") or "")
+                    self.queue_action(UIAction(kind="send_osc", path=report_path, value=True))
+                    self.queue_action(UIAction(kind="save_state"))
+                return
+            if button == "clear":
+                self._replace_selected_param_midi_mapping(None)
+                self.state.midi_learn_instance_id = ""
+                self.state.midi_learn_param_path = ""
+                report_path = self._selected_instance_midi_report_path()
+                if report_path:
+                    self.queue_action(UIAction(kind="send_osc", path=report_path, value=False))
+                self.queue_action(UIAction(kind="save_state"))
+                return
+
+        if self.state.ui_mode == "NAME_OVERWRITE_CONFIRM":
+            if button == "cancel" or button == "back":
+                self.state.ui_mode = "NAME_EDITOR"
+                self.state.name_overwrite_cursor = 1
+                self.queue_action(UIAction(kind="save_state"))
+                return
+            if button == "overwrite":
+                self._queue_confirmed_name_action(self.normalize_name_draft(self.state.name_editor_draft))
+                self.queue_action(UIAction(kind="save_state"))
+                return
+
+        if self.state.ui_mode == "NAME_ERROR":
+            if button in {"edit_name", "cancel", "back"}:
+                self.state.ui_mode = "NAME_EDITOR"
+                self.state.name_overwrite_cursor = 1
+                self.queue_action(UIAction(kind="save_state"))
+                return
+
+        if self.state.ui_mode == "NAME_EDITOR":
+            if button in {"save", "rename", "done", "primary"}:
+                self._submit_name_editor()
+                self.queue_action(UIAction(kind="save_state"))
+                return
+            if button in {"clear", "clear_name"}:
+                self.state.name_editor_draft = ""
+                self.state.name_inline_cursor = 0
+                self.queue_action(UIAction(kind="save_state"))
+                return
+            if button == "generate":
+                self._regenerate_name_draft()
+                self.queue_action(UIAction(kind="save_state"))
+                return
+            if button in {"add_date", "date"}:
+                self.state.name_editor_draft = self.append_date_token(self.state.name_editor_draft)
+                self.queue_action(UIAction(kind="save_state"))
+                return
+
+        if self.state.ui_mode == "REMOVE_INSTANCE_CONFIRM":
+            if button in {"cancel", "back"}:
+                self._cancel_remove_instance_confirm()
+                self.queue_action(UIAction(kind="save_state"))
+                return
+            if button == "remove":
+                self._confirm_remove_instance()
+                self.queue_action(UIAction(kind="save_state"))
+                return
+
+        if self.state.ui_mode == "INSTANCE_LIST":
+            if button in {"add_instance", "add"} and self.can_add_instance:
+                self.state.ui_mode = "PATCHER_PICKER"
+                self.state.patcher_picker_context = "add"
+                self.state.patcher_cursor = 1 if self.state.patchers else 0
+                self.queue_action(UIAction(kind="save_state"))
+                return
+            if button in {"remove_instance", "remove"} and self.can_remove_instances:
+                self.state.ui_mode = "REMOVE_INSTANCE_PICKER"
+                self.state.remove_instance_picker_cursor = 1 if self.state.instances else 0
+                self.state.remove_instance_origin = "instance_list"
+                self.queue_action(UIAction(kind="save_state"))
+                return
+
+        if self.state.ui_mode == "GRAPH_SET_LIST":
+            if button == "save":
+                self._save_current_graph_or_open_save_as()
+                self.queue_action(UIAction(kind="save_state"))
+                return
+            if button in {"save_as", "save_as..."}:
+                self._begin_graph_save_as()
+                self.queue_action(UIAction(kind="save_state"))
+                return
+
+        if self.state.ui_mode == "GRAPH_PRESET_LIST":
+            if button == "save":
+                self._save_current_graph_preset_or_open_save_as()
+                self.queue_action(UIAction(kind="save_state"))
+                return
+            if button in {"save_as", "save_as..."}:
+                self._begin_graph_preset_save_as()
+                self.queue_action(UIAction(kind="save_state"))
+                return
+            if button == "remove" and self.graph_preset_destroy_path:
+                self.state.ui_mode = "GRAPH_PRESET_REMOVE_PICKER"
+                self.state.graph_preset_remove_cursor = 1 if self.available_graph_preset_names else 0
+                self.queue_action(UIAction(kind="save_state"))
+                return
+
+        if self.state.ui_mode == "PRESET_LIST":
+            if button == "save":
+                self._save_current_preset_or_open_save_as()
+                self.queue_action(UIAction(kind="save_state"))
+                return
+            if button in {"save_as", "save_as..."}:
+                self._begin_preset_save_as()
+                self.queue_action(UIAction(kind="save_state"))
+                return
+            if button == "remove" and self.active_preset_destroy_path:
+                self.state.ui_mode = "PRESET_REMOVE_PICKER"
+                self.state.preset_remove_cursor = 1 if self.active_presets else 0
+                self.queue_action(UIAction(kind="save_state"))
+                return
+
+        if self.state.ui_mode == "ROUTING_TARGETS":
+            if button == "disconnect":
+                self.state.ui_mode = "ROUTING_DISCONNECT_PICKER"
+                self.state.routing_disconnect_cursor = 1 if self.current_routing_targets else 0
+                self.queue_action(UIAction(kind="save_state"))
+                return
+
+        if button in {"back", "cancel"}:
+            self._handle_long_press()
+        else:
+            self._handle_short_press()
+
+    def _handle_touch_page(self, direction: int) -> None:
+        if direction == 0:
+            return
+        step = (1 if direction > 0 else -1) * TOUCH_PAGE_ROWS
+        mode = self.state.ui_mode
+
+        def scroll_cursor(attr: str, count: int, *, first_index: int = 1) -> bool:
+            if count <= 0:
+                return False
+            last_index = first_index + count - 1
+            current = int(getattr(self.state, attr))
+            if current < first_index or current > last_index:
+                current = first_index
+            setattr(self.state, attr, max(first_index, min(last_index, current + step)))
+            self.state.activity_ticks += 1
+            return True
+
+        if mode == "INSTANCE_LIST":
+            if scroll_cursor("instance_cursor", len(self.state.instances)):
+                self.state.active_instance_id = str(self.state.instances[self.state.instance_cursor - 1].get("id", ""))
+            return
+        if mode == "REMOVE_INSTANCE_PICKER":
+            scroll_cursor("remove_instance_picker_cursor", len(self.state.instances))
+            return
+        if mode == "PATCHER_PICKER":
+            scroll_cursor("patcher_cursor", len(self.state.patchers))
+            return
+        if mode == "INSTANCE_MENU":
+            scroll_cursor("instance_menu_cursor", len(self.instance_menu_items))
+            return
+        if mode == "PARAM_LIST":
+            scroll_cursor("param_cursor", len(self.active_params))
+            return
+        if mode == "PRESET_LIST":
+            scroll_cursor("preset_cursor", len(self.preset_menu_items), first_index=0)
+            return
+        if mode == "PRESET_REMOVE_PICKER":
+            scroll_cursor("preset_remove_cursor", len(self.active_presets))
+            return
+        if mode == "GRAPH_MENU":
+            scroll_cursor("graph_menu_cursor", len(self.graph_menu_items))
+            return
+        if mode == "GRAPH_SET_LIST":
+            scroll_cursor("graph_set_cursor", len(self.available_set_names), first_index=1 + len(self.graph_action_items))
+            return
+        if mode == "GRAPH_PRESET_LIST":
+            scroll_cursor("graph_preset_cursor", len(self.graph_preset_menu_items), first_index=0)
+            return
+        if mode == "GRAPH_PRESET_REMOVE_PICKER":
+            scroll_cursor("graph_preset_remove_cursor", len(self.available_graph_preset_names))
+            return
+        if mode == "GRAPH_STARTUP":
+            scroll_cursor("graph_startup_cursor", len(self.graph_startup_menu_items))
+            return
+        if mode == "GRAPH_STARTUP_SET_LIST":
+            scroll_cursor("graph_startup_set_cursor", len(self.available_set_names))
+            return
+        if mode == "ROUTING_GROUP":
+            scroll_cursor("routing_group_cursor", len(ROUTING_GROUP_ITEMS))
+            return
+        if mode == "ROUTING_PORTS":
+            scroll_cursor("routing_port_cursor", len(self.active_routing_ports))
+            return
+        if mode == "ROUTING_DISCONNECT_PICKER":
+            scroll_cursor("routing_disconnect_cursor", len(self.current_routing_targets))
+            return
+        if mode in {"AUDIO_ROUTING_OVERVIEW", "MIDI_ROUTING_OVERVIEW"}:
+            scroll_cursor("routing_overview_cursor", len(self.routing_overview_rows))
+            return
+        if mode == "SYSTEM_MENU":
+            scroll_cursor("system_cursor", len(self.system_menu_items))
+            return
+        if mode == "SYSTEM_AUDIO":
+            scroll_cursor("system_audio_cursor", len(SYSTEM_AUDIO_ITEMS))
+            return
+        if mode == "SYSTEM_AUDIO_DEVICE":
+            scroll_cursor("audio_device_cursor", len(self.audio_options))
+            return
+        if mode == "SYSTEM_AUDIO_RATE":
+            scroll_cursor("sample_rate_cursor", len(self.sample_rate_options))
+            return
+        if mode == "SYSTEM_AUDIO_BUFFER":
+            scroll_cursor("buffer_size_cursor", len(self.buffer_size_options))
+            return
+        if mode == "NETWORK":
+            scroll_cursor("network_cursor", len(self.network_value_rows))
+            return
+        if mode == "MAINT":
+            scroll_cursor("maint_cursor", len(self.maint_menu_items))
+            return
+
+    def _set_touch_cursor(self, attr: str, row_index: int, count: int) -> bool:
+        if count <= 0:
+            return False
+        setattr(self.state, attr, clamp_index(row_index, count))
+        return True
+
+    def _cancel_remove_instance_confirm(self) -> None:
+        self.state.pending_remove_instance_id = ""
+        if self.state.remove_instance_origin == "instance_list":
+            self.state.ui_mode = "REMOVE_INSTANCE_PICKER"
+        else:
+            self.state.ui_mode = "INSTANCE_MENU"
+        self.state.remove_instance_origin = ""
+
+    def _confirm_remove_instance(self) -> None:
+        target = self.remove_instance_target
+        if target is not None and self.state.remove_instance_path:
+            self.queue_action(
+                UIAction(
+                    kind="remove_instance",
+                    path=self.state.remove_instance_path,
+                    value=int(target.get("id")),
+                )
+            )
+        self.state.pending_remove_instance_id = ""
+        self.state.ui_mode = "REMOVE_INSTANCE_PICKER" if self.state.remove_instance_origin == "instance_list" else "INSTANCE_MENU"
+        self.state.remove_instance_origin = ""
+
+    def _begin_graph_preset_save_as(self) -> None:
+        if not self.graph_preset_save_path:
+            return
+        self._begin_name_editor(
+            context="save_graph_preset",
+            path=self.graph_preset_save_path,
+            initial_draft=self.suggested_graph_preset_save_name(),
+            return_mode="GRAPH_PRESET_LIST",
+        )
+
+    def _save_current_graph_preset_or_open_save_as(self) -> None:
+        if not self.graph_preset_save_path:
+            return
+        name = self.current_graph_preset_name
+        if not name:
+            self._begin_graph_preset_save_as()
+            return
+        self.queue_action(UIAction(kind="save_graph_preset", path=self.graph_preset_save_path, value=name))
+
+    @property
+    def selected_graph_set_name(self) -> str:
+        idx = self.state.graph_set_cursor - 1 - len(self.graph_action_items)
+        if 0 <= idx < len(self.available_set_names):
+            return str(self.available_set_names[idx])
+        return ""
+
+    def _begin_graph_save_as(self) -> None:
+        if not self.graph_save_path:
+            return
+        self._begin_name_editor(
+            context="save_set",
+            path=self.graph_save_path,
+            initial_draft=self.suggested_set_save_name(),
+            return_mode="GRAPH_SET_LIST",
+        )
+
+    def _save_current_graph_or_open_save_as(self) -> None:
+        if not self.graph_save_path:
+            return
+        name = self.current_set_name
+        if not name or name == "(untitled)":
+            self._begin_graph_save_as()
+            return
+        self.queue_action(UIAction(kind="save_set", path=self.graph_save_path, value=name))
+
+    def _begin_preset_save_as(self) -> None:
+        if not self.active_preset_save_path:
+            return
+        self._begin_name_editor(
+            context="save_preset",
+            path=self.active_preset_save_path,
+            initial_draft=self.suggested_preset_save_name(),
+            return_mode="PRESET_LIST",
+        )
+
+    def _save_current_preset_or_open_save_as(self) -> None:
+        if not self.active_preset_save_path:
+            return
+        name = self.current_preset_name
+        if not name:
+            self._begin_preset_save_as()
+            return
+        self.queue_action(UIAction(kind="save_preset", path=self.active_preset_save_path, value=name))
+
+    def _handle_tap_row(self, index: int | None) -> None:
+        if index is None:
+            return
+        row_index = max(0, int(index))
+        mode = self.state.ui_mode
+        handled = False
+
+        if mode == "TOP":
+            handled = self._set_touch_cursor("top_index", row_index, len(self.top_level_items))
+        elif mode == "GRAPH_MENU":
+            handled = self._set_touch_cursor("graph_menu_cursor", row_index, len(self.graph_menu_items) + 1)
+        elif mode == "GRAPH_SET_LIST":
+            if row_index > 0:
+                row_index += len(self.graph_action_items)
+            handled = self._set_touch_cursor("graph_set_cursor", row_index, len(self.graph_set_menu_items))
+        elif mode == "GRAPH_PRESET_LIST":
+            if row_index > 0:
+                row_index += len(self.graph_preset_action_items)
+            handled = self._set_touch_cursor("graph_preset_cursor", row_index, len(self.graph_preset_menu_items))
+        elif mode == "GRAPH_PRESET_REMOVE_PICKER":
+            handled = self._set_touch_cursor("graph_preset_remove_cursor", row_index, len(self.available_graph_preset_names) + 1)
+        elif mode == "GRAPH_STARTUP":
+            handled = self._set_touch_cursor("graph_startup_cursor", row_index, len(self.graph_startup_menu_items) + 1)
+        elif mode == "GRAPH_STARTUP_SET_LIST":
+            handled = self._set_touch_cursor("graph_startup_set_cursor", row_index, len(self.available_set_names) + 1)
+        elif mode == "NAME_EDITOR":
+            handled = self._set_touch_cursor("name_editor_cursor", row_index, len(self.name_editor_items))
+        elif mode == "NAME_OVERWRITE_CONFIRM":
+            handled = self._set_touch_cursor("name_overwrite_cursor", row_index, len(self.overwrite_confirm_items))
+        elif mode == "NAME_ERROR":
+            handled = self._set_touch_cursor("name_overwrite_cursor", row_index, len(self.name_error_items))
+        elif mode == "INSTANCE_LIST":
+            handled = self._set_touch_cursor("instance_cursor", row_index, len(self.instance_rows))
+            selected_idx = self.state.instance_cursor - 1
+            if 0 <= selected_idx < len(self.state.instances):
+                self.state.active_instance_id = str(self.state.instances[selected_idx].get("id", ""))
+        elif mode == "REMOVE_INSTANCE_PICKER":
+            handled = self._set_touch_cursor("remove_instance_picker_cursor", row_index, len(self.state.instances) + 1)
+        elif mode == "PATCHER_PICKER":
+            handled = self._set_touch_cursor("patcher_cursor", row_index, len(self.state.patchers) + 1)
+        elif mode == "INSTANCE_MENU":
+            handled = self._set_touch_cursor("instance_menu_cursor", row_index, len(self.instance_menu_items) + 1)
+        elif mode == "REMOVE_INSTANCE_CONFIRM":
+            handled = self._set_touch_cursor("remove_instance_confirm_cursor", row_index, len(REMOVE_INSTANCE_CONFIRM_ITEMS))
+        elif mode == "PRESET_LIST":
+            if row_index > 0:
+                row_index += len(self.preset_action_items)
+            handled = self._set_touch_cursor("preset_cursor", row_index, len(self.preset_menu_items))
+        elif mode == "PRESET_REMOVE_PICKER":
+            handled = self._set_touch_cursor("preset_remove_cursor", row_index, len(self.active_presets) + 1)
+        elif mode == "PARAM_LIST":
+            handled = self._set_touch_cursor("param_cursor", row_index, len(self.active_params) + 1)
+        elif mode == "ENUM_LIST":
+            handled = self._set_touch_cursor("enum_cursor", row_index, len(self.active_enum_options))
+        elif mode == "ROUTING_GROUP":
+            handled = self._set_touch_cursor("routing_group_cursor", row_index, len(ROUTING_GROUP_ITEMS) + 1)
+        elif mode == "ROUTING_PORTS":
+            handled = self._set_touch_cursor("routing_port_cursor", row_index, len(self.active_routing_ports) + 1)
+        elif mode == "ROUTING_TARGETS":
+            handled = self._set_touch_cursor("routing_target_cursor", row_index, len(self.active_routing_targets) + 2)
+        elif mode == "ROUTING_DISCONNECT_PICKER":
+            handled = self._set_touch_cursor("routing_disconnect_cursor", row_index, len(self.current_routing_targets) + 1)
+        elif mode in {"AUDIO_ROUTING_OVERVIEW", "MIDI_ROUTING_OVERVIEW"}:
+            handled = self._set_touch_cursor("routing_overview_cursor", row_index + 1, len(self.routing_overview_rows))
+        elif mode == "SYSTEM_MENU":
+            handled = self._set_touch_cursor("system_cursor", row_index, len(self.system_menu_items) + 1)
+        elif mode == "NETWORK":
+            handled = self._set_touch_cursor("network_cursor", row_index + 1, len(self.network_value_rows))
+        elif mode == "SYSTEM_AUDIO":
+            handled = self._set_touch_cursor("system_audio_cursor", row_index, len(SYSTEM_AUDIO_ITEMS) + 1)
+        elif mode == "MAINT":
+            handled = self._set_touch_cursor("maint_cursor", row_index, len(self.maint_menu_items) + 1)
+        elif mode == "SYSTEM_AUDIO_DEVICE":
+            handled = self._set_touch_cursor("audio_device_cursor", row_index, len(self.audio_options) + 1)
+        elif mode == "SYSTEM_AUDIO_RATE":
+            handled = self._set_touch_cursor("sample_rate_cursor", row_index, len(self.sample_rate_options) + 1)
+        elif mode == "SYSTEM_AUDIO_BUFFER":
+            handled = self._set_touch_cursor("buffer_size_cursor", row_index, len(self.buffer_size_options) + 1)
+
+        if handled:
+            self._handle_short_press()
 
     def _handle_step(self, delta: int) -> None:
         if delta == 0:
@@ -1883,9 +2688,11 @@ class ShadowboxUI:
         elif self.state.ui_mode == "GRAPH_MENU":
             self.state.graph_menu_cursor = self._cycle(self.state.graph_menu_cursor, len(self.graph_menu_items) + 1, step)
         elif self.state.ui_mode == "GRAPH_SET_LIST":
-            self.state.graph_set_cursor = self._cycle(self.state.graph_set_cursor, len(self.available_set_names) + 1, step)
+            self.state.graph_set_cursor = self._cycle(self.state.graph_set_cursor, len(self.graph_set_menu_items), step)
         elif self.state.ui_mode == "GRAPH_PRESET_LIST":
             self.state.graph_preset_cursor = self._cycle(self.state.graph_preset_cursor, len(self.graph_preset_menu_items), step)
+        elif self.state.ui_mode == "GRAPH_PRESET_REMOVE_PICKER":
+            self.state.graph_preset_remove_cursor = self._cycle(self.state.graph_preset_remove_cursor, len(self.available_graph_preset_names) + 1, step)
         elif self.state.ui_mode == "GRAPH_STARTUP":
             self.state.graph_startup_cursor = self._cycle(self.state.graph_startup_cursor, len(self.graph_startup_menu_items) + 1, step)
         elif self.state.ui_mode == "GRAPH_STARTUP_SET_LIST":
@@ -1921,6 +2728,8 @@ class ShadowboxUI:
             self.state.remove_instance_confirm_cursor = self._cycle(self.state.remove_instance_confirm_cursor, len(REMOVE_INSTANCE_CONFIRM_ITEMS), step)
         elif self.state.ui_mode == "PRESET_LIST":
             self.state.preset_cursor = self._cycle(self.state.preset_cursor, len(self.preset_menu_items), step)
+        elif self.state.ui_mode == "PRESET_REMOVE_PICKER":
+            self.state.preset_remove_cursor = self._cycle(self.state.preset_remove_cursor, len(self.active_presets) + 1, step)
         elif self.state.ui_mode == "PARAM_LIST":
             self.state.param_cursor = self._cycle(self.state.param_cursor, len(self.active_params) + 1, step)
         elif self.state.ui_mode == "ENUM_LIST":
@@ -1933,6 +2742,8 @@ class ShadowboxUI:
             self.state.routing_port_cursor = self._cycle(self.state.routing_port_cursor, len(self.active_routing_ports) + 1, step)
         elif self.state.ui_mode == "ROUTING_TARGETS":
             self.state.routing_target_cursor = self._cycle(self.state.routing_target_cursor, len(self.active_routing_targets) + 2, step)
+        elif self.state.ui_mode == "ROUTING_DISCONNECT_PICKER":
+            self.state.routing_disconnect_cursor = self._cycle(self.state.routing_disconnect_cursor, len(self.current_routing_targets) + 1, step)
         elif self.state.ui_mode in {"AUDIO_ROUTING_OVERVIEW", "MIDI_ROUTING_OVERVIEW"}:
             self.state.routing_overview_cursor = self._cycle_one_based(
                 self.state.routing_overview_cursor,
@@ -2010,8 +2821,8 @@ class ShadowboxUI:
 
         if self.state.ui_mode == "TOP":
             if self.top_level_items[self.state.top_index] == "GRAPHS":
-                self.state.ui_mode = "GRAPH_MENU"
-                self.state.graph_menu_cursor = 1 if self.graph_menu_items else 0
+                self.state.ui_mode = "GRAPH_SET_LIST"
+                self.state.graph_set_cursor = self.graph_set_initial_cursor()
             elif self.top_level_items[self.state.top_index] == "INSTANCES":
                 self.state.ui_mode = "INSTANCE_LIST"
                 self.state.instance_cursor = 1 if self.state.instances or self.can_add_instance or self.can_remove_instances else 0
@@ -2023,22 +2834,13 @@ class ShadowboxUI:
 
         elif self.state.ui_mode == "GRAPH_MENU":
             if self.state.graph_menu_cursor == 0:
-                self.state.ui_mode = "TOP"
+                self.state.ui_mode = "GRAPH_SET_LIST"
+                self.state.graph_set_cursor = self.graph_set_initial_cursor()
             else:
                 choice = self.graph_menu_items[self.state.graph_menu_cursor - 1]
-                if choice == "CURRENT GRAPH":
-                    self.state.ui_mode = "GRAPH_STATUS"
-                elif choice == "NEW GRAPH" and self.new_graph_available:
-                    self.queue_action(
-                        UIAction(
-                            kind="load_set",
-                            path=self.graph_load_path,
-                            value=NEW_GRAPH_SET_NAME,
-                        )
-                    )
-                elif choice == "LOAD GRAPH":
-                    self.state.ui_mode = "GRAPH_SET_LIST"
-                    self.state.graph_set_cursor = 1 if self.available_set_names else 0
+                if choice == "PRESETS":
+                    self.state.ui_mode = "GRAPH_PRESET_LIST"
+                    self.state.graph_preset_cursor = self.graph_preset_initial_cursor()
                 elif choice == "AUDIO OVERVIEW":
                     self.state.active_transport = "audio"
                     self.state.ui_mode = "AUDIO_ROUTING_OVERVIEW"
@@ -2047,40 +2849,28 @@ class ShadowboxUI:
                     self.state.active_transport = "midi"
                     self.state.ui_mode = "MIDI_ROUTING_OVERVIEW"
                     self.state.routing_overview_cursor = self.instance_cursor_for_active_instance()
-                elif choice == "GRAPH PRESETS":
-                    self.state.ui_mode = "GRAPH_PRESET_LIST"
-                    self.state.graph_preset_cursor = self.graph_preset_initial_cursor()
-                elif choice == "SAVE GRAPH" and self.graph_save_path:
-                    self._begin_name_editor(
-                        context="save_set",
-                        path=self.graph_save_path,
-                        initial_draft=self.suggested_set_save_name(),
-                        return_mode="GRAPH_MENU",
-                    )
-                elif choice == "RENAME GRAPH" and self.graph_rename_path:
-                    self._begin_rename_name_editor(
-                        context="rename_set",
-                        path=self.graph_rename_path,
-                        current_name=self.current_set_name,
-                        return_mode="GRAPH_MENU",
-                    )
-                elif choice == "STARTUP":
-                    self.state.ui_mode = "GRAPH_STARTUP"
-                    self.state.graph_startup_cursor = 1 if self.graph_startup_menu_items else 0
 
         elif self.state.ui_mode == "GRAPH_SET_LIST":
             if self.state.graph_set_cursor == 0:
-                self.state.ui_mode = "GRAPH_MENU"
-            elif self.graph_load_path and self.available_set_names:
-                idx = self.state.graph_set_cursor - 1
-                if 0 <= idx < len(self.available_set_names):
-                    self.queue_action(
-                        UIAction(
-                            kind="load_set",
-                            path=self.graph_load_path,
-                            value=self.available_set_names[idx],
+                self.state.ui_mode = "TOP"
+            else:
+                action_idx = self.state.graph_set_cursor - 1
+                if 0 <= action_idx < len(self.graph_action_items):
+                    choice = self.graph_action_items[action_idx]
+                    if choice == PRESET_ACTION_SAVE:
+                        self._save_current_graph_or_open_save_as()
+                    elif choice == PRESET_ACTION_SAVE_AS:
+                        self._begin_graph_save_as()
+                elif self.graph_load_path:
+                    graph_name = self.selected_graph_set_name
+                    if graph_name:
+                        self.queue_action(
+                            UIAction(
+                                kind="load_set",
+                                path=self.graph_load_path,
+                                value=graph_name,
+                            )
                         )
-                    )
 
         elif self.state.ui_mode == "GRAPH_PRESET_LIST":
             if self.state.graph_preset_cursor == 0:
@@ -2089,28 +2879,13 @@ class ShadowboxUI:
                 action_idx = self.state.graph_preset_cursor - 1
                 if 0 <= action_idx < len(self.graph_preset_action_items):
                     choice = self.graph_preset_action_items[action_idx]
-                    if choice == "SAVE PRESET" and self.graph_preset_save_path:
-                        self._begin_name_editor(
-                            context="save_graph_preset",
-                            path=self.graph_preset_save_path,
-                            initial_draft=self.suggested_graph_preset_save_name(),
-                            return_mode="GRAPH_PRESET_LIST",
-                        )
-                    elif choice == "RENAME PRESET" and self.graph_preset_rename_path and self.current_graph_preset_name:
-                        self._begin_rename_name_editor(
-                            context="rename_graph_preset",
-                            path=self.graph_preset_rename_path,
-                            current_name=self.current_graph_preset_name,
-                            return_mode="GRAPH_PRESET_LIST",
-                        )
-                    elif choice == "DELETE PRESET" and self.graph_preset_destroy_path and self.current_graph_preset_name:
-                        self.queue_action(
-                            UIAction(
-                                kind="delete_graph_preset",
-                                path=self.graph_preset_destroy_path,
-                                value=self.current_graph_preset_name,
-                            )
-                        )
+                    if choice == PRESET_ACTION_SAVE:
+                        self._save_current_graph_preset_or_open_save_as()
+                    elif choice == PRESET_ACTION_SAVE_AS:
+                        self._begin_graph_preset_save_as()
+                    elif choice == PRESET_ACTION_REMOVE and self.graph_preset_destroy_path:
+                        self.state.ui_mode = "GRAPH_PRESET_REMOVE_PICKER"
+                        self.state.graph_preset_remove_cursor = 1 if self.available_graph_preset_names else 0
                 elif self.graph_preset_load_path:
                     preset_name = self.selected_graph_preset_name
                     if preset_name:
@@ -2121,6 +2896,14 @@ class ShadowboxUI:
                                 value=preset_name,
                             )
                         )
+
+        elif self.state.ui_mode == "GRAPH_PRESET_REMOVE_PICKER":
+            if self.state.graph_preset_remove_cursor == 0:
+                self.state.ui_mode = "GRAPH_PRESET_LIST"
+            elif self.graph_preset_destroy_path:
+                preset_name = self.selected_graph_preset_remove_name
+                if preset_name:
+                    self.queue_action(UIAction(kind="delete_graph_preset", path=self.graph_preset_destroy_path, value=preset_name))
 
         elif self.state.ui_mode == "GRAPH_STARTUP":
             if self.state.graph_startup_cursor == 0:
@@ -2236,6 +3019,7 @@ class ShadowboxUI:
                             )
                         )
                     else:
+                        self.state.pending_add_instance_count = len(self.state.instances) + 1
                         self.queue_action(
                             UIAction(
                                 kind="add_instance",
@@ -2243,6 +3027,8 @@ class ShadowboxUI:
                                 value=[-1, patcher_name],
                             )
                         )
+                        self.state.ui_mode = "INSTANCE_LIST"
+                        self.state.instance_cursor = max(1, len(self.state.instances) + 1)
 
         elif self.state.ui_mode == "INSTANCE_MENU":
             if self.state.instance_menu_cursor == 0:
@@ -2275,15 +3061,9 @@ class ShadowboxUI:
 
         elif self.state.ui_mode == "REMOVE_INSTANCE_CONFIRM":
             if self.state.remove_instance_confirm_cursor == 0:
-                self.state.ui_mode = "REMOVE_INSTANCE_PICKER" if self.state.remove_instance_origin == "instance_list" else "INSTANCE_MENU"
+                self._cancel_remove_instance_confirm()
             elif self.remove_instance_target is not None:
-                self.queue_action(
-                    UIAction(
-                        kind="remove_instance",
-                        path=self.state.remove_instance_path,
-                        value=int(self.remove_instance_target.get("id")),
-                    )
-                )
+                self._confirm_remove_instance()
 
         elif self.state.ui_mode == "PRESET_LIST":
             if self.state.preset_cursor == 0:
@@ -2292,25 +3072,26 @@ class ShadowboxUI:
                 action_idx = self.state.preset_cursor - 1
                 if 0 <= action_idx < len(self.preset_action_items):
                     choice = self.preset_action_items[action_idx]
-                    if choice == "SAVE PRESET" and self.active_preset_save_path:
-                        self._begin_name_editor(
-                            context="save_preset",
-                            path=self.active_preset_save_path,
-                            initial_draft=self.suggested_preset_save_name(),
-                            return_mode="PRESET_LIST",
-                        )
-                    elif choice == "RENAME PRESET" and self.active_preset_rename_path and self.current_preset_name:
-                        self._begin_rename_name_editor(
-                            context="rename_preset",
-                            path=self.active_preset_rename_path,
-                            current_name=self.current_preset_name,
-                            return_mode="PRESET_LIST",
-                        )
+                    if choice == PRESET_ACTION_SAVE:
+                        self._save_current_preset_or_open_save_as()
+                    elif choice == PRESET_ACTION_SAVE_AS:
+                        self._begin_preset_save_as()
+                    elif choice == PRESET_ACTION_REMOVE and self.active_preset_destroy_path:
+                        self.state.ui_mode = "PRESET_REMOVE_PICKER"
+                        self.state.preset_remove_cursor = 1 if self.active_presets else 0
                 else:
                     preset = self.selected_preset
                     if preset:
                         self.remember_loaded_preset(preset.get("name"))
                         self.queue_action(UIAction(kind="load_preset", path=preset.get("path"), value=preset.get("value")))
+
+        elif self.state.ui_mode == "PRESET_REMOVE_PICKER":
+            if self.state.preset_remove_cursor == 0:
+                self.state.ui_mode = "PRESET_LIST"
+            elif self.active_preset_destroy_path:
+                preset_name = self.selected_preset_remove_name
+                if preset_name:
+                    self.queue_action(UIAction(kind="delete_preset", path=self.active_preset_destroy_path, value=preset_name))
 
         elif self.state.ui_mode == "PARAM_LIST":
             if self.state.param_cursor == 0:
@@ -2318,26 +3099,34 @@ class ShadowboxUI:
             else:
                 param = self.selected_param
                 if param:
-                    self._edit_original_value = param.get("value")
-                    if is_ttid_param(param):
+                    if is_boolish(param):
+                        self._toggle_bool_param(param)
+                        self._edit_original_value = None
+                    elif is_ttid_param(param):
+                        self._edit_original_value = param.get("value")
                         self._begin_ttid_edit(param)
                         self.state.ui_mode = "EDIT"
                     elif is_step16_param(param):
+                        self._edit_original_value = param.get("value")
                         self.state.edit_value = normalize_step16_mask(param.get("value", 0))
                         self.state.edit_step16_focus = 0
                         self.state.ui_mode = "EDIT"
                     elif is_pitch_display_param(param):
+                        self._edit_original_value = param.get("value")
                         self.state.edit_value = None
                         self.state.ui_mode = "EDIT"
                     elif is_scope_param(param):
+                        self._edit_original_value = param.get("value")
                         self._begin_scope_edit(param)
                         self.state.ui_mode = "EDIT"
                     elif is_enum_param(param):
+                        self._edit_original_value = param.get("value")
                         self.state.edit_value = normalize_current_value_for_edit(param)
                         options = self.active_enum_options
                         self.state.enum_cursor = options.index(self.state.edit_value) if self.state.edit_value in options else 0
                         self.state.ui_mode = "ENUM_LIST"
                     else:
+                        self._edit_original_value = param.get("value")
                         self.state.edit_value = normalize_current_value_for_edit(param)
                         self.state.ui_mode = "EDIT"
                     self._reset_float_edit_acceleration()
@@ -2389,6 +3178,25 @@ class ShadowboxUI:
                         )
                     )
 
+        elif self.state.ui_mode == "ROUTING_DISCONNECT_PICKER":
+            if self.state.routing_disconnect_cursor == 0:
+                self.state.ui_mode = "ROUTING_TARGETS"
+            else:
+                port = self.selected_routing_port
+                current = self.current_routing_targets
+                target_idx = self.state.routing_disconnect_cursor - 1
+                if port is not None and port.get("path") and 0 <= target_idx < len(current):
+                    remove_target = current[target_idx]
+                    value = [target for target in current if target != remove_target]
+                    self.queue_action(
+                        UIAction(
+                            kind="set_routing",
+                            path=port.get("path"),
+                            value=value,
+                        )
+                    )
+                    self.state.ui_mode = "ROUTING_TARGETS"
+
         elif self.state.ui_mode in {"AUDIO_ROUTING_OVERVIEW", "MIDI_ROUTING_OVERVIEW"}:
             selected = self.selected_routing_overview_instance
             if selected is not None:
@@ -2404,6 +3212,9 @@ class ShadowboxUI:
                 if choice == "AUDIO":
                     self.state.ui_mode = "SYSTEM_AUDIO"
                     self.state.system_audio_cursor = 1
+                elif choice == "STARTUP":
+                    self.state.ui_mode = "GRAPH_STARTUP"
+                    self.state.graph_startup_cursor = 1 if self.graph_startup_menu_items else 0
                 elif choice == "NETWORK":
                     self.state.ui_mode = "NETWORK"
                     self.state.network_cursor = 1 if self.network_value_rows else 0
@@ -2564,12 +3375,16 @@ class ShadowboxUI:
             self._edit_original_value = None
             self._reset_float_edit_acceleration()
             self.state.ui_mode = "PARAM_LIST"
+        elif self.state.ui_mode == "PRESET_REMOVE_PICKER":
+            self.state.ui_mode = "PRESET_LIST"
         elif self.state.ui_mode in ("PRESET_LIST", "PARAM_LIST", "ROUTING_GROUP"):
             self.state.ui_mode = "INSTANCE_MENU"
         elif self.state.ui_mode == "ROUTING_PORTS":
             self.state.ui_mode = "ROUTING_GROUP"
         elif self.state.ui_mode == "ROUTING_TARGETS":
             self.state.ui_mode = "ROUTING_PORTS"
+        elif self.state.ui_mode == "ROUTING_DISCONNECT_PICKER":
+            self.state.ui_mode = "ROUTING_TARGETS"
         elif self.state.ui_mode in {"AUDIO_ROUTING_OVERVIEW", "MIDI_ROUTING_OVERVIEW"}:
             self.state.ui_mode = "GRAPH_MENU"
         elif self.state.ui_mode == "GRAPH_STARTUP_SET_LIST":
@@ -2580,12 +3395,19 @@ class ShadowboxUI:
             self.state.ui_mode = "NAME_EDITOR"
         elif self.state.ui_mode == "NAME_EDITOR":
             self._cancel_name_editor()
-        elif self.state.ui_mode in ("GRAPH_STATUS", "GRAPH_STARTUP"):
-            self.state.ui_mode = "GRAPH_MENU"
-        elif self.state.ui_mode in {"GRAPH_SET_LIST", "GRAPH_PRESET_LIST"}:
+        elif self.state.ui_mode == "GRAPH_STATUS":
+            self.state.ui_mode = "GRAPH_SET_LIST"
+        elif self.state.ui_mode == "GRAPH_STARTUP":
+            self.state.ui_mode = "SYSTEM_MENU"
+        elif self.state.ui_mode == "GRAPH_PRESET_REMOVE_PICKER":
+            self.state.ui_mode = "GRAPH_PRESET_LIST"
+        elif self.state.ui_mode == "GRAPH_SET_LIST":
+            self.state.ui_mode = "TOP"
+        elif self.state.ui_mode == "GRAPH_PRESET_LIST":
             self.state.ui_mode = "GRAPH_MENU"
         elif self.state.ui_mode == "GRAPH_MENU":
-            self.state.ui_mode = "TOP"
+            self.state.ui_mode = "GRAPH_SET_LIST"
+            self.state.graph_set_cursor = self.graph_set_initial_cursor()
         elif self.state.ui_mode == "INSTANCE_MENU":
             self.state.ui_mode = "INSTANCE_LIST"
         elif self.state.ui_mode == "INSTANCE_LIST":
@@ -2595,7 +3417,7 @@ class ShadowboxUI:
         elif self.state.ui_mode == "PATCHER_PICKER":
             self.state.ui_mode = "TOP"
         elif self.state.ui_mode == "REMOVE_INSTANCE_CONFIRM":
-            self.state.ui_mode = "REMOVE_INSTANCE_PICKER" if self.state.remove_instance_origin == "instance_list" else "INSTANCE_MENU"
+            self._cancel_remove_instance_confirm()
         elif self.state.ui_mode in ("STATUS", "NETWORK", "ABOUT", "MAINT"):
             self._about_press_count = 0
             self.state.ui_mode = "SYSTEM_MENU"
