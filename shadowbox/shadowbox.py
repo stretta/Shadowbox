@@ -343,8 +343,12 @@ def _apply_saved_midi_profile(ui, rnbo, instance_id: str) -> int:
     return applied
 
 
-def _startup_status_lines(snapshot) -> tuple[str, str]:
+def _startup_status_lines(snapshot, stable_passes: int = 0, recovery_active: bool = False) -> tuple[str, str]:
+    if recovery_active:
+        return "recovering audio", "waiting for OSCQuery"
     if _snapshot_ready(snapshot):
+        if stable_passes < STARTUP_STABLE_PASSES:
+            return "RNBO found", "stabilizing..."
         return "OSCQuery Runner found!", "Launching..."
     return "waiting for OSCQuery Runner", "(this is normal) press to enter"
 
@@ -454,6 +458,7 @@ def main():
     ui = ShadowboxUI(rnbo=rnbo)
     renderer = create_renderer(display=display)
     renderer.set_touch_mode(should_enable_touch_layout(encoder.input_kind))
+    renderer.draw_startup_status("SHADOWBOX", "starting Shadowbox", "please wait", activity_phase=0.0)
     ui.restore_from_saved_state()
     osc_listener.start()
     rnbo.send_value("/rnbo/listeners/add", osc_listener.listener_spec)
@@ -533,11 +538,20 @@ def main():
                     print("Startup discovery timed out; continuing without a ready RNBO snapshot")
                     break
 
-            status_line, hint_line = _startup_status_lines(current_snapshot)
+            recovery_active = (
+                startup_recovery_started is not None
+                and (now - startup_recovery_started) < STARTUP_AUDIO_RECOVERY_HOLD_SECONDS
+            )
+            status_line, hint_line = _startup_status_lines(
+                current_snapshot,
+                startup_stable_passes,
+                recovery_active,
+            )
             renderer.draw_startup_status(
                 "SHADOWBOX",
                 status_line,
                 hint_line,
+                activity_phase=(now - startup_started) * 0.65,
             )
             sleep(0.05)
             continue

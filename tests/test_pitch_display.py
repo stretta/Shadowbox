@@ -150,6 +150,23 @@ class PitchDisplayTests(unittest.TestCase):
         self.assertIn(2, [op[4] for op in text_ops])
         self.assertIn(4, [op[4] for op in text_ops])
 
+    def test_draw_startup_status_draws_activity_bar_when_phase_is_given(self) -> None:
+        display = _FullTftDisplay()
+        renderer = ShadowboxRenderer(display)
+
+        renderer.draw_startup_status(
+            "SHADOWBOX",
+            "waiting for OSCQuery Runner",
+            "(this is normal) press to enter",
+            activity_phase=0.25,
+        )
+
+        rect_ops = [op for op in display.ops if op[0] == "rect"]
+
+        self.assertGreaterEqual(len(rect_ops), 2)
+        self.assertTrue(any(op[6] is False for op in rect_ops))
+        self.assertTrue(any(op[6] is True for op in rect_ops))
+
     def test_st7735s_hat_uses_four_text_rows(self) -> None:
         renderer = ShadowboxRenderer(_HatDisplay())
 

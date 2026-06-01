@@ -118,6 +118,7 @@ class UIState:
     routing_group_cursor: int = 0
     routing_port_cursor: int = 0
     routing_target_cursor: int = 0
+    routing_add_cursor: int = 0
     routing_disconnect_cursor: int = 0
     routing_overview_cursor: int = 0
     graph_menu_cursor: int = 0
@@ -479,6 +480,7 @@ class ShadowboxUI:
         self.state.routing_group_cursor = 1
         self.state.routing_port_cursor = 0
         self.state.routing_target_cursor = 0
+        self.state.routing_add_cursor = 0
         self.state.routing_overview_cursor = 1 if self.state.instances else 0
         self.state.graph_menu_cursor = 1 if self.graph_menu_items else 0
         self.state.graph_set_cursor = self.graph_set_initial_cursor()
@@ -586,7 +588,8 @@ class ShadowboxUI:
             len(self.network_value_rows),
         )
         self.state.routing_port_cursor = clamp_index(self.state.routing_port_cursor, len(self.active_routing_ports) + 1)
-        self.state.routing_target_cursor = clamp_index(self.state.routing_target_cursor, len(self.active_routing_targets) + 2)
+        self.state.routing_target_cursor = clamp_index(self.state.routing_target_cursor, len(self.routing_assignment_rows))
+        self.state.routing_add_cursor = clamp_index(self.state.routing_add_cursor, len(self.available_routing_add_targets) + 1)
         self.state.routing_overview_cursor = clamp_index(
             self.state.routing_overview_cursor if self.state.routing_overview_cursor > 0 else 1,
             len(self.routing_overview_rows),
@@ -1869,8 +1872,6 @@ class ShadowboxUI:
     @property
     def routing_target_rows(self) -> list[MenuRow]:
         rows = [MenuRow("..")]
-        disconnect_current = not self.current_routing_targets
-        rows.append(MenuRow("DISCONNECT", current=disconnect_current))
         current_targets = set(self.current_routing_targets)
         used_targets = self.used_routing_targets
         for item in self.active_routing_targets:
@@ -1882,6 +1883,39 @@ class ShadowboxUI:
                 )
             )
         return rows
+
+    @property
+    def routing_assignment_rows(self) -> list[MenuRow]:
+        rows = [MenuRow("..")]
+        current = self.current_routing_targets
+        if current:
+            rows.extend(MenuRow(str(item), current=True) for item in current)
+        else:
+            rows.append(MenuRow("no assignments"))
+        rows.append(MenuRow("ADD", action=True))
+        rows.append(MenuRow("REMOVE", action=True))
+        return rows
+
+    @property
+    def instance_assigned_routing_targets(self) -> set[str]:
+        assigned: set[str] = set()
+        branch = self._routing_branch(self.active_instance, self.state.active_transport)
+        ports = branch.get(self.state.active_routing_direction, [])
+        if not isinstance(ports, list):
+            return assigned
+        for port in ports:
+            if not isinstance(port, dict):
+                continue
+            for connection in port.get("connections", []):
+                target = str(connection)
+                if target:
+                    assigned.add(target)
+        return assigned
+
+    @property
+    def available_routing_add_targets(self) -> list[str]:
+        assigned = self.instance_assigned_routing_targets
+        return [target for target in self.active_routing_targets if target not in assigned]
 
     @property
     def used_routing_targets(self) -> set[str]:
@@ -2090,6 +2124,7 @@ class ShadowboxUI:
             "EDIT",
             "ENUM_LIST",
             "ROUTING_TARGETS",
+            "ROUTING_ADD_PICKER",
             "ROUTING_DISCONNECT_PICKER",
             "SYSTEM_AUDIO_DEVICE",
             "SYSTEM_AUDIO_RATE",
@@ -2397,7 +2432,12 @@ class ShadowboxUI:
                 return
 
         if self.state.ui_mode == "ROUTING_TARGETS":
-            if button == "disconnect":
+            if button == "add":
+                self.state.ui_mode = "ROUTING_ADD_PICKER"
+                self.state.routing_add_cursor = 1 if self.available_routing_add_targets else 0
+                self.queue_action(UIAction(kind="save_state"))
+                return
+            if button in {"remove", "disconnect"}:
                 self.state.ui_mode = "ROUTING_DISCONNECT_PICKER"
                 self.state.routing_disconnect_cursor = 1 if self.current_routing_targets else 0
                 self.queue_action(UIAction(kind="save_state"))
@@ -2470,6 +2510,12 @@ class ShadowboxUI:
             return
         if mode == "ROUTING_PORTS":
             scroll_cursor("routing_port_cursor", len(self.active_routing_ports))
+            return
+        if mode == "ROUTING_TARGETS":
+            scroll_cursor("routing_target_cursor", len(self.current_routing_targets))
+            return
+        if mode == "ROUTING_ADD_PICKER":
+            scroll_cursor("routing_add_cursor", len(self.available_routing_add_targets))
             return
         if mode == "ROUTING_DISCONNECT_PICKER":
             scroll_cursor("routing_disconnect_cursor", len(self.current_routing_targets))
@@ -2650,7 +2696,9 @@ class ShadowboxUI:
         elif mode == "ROUTING_PORTS":
             handled = self._set_touch_cursor("routing_port_cursor", row_index, len(self.active_routing_ports) + 1)
         elif mode == "ROUTING_TARGETS":
-            handled = self._set_touch_cursor("routing_target_cursor", row_index, len(self.active_routing_targets) + 2)
+            handled = self._set_touch_cursor("routing_target_cursor", row_index, len(self.routing_assignment_rows))
+        elif mode == "ROUTING_ADD_PICKER":
+            handled = self._set_touch_cursor("routing_add_cursor", row_index, len(self.available_routing_add_targets) + 1)
         elif mode == "ROUTING_DISCONNECT_PICKER":
             handled = self._set_touch_cursor("routing_disconnect_cursor", row_index, len(self.current_routing_targets) + 1)
         elif mode in {"AUDIO_ROUTING_OVERVIEW", "MIDI_ROUTING_OVERVIEW"}:
@@ -2741,7 +2789,9 @@ class ShadowboxUI:
         elif self.state.ui_mode == "ROUTING_PORTS":
             self.state.routing_port_cursor = self._cycle(self.state.routing_port_cursor, len(self.active_routing_ports) + 1, step)
         elif self.state.ui_mode == "ROUTING_TARGETS":
-            self.state.routing_target_cursor = self._cycle(self.state.routing_target_cursor, len(self.active_routing_targets) + 2, step)
+            self.state.routing_target_cursor = self._cycle(self.state.routing_target_cursor, len(self.routing_assignment_rows), step)
+        elif self.state.ui_mode == "ROUTING_ADD_PICKER":
+            self.state.routing_add_cursor = self._cycle(self.state.routing_add_cursor, len(self.available_routing_add_targets) + 1, step)
         elif self.state.ui_mode == "ROUTING_DISCONNECT_PICKER":
             self.state.routing_disconnect_cursor = self._cycle(self.state.routing_disconnect_cursor, len(self.current_routing_targets) + 1, step)
         elif self.state.ui_mode in {"AUDIO_ROUTING_OVERVIEW", "MIDI_ROUTING_OVERVIEW"}:
@@ -3153,23 +3203,35 @@ class ShadowboxUI:
                 self.state.ui_mode = "ROUTING_GROUP"
             elif self.selected_routing_port is not None:
                 self.state.ui_mode = "ROUTING_TARGETS"
-                self.state.routing_target_cursor = 1
+                self.state.routing_target_cursor = 1 if self.current_routing_targets else 0
 
         elif self.state.ui_mode == "ROUTING_TARGETS":
             if self.state.routing_target_cursor == 0:
                 self.state.ui_mode = "ROUTING_PORTS"
             else:
+                rows = self.routing_assignment_rows
+                row = rows[self.state.routing_target_cursor] if 0 <= self.state.routing_target_cursor < len(rows) else None
+                if row and row.label == "ADD":
+                    self.state.ui_mode = "ROUTING_ADD_PICKER"
+                    self.state.routing_add_cursor = 1 if self.available_routing_add_targets else 0
+                elif row and row.label == "REMOVE":
+                    self.state.ui_mode = "ROUTING_DISCONNECT_PICKER"
+                    self.state.routing_disconnect_cursor = 1 if self.current_routing_targets else 0
+
+        elif self.state.ui_mode == "ROUTING_ADD_PICKER":
+            if self.state.routing_add_cursor == 0:
+                self.state.ui_mode = "ROUTING_TARGETS"
+            else:
                 port = self.selected_routing_port
-                if port is not None and port.get("path"):
-                    if self.state.routing_target_cursor == 1:
-                        value: list[str] = []
+                targets = self.available_routing_add_targets
+                target_idx = self.state.routing_add_cursor - 1
+                if port is not None and port.get("path") and 0 <= target_idx < len(targets):
+                    current = self.current_routing_targets
+                    add_target = targets[target_idx]
+                    if add_target not in current:
+                        value = current + [add_target]
                     else:
-                        target_idx = self.state.routing_target_cursor - 2
-                        targets = self.active_routing_targets
-                        if target_idx < 0 or target_idx >= len(targets):
-                            value = list(port.get("connections", []))
-                        else:
-                            value = [targets[target_idx]]
+                        value = current
                     self.queue_action(
                         UIAction(
                             kind="set_routing",
@@ -3177,6 +3239,7 @@ class ShadowboxUI:
                             value=value,
                         )
                     )
+                    self.state.ui_mode = "ROUTING_TARGETS"
 
         elif self.state.ui_mode == "ROUTING_DISCONNECT_PICKER":
             if self.state.routing_disconnect_cursor == 0:
@@ -3383,6 +3446,8 @@ class ShadowboxUI:
             self.state.ui_mode = "ROUTING_GROUP"
         elif self.state.ui_mode == "ROUTING_TARGETS":
             self.state.ui_mode = "ROUTING_PORTS"
+        elif self.state.ui_mode == "ROUTING_ADD_PICKER":
+            self.state.ui_mode = "ROUTING_TARGETS"
         elif self.state.ui_mode == "ROUTING_DISCONNECT_PICKER":
             self.state.ui_mode = "ROUTING_TARGETS"
         elif self.state.ui_mode in {"AUDIO_ROUTING_OVERVIEW", "MIDI_ROUTING_OVERVIEW"}:

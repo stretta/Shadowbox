@@ -105,7 +105,7 @@ def param_unit(param: dict | None) -> str:
     for key in ("unit", "units"):
         value = metadata.get(key)
         if isinstance(value, str) and value.strip():
-            return value.strip()
+            return value.strip()[:2]
     return ""
 
 
@@ -1823,6 +1823,81 @@ class ShadowboxRenderer:
                     self._text(row, 6, y, weight=text_weight)
 
     def draw_routing_targets(self, ui, selected_idx: int) -> None:
+        if self.touch_layout_enabled:
+            self._draw_routing_assignments_touch(ui, selected_idx)
+            return
+        self.draw_menu_rows(ui.routing_assignment_rows, selected_idx)
+
+    def _draw_routing_assignments_touch(self, ui, selected_idx: int) -> None:
+        panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
+        self._draw_panel(panel_x, panel_y, panel_w, panel_h, None)
+
+        touch_layout = self._touch_list_geometry(visible_rows=4)
+        content_left, content_right, content_top, content_bottom, row_h, _gap, all_rows = touch_layout
+        rows = all_rows[:3]
+        visible = max(1, len(rows))
+        assignments = ui.current_routing_targets
+        selected_zero = max(0, selected_idx - 1)
+        page_count = max(1, (max(0, len(assignments)) + visible - 1) // visible)
+        current_page = (selected_zero // visible) + 1 if assignments else 1
+        self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count)
+
+        row_w = max(1, content_right - content_left)
+        if not assignments:
+            y = rows[0]
+            row_top = max(content_top, y - (row_h // 2))
+            self._draw_touch_list_item_background(content_left, row_top, row_w, row_h)
+            self._text_theme(
+                "no assignments",
+                content_left + 30,
+                y - (self._line_height(3, "regular") // 2),
+                "muted",
+                3,
+                "regular",
+            )
+        else:
+            selected_zero = min(selected_zero, len(assignments) - 1)
+            if len(assignments) <= visible:
+                indices = list(range(len(assignments)))
+            else:
+                half = visible // 2
+                start = max(0, min(selected_zero - half, len(assignments) - visible))
+                indices = list(range(start, start + visible))
+            for row_idx, item_idx in enumerate(indices):
+                y = rows[row_idx]
+                row_top = max(content_top, y - (row_h // 2))
+                label = self._menu_label(str(assignments[item_idx]))
+                tap_index = item_idx + 1
+                self._record_touch_target(
+                    "row",
+                    content_left,
+                    row_top,
+                    row_w,
+                    row_h,
+                    action_kind="tap_row",
+                    index=tap_index,
+                    label=label,
+                )
+                pressed = self._touch_pressed(kind="row", index=tap_index)
+                self._draw_touch_list_item_background(content_left, row_top, row_w, row_h, current=True, pressed=pressed)
+                fitted = self._truncate_to_width(label, max(1, row_w - 96), 3, "regular")
+                self._text_theme(fitted, content_left + 30, y - (self._line_height(3, "regular") // 2), "text", 3, "regular")
+
+        self._draw_touch_footer_button_row(
+            ["Add", "Remove"],
+            content_left,
+            content_right,
+            all_rows[3] if len(all_rows) > 3 else panel_y + panel_h - (row_h // 2),
+            row_h,
+            destructive_idx=1 if assignments else None,
+        )
+
+    def draw_routing_target_picker(self, labels: list[str], selected_idx: int, empty_label: str = "no targets") -> None:
+        items = [".."] + labels if labels else ["..", empty_label]
+        action_indices = set(range(1, len(items))) if labels else None
+        self.draw_string_list(items, selected_idx, action_indices=action_indices)
+
+    def draw_legacy_routing_targets(self, ui, selected_idx: int) -> None:
         port = ui.selected_routing_port
         labels = [row.label for row in ui.routing_target_rows]
         current_indices = {idx for idx, row in enumerate(ui.routing_target_rows) if row.current}
@@ -2101,6 +2176,51 @@ class ShadowboxRenderer:
             self.text_center(shorten(label, self.title_cols), self.content_bottom - 28)
             return
         self._text(shorten(label, self.text_cols), 0, max(0, self.display.height - 8))
+
+    def _draw_touch_edit_value_readout(self, param: dict | None, value: Any, slider_y: int) -> bool:
+        if not self.touch_layout_enabled:
+            return False
+
+        text = format_param_value(param, value)
+        if text in ("", "-"):
+            return False
+
+        right_edge = self.display.width - 24
+        left_edge = 24
+        top = self.content_top + 12
+        bottom = max(top + 1, slider_y - 10)
+        max_w = max(1, right_edge - left_edge)
+        max_h = max(1, bottom - top)
+        weight = "semibold"
+        scale = 5 if self.is_five_inch_touch else 2
+
+        while scale > 1:
+            text_w, text_h = self._measure_text(text, scale, weight)
+            if text_w <= max_w and text_h <= max_h:
+                break
+            scale -= 1
+
+        text = self._truncate_to_width(text, max_w, scale, weight)
+        text_w, text_h = self._measure_text(text, scale, weight)
+
+        if "." in text:
+            dot_idx = text.find(".")
+            left_text = text[:dot_idx]
+            right_text = text[dot_idx:]
+            right_w, _ = self._measure_text(right_text, scale, weight)
+            left_w, _ = self._measure_text(left_text, scale, weight)
+            decimal_x = right_edge - right_w
+            x = decimal_x - left_w
+        else:
+            x = right_edge - text_w
+        x = max(left_edge, min(x, right_edge - text_w))
+        y = top + max(0, (max_h - text_h) // 2)
+
+        if self.has_color:
+            self._text_theme(text, x, y, "text", scale, weight)
+        else:
+            self._text(text, x, y, scale, weight)
+        return True
 
     def _is_bool_param(self, param: dict, value: Any) -> bool:
         metadata = param.get("metadata", {})
@@ -3165,7 +3285,8 @@ class ShadowboxRenderer:
                     action_kind="set_edit_value",
                     button_id="value_slider",
                 )
-            self.text_center(shorten(format_param_value(selected_param, value), 21), value_y)
+            if not self._draw_touch_edit_value_readout(selected_param, value, gfx_y):
+                self.text_center(shorten(format_param_value(selected_param, value), 21), value_y)
         else:
             norm = 0.0
             if isinstance(value, (int, float)) and pmin is not None and pmax is not None and (pmax - pmin) > 0:
@@ -3182,7 +3303,8 @@ class ShadowboxRenderer:
                     action_kind="set_edit_value",
                     button_id="value_slider",
                 )
-            self.text_center(shorten(format_param_value(selected_param, value), 21), value_y)
+            if not self._draw_touch_edit_value_readout(selected_param, value, gfx_y):
+                self.text_center(shorten(format_param_value(selected_param, value), 21), value_y)
         self._draw_edit_midi_controls(ui, selected_param)
 
     def draw_splash(self, title: str = "SHADOWBOX") -> None:
@@ -3201,7 +3323,28 @@ class ShadowboxRenderer:
             self.text_center(title, 28 if self.is_tall else 12)
         self.display.show()
 
-    def draw_startup_status(self, title: str, status_line: str = "", hint_line: str = "") -> None:
+    def _draw_startup_activity_bar(self, x: int, y: int, w: int, h: int, phase: float) -> None:
+        if w <= 8 or h <= 3:
+            return
+        phase = max(0.0, min(1.0, float(phase) % 1.0))
+        segment_w = max(4, min(w - 2, w // 3))
+        travel_w = max(1, w - 2 - segment_w)
+        segment_x = x + 1 + int(round(travel_w * phase))
+        if self.has_color:
+            radius = max(1, h // 2)
+            self._rounded_theme(x, y, w, h, radius, "line", fill=False)
+            self._rounded_theme(segment_x, y + 1, segment_w, max(1, h - 2), radius, "accent", fill=True)
+            return
+        self.display.rect(x, y, w, h, True, False)
+        self.display.rect(segment_x, y + 1, segment_w, max(1, h - 2), True, True)
+
+    def draw_startup_status(
+        self,
+        title: str,
+        status_line: str = "",
+        hint_line: str = "",
+        activity_phase: float | None = None,
+    ) -> None:
         self.display.clear()
         if self.is_tft:
             if self.is_tiny_text_tft:
@@ -3226,11 +3369,15 @@ class ShadowboxRenderer:
             gap_scale = 2 if self.is_five_inch_touch else 1
             status_gap = (20 if self.is_full_tft else 14) * gap_scale
             hint_gap = (14 if self.is_full_tft else 10) * gap_scale
+            activity_gap = (18 if self.is_full_tft else 12) * gap_scale
+            activity_h = (8 if self.is_full_tft else 5) * gap_scale if activity_phase is not None else 0
             block_h = title_h
             if status_block_h:
                 block_h += status_gap + status_block_h
             if hint_block_h:
                 block_h += hint_gap + hint_block_h
+            if activity_h:
+                block_h += activity_gap + activity_h
             title_y = max(0, (self.display.height - block_h) // 2)
 
             if title == "SHADOWBOX":
@@ -3244,12 +3391,19 @@ class ShadowboxRenderer:
             hint_y = status_y + status_block_h + hint_gap
             for idx, line in enumerate(hint_lines):
                 self.text_center_scaled(line, hint_y + (idx * hint_line_h), hint_scale)
+            if activity_h:
+                bar_w = min(max(48, self.display.width // 2), self.display.width - (64 if self.is_full_tft else 32))
+                bar_x = max(0, (self.display.width - bar_w) // 2)
+                bar_y = hint_y + hint_block_h + activity_gap
+                self._draw_startup_activity_bar(bar_x, bar_y, bar_w, activity_h, activity_phase)
         else:
             self.text_center(title, 28 if self.is_tall else 12)
             if status_line:
                 self.text_center(shorten(status_line, self.text_cols), 44 if self.is_tall else 22)
             if hint_line and self.is_tall:
                 self.text_center(shorten(hint_line, self.text_cols), 56)
+            if activity_phase is not None and self.is_tall:
+                self._draw_startup_activity_bar(16, self.display.height - 8, max(1, self.display.width - 32), 5, activity_phase)
         self.display.show()
 
     def draw_status(self, ui) -> None:
@@ -3826,7 +3980,8 @@ class ShadowboxRenderer:
             "ROUTING_GROUP": state.active_transport.upper(),
             "ROUTING_PORTS": f"{state.active_transport[:1].upper()}{state.active_transport[1:]} {state.active_routing_direction[:1].upper()}{state.active_routing_direction[1:]}",
             "ROUTING_TARGETS": routing_port_display_name(ui.selected_routing_port) or "TARGET",
-            "ROUTING_DISCONNECT_PICKER": "DISCONNECT",
+            "ROUTING_ADD_PICKER": "ADD",
+            "ROUTING_DISCONNECT_PICKER": "REMOVE",
             "SYSTEM_MENU": "SYSTEM",
             "SYSTEM_AUDIO": "AUDIO",
             "SYSTEM_AUDIO_DEVICE": "DEVICE",
@@ -3956,6 +4111,8 @@ class ShadowboxRenderer:
             self.draw_routing_list(ui.active_routing_ports, state.routing_port_cursor) if ui.active_routing_ports else self.draw_string_list(["..", "no ports"], state.routing_port_cursor)
         elif state.ui_mode == "ROUTING_TARGETS":
             self.draw_routing_targets(ui, state.routing_target_cursor)
+        elif state.ui_mode == "ROUTING_ADD_PICKER":
+            self.draw_routing_target_picker(ui.available_routing_add_targets, state.routing_add_cursor)
         elif state.ui_mode == "ROUTING_DISCONNECT_PICKER":
             disconnect_items = [".."] + ui.current_routing_targets if ui.current_routing_targets else ["..", "no connections"]
             disconnect_action_indices = set(range(1, len(disconnect_items))) if ui.current_routing_targets else None

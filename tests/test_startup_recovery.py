@@ -54,6 +54,7 @@ encoder_module = types.ModuleType("shadowbox.encoder")
 encoder_module.EncoderInput = object
 renderer_module = types.ModuleType("shadowbox.renderer")
 renderer_module.create_renderer = lambda *args, **kwargs: None
+renderer_module.should_enable_touch_layout = lambda *args, **kwargs: False
 ui_module = types.ModuleType("shadowbox.ui")
 ui_module.ShadowboxUI = object
 sys.modules.setdefault("shadowbox.display", display_module)

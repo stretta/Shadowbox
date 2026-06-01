@@ -480,7 +480,7 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(ui.current_routing_targets, ["system:capture_1"])
         self.assertEqual(ui.used_routing_targets, {"system:capture_2"})
 
-    def test_routing_target_list_marks_used_destinations_italic(self) -> None:
+    def test_routing_assignment_list_shows_current_assignments_and_actions(self) -> None:
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(
             RNBOSnapshot(
@@ -531,14 +531,106 @@ class InstanceActionTests(unittest.TestCase):
         ui.state.active_transport = "audio"
         ui.state.active_routing_direction = "inputs"
         ui.state.routing_port_cursor = 1
-        ui.state.routing_target_cursor = 2
+        ui.state.routing_target_cursor = 1
 
         renderer = _CaptureRenderer()
         renderer.draw(ui)
 
-        self.assertEqual(renderer.last_items, ["..", "DISCONNECT", "system:capture_1", "system:capture_2"])
-        self.assertEqual(renderer.last_current_indices, {2})
-        self.assertEqual(renderer.last_item_weights, {3: "italic"})
+        self.assertEqual(renderer.last_items, ["..", "system:capture_1", "ADD", "REMOVE"])
+        self.assertEqual(renderer.last_current_indices, {1})
+        self.assertEqual(renderer.last_action_indices, {2, 3})
+
+    def test_routing_add_picker_excludes_targets_already_assigned_to_instance(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(
+            RNBOSnapshot(
+                instances=[
+                    {
+                        "id": "1",
+                        "label": "Synth A",
+                        "routing": {
+                            "midi": {
+                                "inputs": [
+                                    {
+                                        "name": "Midi In 1",
+                                        "path": "/inst/1/midi/in1",
+                                        "targets": ["system:midi_a", "system:midi_b", "system:midi_c"],
+                                        "connections": ["system:midi_a"],
+                                    },
+                                    {
+                                        "name": "Midi In 2",
+                                        "path": "/inst/1/midi/in2",
+                                        "targets": ["system:midi_a", "system:midi_b", "system:midi_c"],
+                                        "connections": ["system:midi_b"],
+                                    },
+                                ],
+                                "outputs": [],
+                            }
+                        },
+                    }
+                ],
+                patchers=[],
+                add_instance_path="",
+                remove_instance_path="",
+                system={},
+            )
+        )
+        ui.state.active_instance_id = "1"
+        ui.state.active_transport = "midi"
+        ui.state.active_routing_direction = "inputs"
+        ui.state.routing_port_cursor = 1
+        ui.state.ui_mode = "ROUTING_ADD_PICKER"
+
+        renderer = _CaptureRenderer()
+        renderer.draw(ui)
+
+        self.assertEqual(ui.available_routing_add_targets, ["system:midi_c"])
+        self.assertEqual(renderer.last_items, ["..", "system:midi_c"])
+        self.assertEqual(renderer.last_action_indices, {1})
+
+    def test_routing_add_picker_appends_selected_assignment(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(
+            RNBOSnapshot(
+                instances=[
+                    {
+                        "id": "1",
+                        "label": "Synth A",
+                        "routing": {
+                            "audio": {
+                                "inputs": [
+                                    {
+                                        "name": "In 1",
+                                        "path": "/inst/1/in1",
+                                        "targets": ["system:capture_1", "system:capture_2"],
+                                        "connections": ["system:capture_1"],
+                                    }
+                                ],
+                                "outputs": [],
+                            }
+                        },
+                    }
+                ],
+                patchers=[],
+                add_instance_path="",
+                remove_instance_path="",
+                system={},
+            )
+        )
+        ui.state.active_instance_id = "1"
+        ui.state.active_transport = "audio"
+        ui.state.active_routing_direction = "inputs"
+        ui.state.routing_port_cursor = 1
+        ui.state.ui_mode = "ROUTING_ADD_PICKER"
+        ui.state.routing_add_cursor = 1
+
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+
+        actions = [action for action in ui.pop_actions() if action.kind == "set_routing"]
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0].path, "/inst/1/in1")
+        self.assertEqual(actions[0].value, ["system:capture_1", "system:capture_2"])
+        self.assertEqual(ui.state.ui_mode, "ROUTING_TARGETS")
 
     def test_routing_views_prefer_port_display_name(self) -> None:
         ui = ShadowboxUI()

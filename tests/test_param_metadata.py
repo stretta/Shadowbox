@@ -12,7 +12,7 @@ pythonosc_module.udp_client = udp_client_module
 sys.modules.setdefault("pythonosc", pythonosc_module)
 sys.modules.setdefault("pythonosc.udp_client", udp_client_module)
 
-from shadowbox.renderer import ShadowboxRenderer, format_param_value, param_midi_mapping_marker, routing_port_display_name
+from shadowbox.renderer import ShadowboxRenderer, format_param_value, param_midi_mapping_marker, param_unit, routing_port_display_name
 from shadowbox.rnbo import (
     discover_host_network,
     discover_instances,
@@ -336,6 +336,11 @@ class ParamMetadataTests(unittest.TestCase):
     def test_format_param_value_appends_units_after_precision_formatting(self) -> None:
         param = {"metadata": {"display_precision": 1, "unit": "Hz"}}
         self.assertEqual(format_param_value(param, 42.34), "42.3Hz")
+
+    def test_format_param_value_truncates_long_unit_labels(self) -> None:
+        param = {"metadata": {"display_precision": 1, "unit": "semitones"}}
+        self.assertEqual(param_unit(param), "se")
+        self.assertEqual(format_param_value(param, 42.34), "42.3se")
 
     def test_param_midi_mapping_marker_formats_channel_and_cc(self) -> None:
         param = {"metadata": {"midi": {"chan": 4.0, "ctrl": 28.0}}}

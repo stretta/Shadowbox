@@ -219,7 +219,7 @@ sudo tee "${SERVICE_PATH}" >/dev/null <<EOF
 [Unit]
 Description=Shadowbox RNBO Hardware UI
 Wants=pigpiod.service
-After=network.target pigpiod.service
+After=pigpiod.service
 
 [Service]
 User=${RUN_USER}
@@ -229,6 +229,8 @@ Restart=always
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=-/etc/default/shadowbox
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

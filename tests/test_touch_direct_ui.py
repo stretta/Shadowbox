@@ -587,6 +587,34 @@ class TouchDirectUITests(unittest.TestCase):
         self.assertEqual(action.kind, "set_edit_value")
         self.assertAlmostEqual(action.value, 0.5, places=2)
 
+    def test_value_editor_touch_readout_is_large_and_right_aligned_above_slider(self) -> None:
+        ui = ShadowboxUI()
+        param = {"name": "gain", "value": 0.5, "path": "/params/gain", "min": -1.0, "max": 1.0}
+        ui.state.ui_mode = "EDIT"
+        ui.state.instances = [{"id": "1", "params": [param]}]
+        ui.state.active_instance_id = "1"
+        ui.state.param_cursor = 1
+        ui.state.edit_value = 0.5
+
+        display = _ColorFiveInchDisplay()
+        renderer = create_renderer(display)
+        renderer.set_touch_mode(True)
+        renderer.draw(ui, touch_state=SimpleNamespace(pressed=False, normalized_x=0.0, normalized_y=0.0))
+        if renderer.touch_layout is None:
+            raise AssertionError("touch layout was not created")
+
+        slider = next(target for target in renderer.touch_layout.targets if target.kind == "edit_slider")
+        value_op = next(op for op in display.ops if op[0] == "text_color" and op[1] == "0.500")
+        _kind, text, x, y, _color, scale, weight = value_op
+        text_w = len(text) * 12 * scale
+
+        self.assertGreater(y, renderer.content_top)
+        self.assertLess(y, slider.y)
+        self.assertGreaterEqual(scale, 4)
+        self.assertEqual(weight, "semibold")
+        self.assertGreaterEqual(x + text_w, display.width - 28)
+        self.assertGreater(x, display.width // 2)
+
     def test_value_editor_exposes_midi_learn_and_clear_buttons(self) -> None:
         ui = ShadowboxUI()
         param = {
@@ -1303,7 +1331,7 @@ class TouchDirectUITests(unittest.TestCase):
         self.assertTrue(any(target.button_id == "disconnect" for target in buttons))
         self.assertFalse(any(str(op[1]).startswith("CURRENT:") for op in display.ops if op[0] in {"text", "text_color"}))
 
-    def test_routing_targets_disconnect_button_opens_remove_picker(self) -> None:
+    def test_routing_targets_remove_button_opens_remove_picker(self) -> None:
         ui = ShadowboxUI()
         ui.state.ui_mode = "ROUTING_TARGETS"
         ui.state.instances = [
@@ -1331,12 +1359,53 @@ class TouchDirectUITests(unittest.TestCase):
         ui.state.active_routing_direction = "inputs"
         ui.state.routing_port_cursor = 1
 
-        ui.handle_event(UIEvent(kind="tap_button", button_id="disconnect"))
+        ui.handle_event(UIEvent(kind="tap_button", button_id="remove"))
 
         actions = [action for action in ui.pop_actions() if action.kind == "set_routing"]
         self.assertEqual(actions, [])
         self.assertEqual(ui.state.ui_mode, "ROUTING_DISCONNECT_PICKER")
         self.assertEqual(ui.state.routing_disconnect_cursor, 1)
+
+    def test_routing_assignment_touch_screen_shows_assignments_and_add_remove_buttons(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.ui_mode = "ROUTING_TARGETS"
+        ui.state.instances = [
+            {
+                "id": "1",
+                "label": "Synth",
+                "routing": {
+                    "midi": {
+                        "inputs": [
+                            {
+                                "name": "Midi Input",
+                                "path": "/rnbo/inst/1/midi/in/0",
+                                "connections": ["system:midi_a"],
+                                "targets": ["system:midi_a", "system:midi_b"],
+                            }
+                        ],
+                        "outputs": [],
+                    },
+                    "audio": {"inputs": [], "outputs": []},
+                },
+            }
+        ]
+        ui.state.active_instance_id = "1"
+        ui.state.active_transport = "midi"
+        ui.state.active_routing_direction = "inputs"
+        ui.state.routing_port_cursor = 1
+
+        display = _ColorFiveInchDisplay()
+        renderer = create_renderer(display)
+        renderer.set_touch_mode(True)
+        renderer.draw(ui, touch_state=SimpleNamespace(pressed=False, normalized_x=0.0, normalized_y=0.0))
+
+        labels = [op[1] for op in display.ops if op[0] == "text_color"]
+        buttons = [target.button_id for target in renderer.touch_layout.targets if target.kind == "modal_button"]
+
+        self.assertIn("system:midi_a", labels)
+        self.assertIn("Add", labels)
+        self.assertIn("Remove", labels)
+        self.assertEqual(buttons, ["add", "remove"])
 
     def test_routing_disconnect_picker_removes_selected_connection(self) -> None:
         ui = ShadowboxUI()
