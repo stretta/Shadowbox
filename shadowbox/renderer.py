@@ -3963,6 +3963,7 @@ class ShadowboxRenderer:
             "GRAPH_MENU": ui.current_set_name,
             "GRAPH_STATUS": "CURRENT SET",
             "GRAPH_SET_LIST": "SETS",
+            "GRAPH_LOAD_SET_LIST": "LOAD SET",
             "GRAPH_STARTUP": "STARTUP",
             "GRAPH_STARTUP_SET_LIST": "STARTUP SET",
             "NAME_EDITOR": ui.name_editor_title,
@@ -4020,16 +4021,9 @@ class ShadowboxRenderer:
         elif state.ui_mode == "GRAPH_STATUS":
             self.draw_graph_status(ui)
         elif state.ui_mode == "GRAPH_SET_LIST":
-            if self.touch_layout_enabled:
-                self.draw_preset_list_with_footer(
-                    ui.available_set_names,
-                    state.graph_set_cursor - len(ui.graph_action_items),
-                    ui.current_set_name,
-                    ui.graph_action_items,
-                    empty_label="no saved sets",
-                )
-            else:
-                self.draw_menu_rows(ui.graph_set_rows, state.graph_set_cursor)
+            self.draw_menu_rows(ui.graph_set_rows, state.graph_set_cursor)
+        elif state.ui_mode == "GRAPH_LOAD_SET_LIST":
+            self.draw_menu_rows(ui.graph_load_set_rows, state.graph_load_set_cursor)
         elif state.ui_mode == "GRAPH_PRESET_LIST":
             if self.touch_layout_enabled:
                 self.draw_preset_list_with_footer(

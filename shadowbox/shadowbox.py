@@ -692,8 +692,8 @@ def main():
                         rnbo.send_value(action.path, action.value)
                         sleep(0.2)
                         ui.apply_runner_snapshot(rnbo.discover())
-                        ui.state.ui_mode = "GRAPH_SET_LIST"
-                        ui.state.graph_set_cursor = ui.graph_set_initial_cursor()
+                        ui.state.ui_mode = "GRAPH_MENU"
+                        ui.state.graph_menu_cursor = 1 if ui.graph_menu_items else 0
                         ui.set_status_message(f"Saved {action.value}")
                         ui.set_busy(False)
 

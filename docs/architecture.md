@@ -41,8 +41,9 @@ Module responsibilities:
   - instances
   - patchers
   - set capabilities and startup configuration when published
-  - set presets when published
-  - presets
+  - saved set names and set load/save paths when published
+  - set presets for the currently loaded set when published
+  - instance presets
   - parameters
   - JACK audio and MIDI routing
   - instance lifecycle command paths

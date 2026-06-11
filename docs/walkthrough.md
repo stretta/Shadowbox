@@ -10,7 +10,10 @@ Shadowbox talks to RNBO Runner over two channels:
 
 At runtime, the main concepts are:
 - Patcher: a loadable RNBO asset under `/rnbo/patchers/<name>`
+- Set: a whole-system runtime state and saved recall target published under Runner `sets`
+- Set preset: a parameter-state preset for the currently loaded set, published under `sets/presets`
 - Instance: a live RNBO runtime object under `/rnbo/inst/<n>`
+- Instance preset: a preset entry published by one live instance under its `presets` branch
 - Parameter: an editable value under an instance `params` branch
 - State: a read-only runtime value published by an instance
 
@@ -21,7 +24,9 @@ On startup and on refresh, `shadowbox/rnbo.py` reads the OSCQuery tree and norma
 The snapshot currently includes:
 - instances
 - patchers
-- presets
+- saved set capabilities and set names
+- set presets when Runner publishes `sets/presets`
+- instance presets
 - parameters
 - read-only instance state
 - audio and MIDI routing

@@ -556,7 +556,7 @@ Supported values:
 
 - `instance` keeps the current behavior and returns to the instance menu
 - `parameters` jumps straight into the parameter list for the loaded instance
-- `presets` jumps straight into the preset list for the loaded instance
+- `presets` jumps straight into the instance preset list for the loaded instance
 
 Shadowbox also has a shared turbo render cadence for animation-heavy screens:
 

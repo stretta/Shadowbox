@@ -433,7 +433,7 @@ class TouchDirectUITests(unittest.TestCase):
         self.assertEqual(buttons[1].x, buttons[0].x + buttons[0].w + 12)
         self.assertEqual(buttons[2].x, buttons[1].x + buttons[1].w + 12)
 
-    def test_graph_touch_list_uses_three_rows_and_save_footer_buttons(self) -> None:
+    def test_sets_touch_list_shows_current_and_load_rows(self) -> None:
         ui = ShadowboxUI()
         ui.state.ui_mode = "GRAPH_SET_LIST"
         ui.state.system = {
@@ -454,13 +454,10 @@ class TouchDirectUITests(unittest.TestCase):
         renderer.draw(ui, touch_state=SimpleNamespace(pressed=False, normalized_x=0.0, normalized_y=0.0))
 
         row_targets = [target for target in renderer.touch_layout.targets if target.kind == "row"]
-        self.assertEqual([target.label for target in row_targets], ["StudioA", "StudioB", "StudioC"])
+        self.assertEqual([target.label for target in row_targets], ["Current Set", "Load Set"])
 
         buttons = [target for target in renderer.touch_layout.targets if target.kind == "modal_button"]
-        self.assertEqual([target.button_id for target in buttons], ["save", "save_as"])
-        self.assertTrue(all(row.y + row.h <= buttons[0].y for row in row_targets))
-        self.assertEqual(buttons[0].x, 12)
-        self.assertEqual(buttons[1].x, buttons[0].x + buttons[0].w + 12)
+        self.assertEqual(buttons, [])
 
     def test_touch_page_controls_do_not_select_back_or_action_rows(self) -> None:
         ui = ShadowboxUI()

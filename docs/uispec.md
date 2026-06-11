@@ -14,7 +14,7 @@ The UI is organized around live RNBO instances, with a user-facing top level tha
 
 - Instance-scoped runtime data comes from OSCQuery
 - Shadowbox may store limited local UI state such as cursor position or saved audio-device selection
-- Shadowbox must not invent patch, set, preset, routing, or graph structures that are not published
+- Shadowbox must not invent patch, set, set preset, instance preset, routing, or graph structures that are not published
 - `SYSTEM` may expose a small curated set of host-level status or maintenance actions that are not owned by any instance and may come from local OS/integration data instead of OSCQuery
 - Non-OSCQuery `SYSTEM` features must be explicit, minimal, and documented; they must not be generalized into arbitrary host inspection
 
@@ -27,7 +27,7 @@ Definitions:
 - Node = avoid this term in the UI and implementation unless quoting backend terminology; when it appears in backend descriptions, it refers to an instance
 - Patch = avoid this term in the UI and implementation because it is ambiguous across RNBO authoring, patchers, and live instances
 - Parameter = editable node under an instance `params` branch
-- Preset = published preset entry for an instance
+- Instance Preset = published preset entry for an instance
 - Audio routing = published JACK audio connections for an instance
 - MIDI routing = published JACK MIDI connections for an instance
 - System = global RNBO/JACK/device information not owned by a single instance
@@ -41,14 +41,23 @@ SYSTEM
 
 SETS
 CURRENT SET
-NEW SET
 LOAD SET
-SAVE SET
-STARTUP
+
+CURRENT SET
+SAVE
+SAVE AS...
+SET PRESETS
+AUDIO OVERVIEW
+MIDI OVERVIEW
 
 LOAD SET
 <SAVED SET>
 <SAVED SET>
+...
+
+SET PRESETS
+<SET PRESET>
+<SET PRESET>
 ...
 
 STARTUP
@@ -93,11 +102,12 @@ Rules:
 - Instances are discovered from OSCQuery, not hardcoded
 - `SETS` is a user-facing top-level label and must not imply a separate Shadowbox-owned graph model
 - `SETS` is backed by published Runner `sets` and startup capabilities when those paths are available
-- `CURRENT SET` reflects the currently published live set state and current set identity only
+- `CURRENT SET` reflects the currently published live set state and current set identity only; it is the place for saving the current set, viewing routing overviews, and entering set presets
 - `NEW SET` may appear as a curated action only when the backend publishes a loadable template set and Shadowbox implements the action by invoking the published set load path
 - `NEW SET` must not imply a separate Shadowbox-owned graph creation or clear command
-- `LOAD SET` loads a published set by name through the published backend set load path
-- `SAVE SET` saves the current published live set through the published backend set save path
+- `LOAD SET` opens the saved-set load screen and loads a published set by name through the published backend set load path
+- `SET PRESETS` appears inside `CURRENT SET` when the backend publishes set preset capabilities; it must not replace `LOAD SET`
+- `SAVE` and `SAVE AS...` in `CURRENT SET` save the current published live set through the published backend set save path
 - `STARTUP` edits published Runner startup configuration only; it does not implement local boot restore logic
 - Instance labels should use published alias/name when available
 - `ADD INSTANCE` should appear in the `INSTANCES` menu only if the backend exposes a supported command path for creating an instance from a patcher
@@ -139,7 +149,7 @@ Instance:
 - id or index
 - label
 - params
-- presets
+- instance presets
 - audio routing
 - midi routing
 
@@ -259,20 +269,20 @@ Editor behavior:
 - `pitch_display` uses a specialized live viewer when the parameter metadata explicitly includes `editor: "pitch_display"`; its default runtime state keys are `pitch_name` and `pitch_cents` and may be overridden with `pitch_state` and `cents_state`
 - Numeric parameters may be presented as integer-style controls only when metadata such as `display_as: "int"` or `edit_as: "int"` is present, even if RNBO Runner publishes the raw value as float-like
 
-8. Presets
+8. Instance Presets
 
-Presets come from the instance `presets` branch.
+Instance presets come from the instance `presets` branch.
 
 Expected behavior:
-- available preset names are read from the published preset entries list
-- selecting a preset sends its name to the published preset load path
+- available instance preset names are read from the published preset entries list
+- selecting an instance preset sends its name to the published preset load path
 
-If the backend publishes preset save or rename capabilities, Shadowbox should reuse the same naming UI used for set save and rename actions rather than introducing a separate preset-specific editor.
+If the backend publishes instance preset save or rename capabilities, Shadowbox should reuse the same naming UI used for set save and rename actions rather than introducing a separate preset-specific editor.
 
 Shadowbox does not:
-- create its own preset format
-- infer preset groups that are not published
-- cache preset state beyond minimal UI convenience
+- create its own instance preset format
+- infer instance preset groups that are not published
+- cache instance preset state beyond minimal UI convenience
 
 8a. Set Presets
 
@@ -282,10 +292,14 @@ Expected behavior:
 - available set preset names are read from the published set preset load range
 - selecting a set preset sends its name to the published set preset load path
 - set preset save, rename, and delete operations are only shown when their published paths exist
+- set presets are reached from `CURRENT SET > SET PRESETS`
+- saved sets are reached from `SETS > LOAD SET`
 
 Set presets are distinct from:
 - saved sets, which manage whole set/session recall
 - instance presets, which come from each live instance `presets` branch
+
+Shadowbox must keep saved-set loading and set-preset loading as separate screens. `LOAD SET` talks to the published set load path; `SET PRESETS` talks to the published `sets/presets` load path for the currently loaded set.
 
 8b. Shared Naming UI
 
@@ -298,7 +312,7 @@ Naming should be handled by one shared modal flow that can be invoked by:
 - `RENAME PRESET` if a published preset-rename capability exists
 
 Rules:
-- The naming UI is only shown for published save/rename capabilities; Shadowbox must not invent local preset or set storage
+- The naming UI is only shown for published save/rename capabilities; Shadowbox must not invent local set, set preset, or instance preset storage
 - Saving and renaming should feel identical apart from the action label and the initial text value
 - The current generated fallback name remains useful as the initial draft for `SAVE SET`, but it should be editable before commit and always remain available as an explicit regenerate action
 - Renaming should preload the current item name
@@ -333,7 +347,8 @@ Recommended editing behavior:
 
 Generated-name guidance:
 - `SAVE SET` should open with a generated suggestion derived from the current set name when available, otherwise a neutral base such as `set`
-- `SAVE PRESET` should open with a generated suggestion derived from the current preset or instance label when available, otherwise a neutral base such as `preset`
+- `SAVE SET PRESET` should open with a generated suggestion derived from the current set preset or set name when available, otherwise a neutral base such as `preset`
+- `SAVE PRESET` should open with a generated suggestion derived from the current instance preset or instance label when available, otherwise a neutral base such as `preset`
 - generated names may include a timestamp suffix to keep one-click saves unique
 - `GENERATE NAME` should remain available even when the user has already edited the draft, so they can quickly reset to a fresh suggestion
 - `ADD DATE` should be available independently because date stamping is useful even when the base name is handwritten
@@ -410,7 +425,7 @@ Initial system areas:
 
 Rules:
 - System must remain clearly separate from per-instance editing and routing
-- Per-instance structure, lifecycle, parameters, presets, and routing remain OSCQuery/published-command driven
+- Per-instance structure, lifecycle, parameters, instance presets, and routing remain OSCQuery/published-command driven
 - Non-OSCQuery `SYSTEM` entries must be explicitly chosen product features, not a generic escape hatch for backend gaps
 - Host-derived `SYSTEM` data should stay read-only unless there is a deliberately integrated control path for that feature
 - `NETWORK` may include a local `DIRECT ETHERNET SETUP` action that manages a fixed fallback address on `eth0` for headless recovery
@@ -468,7 +483,7 @@ Display rendering rules:
 
 Shadowbox will not:
 - invent a synthetic set or graph tree unrelated to published instances
-- create or manage its own preset system
+- create or manage its own set preset or instance preset system
 - expose editing for unpublished backend capabilities
 - expose raw instance `config` or `control` branches as generic menu sections
 - support workflows requiring multiple simultaneous controls

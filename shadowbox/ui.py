@@ -67,6 +67,8 @@ NAME_ERROR_BUTTONS = ["EDIT NAME"]
 PRESET_ACTION_SAVE = "SAVE"
 PRESET_ACTION_SAVE_AS = "SAVE AS..."
 PRESET_ACTION_REMOVE = "REMOVE"
+SET_MENU_CURRENT = "CURRENT SET"
+SET_MENU_LOAD = "LOAD SET"
 NAME_EDITOR_MAX_LEN = 24
 NAME_EDITOR_CHAR_OPTIONS: list[tuple[str, str]] = [
     ("SPACE", " "),
@@ -123,6 +125,7 @@ class UIState:
     routing_overview_cursor: int = 0
     graph_menu_cursor: int = 0
     graph_set_cursor: int = 0
+    graph_load_set_cursor: int = 0
     graph_preset_cursor: int = 0
     graph_preset_remove_cursor: int = 0
     graph_startup_cursor: int = 0
@@ -484,6 +487,7 @@ class ShadowboxUI:
         self.state.routing_overview_cursor = 1 if self.state.instances else 0
         self.state.graph_menu_cursor = 1 if self.graph_menu_items else 0
         self.state.graph_set_cursor = self.graph_set_initial_cursor()
+        self.state.graph_load_set_cursor = self.graph_load_set_initial_cursor()
         self.state.graph_preset_cursor = self.graph_preset_initial_cursor()
         self.state.graph_preset_remove_cursor = 1 if self.available_graph_preset_names else 0
         self.state.graph_startup_cursor = 1 if self.graph_startup_menu_items else 0
@@ -596,6 +600,7 @@ class ShadowboxUI:
         )
         self.state.graph_menu_cursor = clamp_index(self.state.graph_menu_cursor, len(self.graph_menu_items) + 1)
         self.state.graph_set_cursor = clamp_index(self.state.graph_set_cursor, len(self.graph_set_menu_items))
+        self.state.graph_load_set_cursor = clamp_index(self.state.graph_load_set_cursor, len(self.graph_load_set_menu_items))
         self.state.graph_preset_cursor = clamp_index(self.state.graph_preset_cursor, len(self.graph_preset_menu_items))
         self.state.graph_preset_remove_cursor = clamp_index(self.state.graph_preset_remove_cursor, len(self.available_graph_preset_names) + 1)
         self.state.graph_startup_cursor = clamp_index(self.state.graph_startup_cursor, len(self.graph_startup_menu_items) + 1)
@@ -774,9 +779,9 @@ class ShadowboxUI:
 
     @property
     def graph_menu_items(self) -> list[str]:
-        items: list[str] = []
+        items: list[str] = self.graph_action_items
         if self.graph_preset_menu_enabled:
-            items.append("PRESETS")
+            items.append("SET PRESETS")
         items.extend(["AUDIO OVERVIEW", "MIDI OVERVIEW"])
         return items
 
@@ -812,41 +817,47 @@ class ShadowboxUI:
     def graph_action_items(self) -> list[str]:
         if not self.graph_save_path:
             return []
-        return [PRESET_ACTION_SAVE, PRESET_ACTION_SAVE_AS]
+        items: list[str] = []
+        if self.current_set_name != "(untitled)":
+            items.append(PRESET_ACTION_SAVE)
+        items.append(PRESET_ACTION_SAVE_AS)
+        return items
 
     @property
     def graph_set_menu_items(self) -> list[str]:
-        return [".."] + self.graph_action_items + self.available_set_names
+        return ["..", SET_MENU_CURRENT, SET_MENU_LOAD]
 
     @property
     def graph_set_rows(self) -> list[MenuRow]:
+        return [MenuRow(".."), MenuRow(SET_MENU_CURRENT, current=True), MenuRow(SET_MENU_LOAD)]
+
+    def graph_set_initial_cursor(self) -> int:
+        return 1
+
+    @property
+    def graph_load_set_menu_items(self) -> list[str]:
+        return [".."] + self.available_set_names if self.available_set_names else ["..", "no saved sets"]
+
+    @property
+    def graph_load_set_rows(self) -> list[MenuRow]:
         rows = [MenuRow("..")]
-        for item in self.graph_action_items:
-            rows.append(MenuRow(str(item), action=True))
+        if not self.available_set_names:
+            rows.append(MenuRow("no saved sets"))
+            return rows
         current_indices = self.graph_set_current_indices
-        offset = len(self.graph_action_items)
-        dirty_weights = {
-            idx + offset: weight
-            for idx, weight in self.graph_set_item_weights.items()
-        }
+        dirty_weights = self.graph_set_item_weights
         for idx, item in enumerate(self.available_set_names, start=1):
             rows.append(
                 MenuRow(
                     str(item),
-                    current=(idx + offset) in {item_idx + offset for item_idx in current_indices},
-                    emphasis="italic" if dirty_weights.get(idx + offset) == "italic" else "",
+                    current=idx in current_indices,
+                    emphasis="italic" if dirty_weights.get(idx) == "italic" else "",
                 )
             )
-        if len(rows) == 1:
-            rows.append(MenuRow("no saved sets"))
         return rows
 
-    def graph_set_initial_cursor(self) -> int:
-        if self.available_set_names:
-            return 1 + len(self.graph_action_items)
-        if self.graph_action_items:
-            return 1
-        return 0
+    def graph_load_set_initial_cursor(self) -> int:
+        return 1 if self.available_set_names else 0
 
     @property
     def set_presets(self) -> dict:
@@ -2102,6 +2113,7 @@ class ShadowboxUI:
         return self.state.ui_mode in {
             "GRAPH_MENU",
             "GRAPH_SET_LIST",
+            "GRAPH_LOAD_SET_LIST",
             "GRAPH_PRESET_LIST",
             "GRAPH_PRESET_REMOVE_PICKER",
             "GRAPH_STARTUP",
@@ -2491,7 +2503,10 @@ class ShadowboxUI:
             scroll_cursor("graph_menu_cursor", len(self.graph_menu_items))
             return
         if mode == "GRAPH_SET_LIST":
-            scroll_cursor("graph_set_cursor", len(self.available_set_names), first_index=1 + len(self.graph_action_items))
+            scroll_cursor("graph_set_cursor", len(self.graph_set_menu_items), first_index=0)
+            return
+        if mode == "GRAPH_LOAD_SET_LIST":
+            scroll_cursor("graph_load_set_cursor", len(self.available_set_names), first_index=1)
             return
         if mode == "GRAPH_PRESET_LIST":
             scroll_cursor("graph_preset_cursor", len(self.graph_preset_menu_items), first_index=0)
@@ -2594,7 +2609,7 @@ class ShadowboxUI:
 
     @property
     def selected_graph_set_name(self) -> str:
-        idx = self.state.graph_set_cursor - 1 - len(self.graph_action_items)
+        idx = self.state.graph_load_set_cursor - 1
         if 0 <= idx < len(self.available_set_names):
             return str(self.available_set_names[idx])
         return ""
@@ -2606,7 +2621,7 @@ class ShadowboxUI:
             context="save_set",
             path=self.graph_save_path,
             initial_draft=self.suggested_set_save_name(),
-            return_mode="GRAPH_SET_LIST",
+            return_mode="GRAPH_MENU",
         )
 
     def _save_current_graph_or_open_save_as(self) -> None:
@@ -2649,9 +2664,9 @@ class ShadowboxUI:
         elif mode == "GRAPH_MENU":
             handled = self._set_touch_cursor("graph_menu_cursor", row_index, len(self.graph_menu_items) + 1)
         elif mode == "GRAPH_SET_LIST":
-            if row_index > 0:
-                row_index += len(self.graph_action_items)
             handled = self._set_touch_cursor("graph_set_cursor", row_index, len(self.graph_set_menu_items))
+        elif mode == "GRAPH_LOAD_SET_LIST":
+            handled = self._set_touch_cursor("graph_load_set_cursor", row_index, len(self.graph_load_set_menu_items))
         elif mode == "GRAPH_PRESET_LIST":
             if row_index > 0:
                 row_index += len(self.graph_preset_action_items)
@@ -2737,6 +2752,8 @@ class ShadowboxUI:
             self.state.graph_menu_cursor = self._cycle(self.state.graph_menu_cursor, len(self.graph_menu_items) + 1, step)
         elif self.state.ui_mode == "GRAPH_SET_LIST":
             self.state.graph_set_cursor = self._cycle(self.state.graph_set_cursor, len(self.graph_set_menu_items), step)
+        elif self.state.ui_mode == "GRAPH_LOAD_SET_LIST":
+            self.state.graph_load_set_cursor = self._cycle(self.state.graph_load_set_cursor, len(self.graph_load_set_menu_items), step)
         elif self.state.ui_mode == "GRAPH_PRESET_LIST":
             self.state.graph_preset_cursor = self._cycle(self.state.graph_preset_cursor, len(self.graph_preset_menu_items), step)
         elif self.state.ui_mode == "GRAPH_PRESET_REMOVE_PICKER":
@@ -2888,7 +2905,11 @@ class ShadowboxUI:
                 self.state.graph_set_cursor = self.graph_set_initial_cursor()
             else:
                 choice = self.graph_menu_items[self.state.graph_menu_cursor - 1]
-                if choice == "PRESETS":
+                if choice == PRESET_ACTION_SAVE:
+                    self._save_current_graph_or_open_save_as()
+                elif choice == PRESET_ACTION_SAVE_AS:
+                    self._begin_graph_save_as()
+                elif choice == "SET PRESETS":
                     self.state.ui_mode = "GRAPH_PRESET_LIST"
                     self.state.graph_preset_cursor = self.graph_preset_initial_cursor()
                 elif choice == "AUDIO OVERVIEW":
@@ -2904,27 +2925,33 @@ class ShadowboxUI:
             if self.state.graph_set_cursor == 0:
                 self.state.ui_mode = "TOP"
             else:
-                action_idx = self.state.graph_set_cursor - 1
-                if 0 <= action_idx < len(self.graph_action_items):
-                    choice = self.graph_action_items[action_idx]
-                    if choice == PRESET_ACTION_SAVE:
-                        self._save_current_graph_or_open_save_as()
-                    elif choice == PRESET_ACTION_SAVE_AS:
-                        self._begin_graph_save_as()
-                elif self.graph_load_path:
-                    graph_name = self.selected_graph_set_name
-                    if graph_name:
-                        self.queue_action(
-                            UIAction(
-                                kind="load_set",
-                                path=self.graph_load_path,
-                                value=graph_name,
-                            )
+                choice = self.graph_set_menu_items[self.state.graph_set_cursor]
+                if choice == SET_MENU_CURRENT:
+                    self.state.ui_mode = "GRAPH_MENU"
+                    self.state.graph_menu_cursor = 1 if self.graph_menu_items else 0
+                elif choice == SET_MENU_LOAD:
+                    self.state.ui_mode = "GRAPH_LOAD_SET_LIST"
+                    self.state.graph_load_set_cursor = self.graph_load_set_initial_cursor()
+
+        elif self.state.ui_mode == "GRAPH_LOAD_SET_LIST":
+            if self.state.graph_load_set_cursor == 0:
+                self.state.ui_mode = "GRAPH_SET_LIST"
+                self.state.graph_set_cursor = 2
+            elif self.graph_load_path:
+                graph_name = self.selected_graph_set_name
+                if graph_name:
+                    self.queue_action(
+                        UIAction(
+                            kind="load_set",
+                            path=self.graph_load_path,
+                            value=graph_name,
                         )
+                    )
 
         elif self.state.ui_mode == "GRAPH_PRESET_LIST":
             if self.state.graph_preset_cursor == 0:
                 self.state.ui_mode = "GRAPH_MENU"
+                self.state.graph_menu_cursor = self.graph_menu_items.index("SET PRESETS") + 1 if "SET PRESETS" in self.graph_menu_items else 1
             else:
                 action_idx = self.state.graph_preset_cursor - 1
                 if 0 <= action_idx < len(self.graph_preset_action_items):
@@ -3468,8 +3495,12 @@ class ShadowboxUI:
             self.state.ui_mode = "GRAPH_PRESET_LIST"
         elif self.state.ui_mode == "GRAPH_SET_LIST":
             self.state.ui_mode = "TOP"
+        elif self.state.ui_mode == "GRAPH_LOAD_SET_LIST":
+            self.state.ui_mode = "GRAPH_SET_LIST"
+            self.state.graph_set_cursor = 2
         elif self.state.ui_mode == "GRAPH_PRESET_LIST":
             self.state.ui_mode = "GRAPH_MENU"
+            self.state.graph_menu_cursor = self.graph_menu_items.index("SET PRESETS") + 1 if "SET PRESETS" in self.graph_menu_items else 1
         elif self.state.ui_mode == "GRAPH_MENU":
             self.state.ui_mode = "GRAPH_SET_LIST"
             self.state.graph_set_cursor = self.graph_set_initial_cursor()
