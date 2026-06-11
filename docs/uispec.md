@@ -8,22 +8,22 @@ Shadowbox is a hardware UI for RNBO Runner that:
 - allows editing of parameters and routing that are explicitly published
 - does not invent structure that is not present in the published data
 
-The UI is organized around live RNBO instances, with a user-facing top level that separates graphs, instances, and system concerns.
+The UI is organized around live RNBO instances, with a user-facing top level that separates sets, instances, and system concerns.
 
 2. Source of Truth
 
 - Instance-scoped runtime data comes from OSCQuery
 - Shadowbox may store limited local UI state such as cursor position or saved audio-device selection
-- Shadowbox must not invent patch, graph, preset, or routing structures that are not published
+- Shadowbox must not invent patch, set, preset, routing, or graph structures that are not published
 - `SYSTEM` may expose a small curated set of host-level status or maintenance actions that are not owned by any instance and may come from local OS/integration data instead of OSCQuery
 - Non-OSCQuery `SYSTEM` features must be explicit, minimal, and documented; they must not be generalized into arbitrary host inspection
 
 Definitions:
 - Instance = one live published RNBO instance under `/rnbo/inst/<n>`
 - Patcher = a loadable RNBO asset published under `/rnbo/patchers/<name>`
-- Graph = the user-facing term for the current whole-system runtime state and its saved variants
-- Graph Preset = a Runner-managed snapshot of parameter state for the currently loaded graph, published under the backend `sets/presets` branch
-- Set = backend Runner terminology exposed through published `sets` paths; this term should not appear in user-facing UI copy unless quoting the backend
+- Set = the user-facing term for the current whole-system runtime state and its saved variants, backed by Runner-published `sets` paths
+- Set Preset = a Runner-managed snapshot of parameter state for the currently loaded set, published under the backend `sets/presets` branch
+- Graph = avoid this term in user-facing UI copy; it may still appear in backend or implementation descriptions when referring to RNBO Runner internals or graph-editor compatibility
 - Node = avoid this term in the UI and implementation unless quoting backend terminology; when it appears in backend descriptions, it refers to an instance
 - Patch = avoid this term in the UI and implementation because it is ambiguous across RNBO authoring, patchers, and live instances
 - Parameter = editable node under an instance `params` branch
@@ -35,30 +35,30 @@ Definitions:
 3. Menu Hierarchy
 
 TOP
-GRAPHS
+SETS
 INSTANCES
 SYSTEM
 
-GRAPHS
-CURRENT GRAPH
-NEW GRAPH
-LOAD GRAPH
-SAVE GRAPH
+SETS
+CURRENT SET
+NEW SET
+LOAD SET
+SAVE SET
 STARTUP
 
-LOAD GRAPH
-<SAVED GRAPH>
-<SAVED GRAPH>
+LOAD SET
+<SAVED SET>
+<SAVED SET>
 ...
 
 STARTUP
 RESTORE LAST
-LOAD NAMED GRAPH
+LOAD NAMED SET
 OFF
 
-LOAD NAMED GRAPH
-<SAVED GRAPH>
-<SAVED GRAPH>
+LOAD NAMED SET
+<SAVED SET>
+<SAVED SET>
 ...
 
 INSTANCES
@@ -91,13 +91,13 @@ MAINT
 
 Rules:
 - Instances are discovered from OSCQuery, not hardcoded
-- `GRAPHS` is a user-facing top-level label and must not imply a separate Shadowbox-owned graph model
-- `GRAPHS` is backed by published Runner `sets` and startup capabilities when those paths are available
-- `CURRENT GRAPH` reflects the currently published live graph state and current graph identity only
-- `NEW GRAPH` may appear as a curated action only when the backend publishes a loadable set named `New Graph` and Shadowbox implements the action by invoking the published set load path with that exact name
-- `NEW GRAPH` must not imply a separate Shadowbox-owned graph creation or clear command
-- `LOAD GRAPH` loads a published graph by name through the published backend set load path
-- `SAVE GRAPH` saves the current published live graph through the published backend set save path
+- `SETS` is a user-facing top-level label and must not imply a separate Shadowbox-owned graph model
+- `SETS` is backed by published Runner `sets` and startup capabilities when those paths are available
+- `CURRENT SET` reflects the currently published live set state and current set identity only
+- `NEW SET` may appear as a curated action only when the backend publishes a loadable template set and Shadowbox implements the action by invoking the published set load path
+- `NEW SET` must not imply a separate Shadowbox-owned graph creation or clear command
+- `LOAD SET` loads a published set by name through the published backend set load path
+- `SAVE SET` saves the current published live set through the published backend set save path
 - `STARTUP` edits published Runner startup configuration only; it does not implement local boot restore logic
 - Instance labels should use published alias/name when available
 - `ADD INSTANCE` should appear in the `INSTANCES` menu only if the backend exposes a supported command path for creating an instance from a patcher
@@ -202,10 +202,10 @@ Rules:
 - when the backend uses the word `node`, Shadowbox may map that action into instance lifecycle language in the UI
 - raw instance `config` and `control` branches should remain hidden unless a specific published capability is promoted into the curated UI
 
-Graph curation rule:
-- Shadowbox may promote a small number of graph actions into friendlier UI labels when they map to a verified published backend capability with stable semantics
-- The canonical example is `NEW GRAPH`, which is valid only when it is implemented as `LOAD GRAPH "New Graph"` through the published backend set load path
-- Shadowbox must not expose `CLEAR GRAPH` as a synthetic action unless the backend publishes an equally explicit and verified command or backend-set-backed behavior for it
+Set curation rule:
+- Shadowbox may promote a small number of set actions into friendlier UI labels when they map to a verified published backend capability with stable semantics
+- The canonical example is `NEW SET`, which is valid only when it is implemented through the published backend set load path
+- Shadowbox must not expose `CLEAR SET` as a synthetic action unless the backend publishes an equally explicit and verified command or backend-set-backed behavior for it
 
 7. Parameters
 
@@ -267,52 +267,52 @@ Expected behavior:
 - available preset names are read from the published preset entries list
 - selecting a preset sends its name to the published preset load path
 
-If the backend publishes preset save or rename capabilities, Shadowbox should reuse the same naming UI used for graph save and rename actions rather than introducing a separate preset-specific editor.
+If the backend publishes preset save or rename capabilities, Shadowbox should reuse the same naming UI used for set save and rename actions rather than introducing a separate preset-specific editor.
 
 Shadowbox does not:
 - create its own preset format
 - infer preset groups that are not published
 - cache preset state beyond minimal UI convenience
 
-8a. Graph Presets
+8a. Set Presets
 
-Graph presets come from the graph branch `/rnbo/inst/control/sets/presets`.
+Set presets come from the set preset branch `/rnbo/inst/control/sets/presets`.
 
 Expected behavior:
-- available graph preset names are read from the published graph preset load range
-- selecting a graph preset sends its name to the published graph preset load path
-- graph preset save, rename, and delete operations are only shown when their published paths exist
+- available set preset names are read from the published set preset load range
+- selecting a set preset sends its name to the published set preset load path
+- set preset save, rename, and delete operations are only shown when their published paths exist
 
-Graph presets are distinct from:
-- saved graphs, which manage whole graph/session recall
+Set presets are distinct from:
+- saved sets, which manage whole set/session recall
 - instance presets, which come from each live instance `presets` branch
 
 8b. Shared Naming UI
 
 Naming should be handled by one shared modal flow that can be invoked by:
-- `SAVE GRAPH`
-- `RENAME GRAPH` if a published rename capability is added
-- `SAVE GRAPH PRESET` for graph presets if a published graph preset-save capability exists
-- `RENAME GRAPH PRESET` for graph presets if a published graph preset-rename capability exists
+- `SAVE SET`
+- `RENAME SET` if a published rename capability is added
+- `SAVE SET PRESET` for set presets if a published set preset-save capability exists
+- `RENAME SET PRESET` for set presets if a published set preset-rename capability exists
 - `SAVE PRESET` if a published preset-save capability exists
 - `RENAME PRESET` if a published preset-rename capability exists
 
 Rules:
-- The naming UI is only shown for published save/rename capabilities; Shadowbox must not invent local preset or graph storage
+- The naming UI is only shown for published save/rename capabilities; Shadowbox must not invent local preset or set storage
 - Saving and renaming should feel identical apart from the action label and the initial text value
-- The current generated fallback name remains useful as the initial draft for `SAVE GRAPH`, but it should be editable before commit and always remain available as an explicit regenerate action
+- The current generated fallback name remains useful as the initial draft for `SAVE SET`, but it should be editable before commit and always remain available as an explicit regenerate action
 - Renaming should preload the current item name
 - The naming flow must work on the existing step/press input model without hidden gestures
 
 Proposed invocation model:
-- choosing `SAVE GRAPH` opens `NAME EDITOR` instead of immediately dispatching the generated fallback name
+- choosing `SAVE SET` opens `NAME EDITOR` instead of immediately dispatching the generated fallback name
 - choosing `SAVE PRESET` does the same when that published capability exists
-- choosing `RENAME GRAPH`, `SAVE GRAPH PRESET`, `RENAME GRAPH PRESET`, or `RENAME PRESET` opens `NAME EDITOR` seeded with the current item name as appropriate
+- choosing `RENAME SET`, `SAVE SET PRESET`, `RENAME SET PRESET`, or `RENAME PRESET` opens `NAME EDITOR` seeded with the current item name as appropriate
 - on confirm, Shadowbox dispatches the published command with the final text value
 - on cancel, no backend command is sent
 
 Proposed editor structure:
-- header shows the action context, such as `SAVE GRAPH`, `SAVE GRAPH PRESET`, `RENAME GRAPH`, `RENAME GRAPH PRESET`, `SAVE PRESET`, or `RENAME PRESET`
+- header shows the action context, such as `SAVE SET`, `SAVE SET PRESET`, `RENAME SET`, `RENAME SET PRESET`, `SAVE PRESET`, or `RENAME PRESET`
 - first row shows the current draft name, with an insertion cursor
 - second row is a compact character wheel or palette
 - final row exposes explicit actions: `SAVE` or `RENAME`, `GENERATE NAME`, `ADD DATE`, `DELETE CHAR`, `CANCEL`
@@ -332,7 +332,7 @@ Recommended editing behavior:
 7. Selecting `SAVE` or `RENAME` submits the draft
 
 Generated-name guidance:
-- `SAVE GRAPH` should open with a generated suggestion derived from the current graph name when available, otherwise a neutral base such as `graph`
+- `SAVE SET` should open with a generated suggestion derived from the current set name when available, otherwise a neutral base such as `set`
 - `SAVE PRESET` should open with a generated suggestion derived from the current preset or instance label when available, otherwise a neutral base such as `preset`
 - generated names may include a timestamp suffix to keep one-click saves unique
 - `GENERATE NAME` should remain available even when the user has already edited the draft, so they can quickly reset to a fresh suggestion
@@ -420,9 +420,9 @@ Live runtime authority:
 - Shadowbox reflects the currently published live runtime state
 - Live instances under `/rnbo/inst/<n>` are authoritative for what exists now
 - Published set metadata, view metadata, or layout metadata do not by themselves establish that an instance exists
-- Shadowbox must not reconstruct or imply missing live instances from saved graph metadata
+- Shadowbox must not reconstruct or imply missing live instances from saved set metadata
 - Multiple instances of the same patcher are valid and must remain distinct by runtime instance id
-- Loading or saving a graph means invoking published Runner set operations and then rediscovering the resulting live runtime state
+- Loading or saving a set means invoking published Runner set operations and then rediscovering the resulting live runtime state
 
 12. Rendering Contract
 
@@ -461,13 +461,13 @@ Display rendering rules:
 - UI must stay small and readable on OLED hardware
 - hierarchy should reflect published OSCQuery structure as directly as possible
 - local persistence should be limited to UI convenience, not mirrored domain state
-- local persistence must not be presented as graph or session restoration
+- local persistence must not be presented as set or session restoration
 - no feature expansion without corresponding published data
 
 14. Explicit Non-Goals
 
 Shadowbox will not:
-- invent a synthetic graph tree unrelated to published instances
+- invent a synthetic set or graph tree unrelated to published instances
 - create or manage its own preset system
 - expose editing for unpublished backend capabilities
 - expose raw instance `config` or `control` branches as generic menu sections

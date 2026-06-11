@@ -183,7 +183,7 @@ class PitchDisplayTests(unittest.TestCase):
                 busy=False,
                 activity_ticks=0,
             ),
-            top_level_items=["GRAPHS", "INSTANCES", "SYSTEM"],
+            top_level_items=["SETS", "INSTANCES", "SYSTEM"],
         )
 
         renderer.draw(ui)
@@ -191,7 +191,7 @@ class PitchDisplayTests(unittest.TestCase):
         text_ops = [op for op in display.ops if op[0] == "text"]
         rendered = [op[1] for op in text_ops]
         self.assertIn("SHADOWBOX", rendered)
-        self.assertIn("  GRAPHS", rendered)
+        self.assertIn("  SETS", rendered)
         self.assertIn("> INSTANCES", rendered)
         self.assertIn("  SYSTEM", rendered)
         self.assertFalse(any(op[0] == "rect" for op in display.ops))

@@ -288,8 +288,8 @@ class TouchDirectUITests(unittest.TestCase):
         renderer.set_touch_mode(True)
         renderer.draw(ui, touch_state=SimpleNamespace(pressed=False, normalized_x=0.0, normalized_y=0.0))
 
-        label_ops = [op for op in display.ops if op[0] == "text" and op[1] in {"Graphs", "Instances", "System"}]
-        self.assertEqual([op[1] for op in label_ops], ["Graphs", "Instances", "System"])
+        label_ops = [op for op in display.ops if op[0] == "text" and op[1] in {"Sets", "Instances", "System"}]
+        self.assertEqual([op[1] for op in label_ops], ["Sets", "Instances", "System"])
         self.assertEqual(len({op[3] for op in label_ops}), 1)
 
     def test_header_title_sits_closer_to_back_button_on_touch_layout(self) -> None:

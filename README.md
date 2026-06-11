@@ -83,9 +83,9 @@ https://www.adafruit.com/product/4484
 - Display dim/sleep management
 - Encoder navigation
 - RNBO OSCQuery integration
-- `NEW GRAPH` support when implemented as loading a published set named `New Graph`
-- Graph set load/save from published Runner capabilities
-- Graph startup configuration through published Runner controls
+- `NEW SET` support when implemented as loading a published backend set template
+- Set load/save from published Runner capabilities
+- Set startup configuration through published Runner controls
 - System status display
 - Direct Ethernet rescue setup with a fixed fallback IP on `eth0`
 - Audio device switching
@@ -93,9 +93,9 @@ https://www.adafruit.com/product/4484
 - Saved top-level cursor and audio-device selection in `~/rnbo-ui/shadowbox_state.json`
 
 Shadowbox treats the published live OSCQuery runtime tree as the source of truth.
-It does not maintain its own graph model or restore graph/session state from local persistence.
-Graph load/save/startup behavior is executed only through Runner-published set and startup controls.
-A curated `NEW GRAPH` action is acceptable when it maps directly to the published set load path using a verified set named `New Graph`.
+It does not maintain its own set model or restore set/session state from local persistence.
+Set load/save/startup behavior is executed only through Runner-published set and startup controls.
+A curated `NEW SET` action is acceptable when it maps directly to the published set load path using a verified backend template.
 The `SYSTEM -> NETWORK` screen also includes a local direct-Ethernet setup action that can assign a predictable fallback IP for headless rescue connections.
 
 ---

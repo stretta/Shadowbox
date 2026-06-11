@@ -752,7 +752,7 @@ class InstanceActionTests(unittest.TestCase):
         self.assertIn("STARTUP", renderer.last_items or [])
         self.assertNotIn("AUDIO OVERVIEW", renderer.last_items or [])
         self.assertNotIn("MIDI OVERVIEW", renderer.last_items or [])
-        self.assertNotIn("GRAPH PRESETS", renderer.last_items or [])
+        self.assertNotIn("SET PRESETS", renderer.last_items or [])
 
     def test_graph_menu_audio_overview_selects_active_instance_row(self) -> None:
         ui = ShadowboxUI()
@@ -917,7 +917,7 @@ class InstanceActionTests(unittest.TestCase):
         renderer = _CaptureRenderer()
         renderer.draw(ui)
 
-        self.assertEqual(renderer.last_value_rows, [("graph", "StudioA"), ("dirty", "YES"), ("graphs", 2)])
+        self.assertEqual(renderer.last_value_rows, [("set", "StudioA"), ("dirty", "YES"), ("sets", 2)])
         self.assertEqual(renderer.last_current_indices, {1, 2})
         self.assertEqual(renderer.last_value_weights, ["italic", None, None])
 
@@ -926,7 +926,7 @@ class InstanceActionTests(unittest.TestCase):
         ui.apply_runner_snapshot(self._snapshot_with_graph_preset_capabilities())
         self.assertEqual(
             [(row.label, row.value, row.current) for row in ui.graph_status_value_rows],
-            [("graph", "StudioA", True), ("dirty", "YES", True), ("graphs", 2, False), ("preset", "linke synce", True)],
+            [("set", "StudioA", True), ("dirty", "YES", True), ("sets", 2, False), ("preset", "linke synce", True)],
         )
 
     def test_graph_set_selection_queues_load_set_action(self) -> None:
@@ -1236,7 +1236,7 @@ class InstanceActionTests(unittest.TestCase):
         renderer = _CaptureRenderer()
         renderer.draw(ui)
 
-        self.assertEqual(renderer.last_header, "SAVE GRAPH")
+        self.assertEqual(renderer.last_header, "SAVE SET")
         self.assertEqual(
             renderer.last_items,
             [
@@ -1328,7 +1328,7 @@ class InstanceActionTests(unittest.TestCase):
 
         renderer = _CaptureRenderer()
         renderer.draw(ui)
-        self.assertEqual(renderer.last_header, "RENAME GRAPH")
+        self.assertEqual(renderer.last_header, "RENAME SET")
         self.assertEqual(renderer.last_items[1], "RENAME")
 
         ui.handle_event(type("Evt", (), {"kind": "short_press"})())
@@ -1457,7 +1457,7 @@ class InstanceActionTests(unittest.TestCase):
         renderer = _CaptureRenderer()
         renderer.draw(ui)
 
-        self.assertEqual(renderer.last_items, ["..", "RESTORE LAST", "LOAD NAMED GRAPH", "OFF"])
+        self.assertEqual(renderer.last_items, ["..", "RESTORE LAST", "LOAD NAMED SET", "OFF"])
         self.assertEqual(renderer.last_current_indices, {1})
 
     def test_graph_startup_value_rows_mark_current_startup_state(self) -> None:

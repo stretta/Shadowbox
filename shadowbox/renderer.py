@@ -177,6 +177,8 @@ class ShadowboxRenderer:
         value = str(text)
         if value == "..":
             return value
+        if value == "New Graph":
+            return "New Set"
         if self.touch_layout_enabled and value.upper() == value and any(ch.isalpha() for ch in value):
             return value.title()
         return value
@@ -3878,7 +3880,7 @@ class ShadowboxRenderer:
             )
         if label == "SYSTEM":
             self._draw_system_icon(icon_x, icon_y, on=True, scale=icon_scale)
-        elif label == "GRAPHS":
+        elif label == "SETS":
             self._draw_graphs_icon(icon_x, icon_y, on=True, scale=icon_scale)
         else:
             self._draw_instances_icon(icon_x, icon_y, on=True, scale=icon_scale)
@@ -3890,7 +3892,7 @@ class ShadowboxRenderer:
         text_w, text_h = self._measure_text(display_label, text_scale, text_weight)
         text_x = x + max(0, (w - text_w) // 2)
         if self.touch_layout_enabled:
-            _ref_w, reference_h = self._measure_text("Graphs", text_scale, "semibold")
+            _ref_w, reference_h = self._measure_text("Sets", text_scale, "semibold")
             text_y = y + h - reference_h - 30
         else:
             text_y = y + h - text_h - (24 if self.is_full_tft else 14)
@@ -3959,10 +3961,10 @@ class ShadowboxRenderer:
         header = {
             "TOP": "SHADOWBOX",
             "GRAPH_MENU": ui.current_set_name,
-            "GRAPH_STATUS": "CURRENT GRAPH",
-            "GRAPH_SET_LIST": "GRAPHS",
+            "GRAPH_STATUS": "CURRENT SET",
+            "GRAPH_SET_LIST": "SETS",
             "GRAPH_STARTUP": "STARTUP",
-            "GRAPH_STARTUP_SET_LIST": "STARTUP GRAPH",
+            "GRAPH_STARTUP_SET_LIST": "STARTUP SET",
             "NAME_EDITOR": ui.name_editor_title,
             "NAME_OVERWRITE_CONFIRM": "OVERWRITE?",
             "NAME_ERROR": ui.name_error_title,
@@ -3992,7 +3994,7 @@ class ShadowboxRenderer:
             "ABOUT": "ABOUT",
             "BRICK_PANEL": "BRICK PANEL",
             "MAINT": "MAINT",
-            "GRAPH_PRESET_LIST": "GRAPH PRESETS",
+            "GRAPH_PRESET_LIST": "SET PRESETS",
         }.get(state.ui_mode, state.ui_mode)
         if state.status_message:
             header = state.status_message
@@ -4024,7 +4026,7 @@ class ShadowboxRenderer:
                     state.graph_set_cursor - len(ui.graph_action_items),
                     ui.current_set_name,
                     ui.graph_action_items,
-                    empty_label="no saved graphs",
+                    empty_label="no saved sets",
                 )
             else:
                 self.draw_menu_rows(ui.graph_set_rows, state.graph_set_cursor)
@@ -4039,13 +4041,13 @@ class ShadowboxRenderer:
             else:
                 self.draw_menu_rows(ui.graph_preset_rows, state.graph_preset_cursor)
         elif state.ui_mode == "GRAPH_PRESET_REMOVE_PICKER":
-            items = [".."] + ui.available_graph_preset_names if ui.available_graph_preset_names else ["..", "no graph presets"]
+            items = [".."] + ui.available_graph_preset_names if ui.available_graph_preset_names else ["..", "no set presets"]
             action_indices = set(range(1, len(items))) if ui.available_graph_preset_names else None
             self.draw_string_list(items, state.graph_preset_remove_cursor, action_indices=action_indices)
         elif state.ui_mode == "GRAPH_STARTUP":
             self.draw_menu_rows(ui.graph_startup_rows, state.graph_startup_cursor)
         elif state.ui_mode == "GRAPH_STARTUP_SET_LIST":
-            self.draw_string_list([".."] + ui.available_set_names if ui.available_set_names else ["..", "no saved graphs"], state.graph_startup_set_cursor)
+            self.draw_string_list([".."] + ui.available_set_names if ui.available_set_names else ["..", "no saved sets"], state.graph_startup_set_cursor)
         elif state.ui_mode == "NAME_EDITOR":
             if self.touch_layout_enabled:
                 self.draw_name_keyboard_editor(ui)

@@ -40,8 +40,8 @@ Module responsibilities:
 - Discovers:
   - instances
   - patchers
-  - graph capabilities and startup configuration when published
-  - graph presets when published
+  - set capabilities and startup configuration when published
+  - set presets when published
   - presets
   - parameters
   - JACK audio and MIDI routing
@@ -70,8 +70,8 @@ Design rules:
 - The authoritative runtime view is the currently published live tree, especially live instances under `/rnbo/inst/<n>`
 - Published set metadata, view metadata, or layout metadata are not by themselves proof that a live instance exists
 - Shadowbox must not synthesize missing runtime instances or reconstruct a graph from non-runtime metadata
-- Graph load/save/startup controls must map directly to published Runner `sets`/config paths rather than a Shadowbox-owned persistence layer
-- Curated graph shortcuts are allowed only when they map directly to a verified backend capability with well-defined semantics; for example, `NEW GRAPH` may map to loading a published backend set named `New Graph`
+- Set load/save/startup controls must map directly to published Runner `sets`/config paths rather than a Shadowbox-owned persistence layer
+- Curated set shortcuts are allowed only when they map directly to a verified backend capability with well-defined semantics; for example, `NEW SET` may map to loading a published backend template set
 - The UI should be capability-driven; if a backend command or branch is not published, Shadowbox should not invent it
 - System controls must remain separate from per-instance controls
 - `SYSTEM` may include a narrow, explicitly documented set of host-level status or maintenance features outside OSCQuery when they are not owned by an instance
