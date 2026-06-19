@@ -19,7 +19,9 @@ ENABLE_SPI=1
 FONT_SOURCE_DIR="${REPO_DIR}/assets/fonts"
 FONT_INSTALL_DIR="/usr/local/share/fonts/shadowbox/ibm-plex"
 DIRECT_ETHERNET_HELPER="${REPO_DIR}/tools/direct_ethernet.sh"
-SUDOERS_PATH="/etc/sudoers.d/shadowbox-direct-ethernet"
+WIFI_NETWORK_HELPER="${REPO_DIR}/tools/wifi_network.sh"
+DIRECT_ETHERNET_SUDOERS_PATH="/etc/sudoers.d/shadowbox-direct-ethernet"
+WIFI_NETWORK_SUDOERS_PATH="/etc/sudoers.d/shadowbox-wifi-network"
 
 boot_file_path() {
     local basename="$1"
@@ -200,6 +202,9 @@ fi
 if ! grep -q '^SHADOWBOX_DIRECT_ETHERNET_HELPER=' "${TMP_ENV}"; then
     printf 'SHADOWBOX_DIRECT_ETHERNET_HELPER=%s\n' "${DIRECT_ETHERNET_HELPER}" >> "${TMP_ENV}"
 fi
+if ! grep -q '^SHADOWBOX_WIFI_NETWORK_HELPER=' "${TMP_ENV}"; then
+    printf 'SHADOWBOX_WIFI_NETWORK_HELPER=%s\n' "${WIFI_NETWORK_HELPER}" >> "${TMP_ENV}"
+fi
 
 sudo install -m 0644 "${TMP_ENV}" "${DEFAULT_ENV_PATH}"
 rm -f "${TMP_ENV}"
@@ -211,7 +216,17 @@ cat > "${TMP_SUDOERS}" <<EOF
 ${RUN_USER} ALL=(root) NOPASSWD: ${DIRECT_ETHERNET_HELPER}
 EOF
 sudo visudo -cf "${TMP_SUDOERS}"
-sudo install -m 0440 "${TMP_SUDOERS}" "${SUDOERS_PATH}"
+sudo install -m 0440 "${TMP_SUDOERS}" "${DIRECT_ETHERNET_SUDOERS_PATH}"
+rm -f "${TMP_SUDOERS}"
+
+echo "Configuring WiFi network helper..."
+chmod 0755 "${WIFI_NETWORK_HELPER}"
+TMP_SUDOERS="$(mktemp)"
+cat > "${TMP_SUDOERS}" <<EOF
+${RUN_USER} ALL=(root) NOPASSWD: ${WIFI_NETWORK_HELPER}
+EOF
+sudo visudo -cf "${TMP_SUDOERS}"
+sudo install -m 0440 "${TMP_SUDOERS}" "${WIFI_NETWORK_SUDOERS_PATH}"
 rm -f "${TMP_SUDOERS}"
 
 echo "Installing systemd service..."

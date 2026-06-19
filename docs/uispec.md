@@ -419,7 +419,7 @@ Unlike instance browsing and editing, `SYSTEM` may include a tightly scoped set 
 Initial system areas:
 - status
 - audio device selection
-- network status and direct Ethernet rescue setup
+- network status, WiFi network selection, and direct Ethernet rescue setup
 - about screen
 - maintenance actions
 

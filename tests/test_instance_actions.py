@@ -13,7 +13,7 @@ sys.modules.setdefault("pythonosc.udp_client", udp_client_module)
 
 from shadowbox.renderer import ShadowboxRenderer
 from shadowbox.rnbo import RNBO_PORT, RNBOSnapshot
-from shadowbox.ui import ShadowboxUI
+from shadowbox.ui import MenuRow, ShadowboxUI
 
 
 class _FakeDisplay:
@@ -100,6 +100,12 @@ class _CaptureRenderer(ShadowboxRenderer):
         self.last_selectable_value_rows = [(row.label, row.value, row.current) for row in rows]
         self.last_selected_idx = selected_idx
 
+    def draw_menu_rows(self, rows: list[MenuRow], selected_idx: int) -> None:
+        self.last_items = [str(row.label) for row in rows]
+        self.last_selected_idx = selected_idx
+        self.last_current_indices = {idx for idx, row in enumerate(rows) if row.current}
+        self.last_action_indices = {idx for idx, row in enumerate(rows) if row.action}
+
 
 class InstanceActionTests(unittest.TestCase):
     def _snapshot_with_direct_network(self) -> RNBOSnapshot:
@@ -119,6 +125,12 @@ class InstanceActionTests(unittest.TestCase):
                     "wifi_name": "wlan0",
                     "wifi_connected": False,
                     "wifi_ssid": "",
+                    "wifi_networks": [
+                        {"id": "studio-profile", "ssid": "studio", "saved": True, "connected": False, "signal": "80", "security": "WPA2"},
+                        {"id": "stage-profile", "ssid": "stage", "saved": True, "connected": False, "signal": "55", "security": "WPA2"},
+                        {"id": "", "ssid": "guest", "saved": False, "connected": False, "signal": "35", "security": "WPA2"},
+                        {"id": "", "ssid": "open", "saved": False, "connected": False, "signal": "25", "security": ""},
+                    ],
                     "wifi_ipv4": "",
                     "primary_ipv4": "",
                     "direct_setup_available": True,
@@ -312,7 +324,7 @@ class InstanceActionTests(unittest.TestCase):
                 ("state", "OFF", False),
                 ("wired", "LINK", True),
                 ("eth ip", "169.254.12.34", False),
-                ("wifi", "DOWN", False),
+                ("wifi", "CHOOSE", False),
                 ("wifi ip", "-", False),
                 ("hint", "DIRECT READY", True),
                 ("host", "shadowbox.local", False),
@@ -358,6 +370,107 @@ class InstanceActionTests(unittest.TestCase):
 
         self.assertEqual(ui.pop_actions()[0].kind, "disable_direct_ethernet")
 
+    def test_network_press_opens_wifi_network_picker(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_direct_network())
+        ui.state.ui_mode = "NETWORK"
+        ui.state.network_cursor = 5
+
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        self.assertEqual(ui.state.ui_mode, "WIFI_NETWORKS")
+        self.assertEqual(ui.state.wifi_network_cursor, 1)
+
+    def test_network_touch_wifi_row_opens_wifi_network_picker(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_direct_network())
+        ui.state.ui_mode = "NETWORK"
+
+        ui.handle_event(types.SimpleNamespace(kind="tap_row", index=5))
+
+        self.assertEqual(ui.state.network_cursor, 5)
+        self.assertEqual(ui.state.ui_mode, "WIFI_NETWORKS")
+        self.assertEqual(ui.state.wifi_network_cursor, 1)
+
+    def test_wifi_network_picker_rescan_queues_rescan_action(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_direct_network())
+        ui.state.ui_mode = "WIFI_NETWORKS"
+        ui.state.wifi_network_cursor = len(ui.wifi_network_rows) - 1
+
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        self.assertEqual(ui.pop_actions()[0].kind, "rescan_wifi")
+
+    def test_wifi_network_picker_queues_connect_action(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_direct_network())
+        ui.state.ui_mode = "WIFI_NETWORKS"
+        ui.state.wifi_network_cursor = 2
+
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        action = ui.pop_actions()[0]
+        self.assertEqual(action.kind, "connect_wifi")
+        self.assertEqual(action.ssid, "stage-profile")
+
+    def test_wifi_network_picker_opens_password_editor_for_unsaved_secured_network(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_direct_network())
+        ui.state.ui_mode = "WIFI_NETWORKS"
+        ui.state.wifi_network_cursor = 3
+
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        self.assertEqual(ui.state.ui_mode, "NAME_EDITOR")
+        self.assertEqual(ui.state.name_editor_context, "wifi_password")
+        self.assertEqual(ui.state.pending_wifi_ssid, "guest")
+        self.assertEqual(ui.name_editor_title, "WIFI PASSWORD")
+        self.assertEqual(ui.name_editor_confirm_label, "CONNECT")
+
+    def test_wifi_password_submit_queues_new_network_action(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_direct_network())
+        ui._begin_wifi_password_editor("guest")
+        ui.state.name_editor_draft = "secretpass"
+
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        action = ui.pop_actions()[0]
+        self.assertEqual(action.kind, "connect_wifi_new")
+        self.assertEqual(action.ssid, "guest")
+        self.assertEqual(action.value, "secretpass")
+        self.assertEqual(ui.state.ui_mode, "WIFI_NETWORKS")
+        self.assertEqual(ui.state.name_editor_draft, "")
+
+    def test_wifi_network_picker_queues_open_network_without_password(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_direct_network())
+        ui.state.ui_mode = "WIFI_NETWORKS"
+        ui.state.wifi_network_cursor = 4
+
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        action = ui.pop_actions()[0]
+        self.assertEqual(action.kind, "connect_wifi_new")
+        self.assertEqual(action.ssid, "open")
+        self.assertEqual(action.value, "")
+
+    def test_wifi_network_rows_mark_current_ssid(self) -> None:
+        ui = ShadowboxUI()
+        snapshot = self._snapshot_with_direct_network()
+        snapshot.system["network"]["wifi_connected"] = True
+        snapshot.system["network"]["wifi_ssid"] = "stage"
+        snapshot.system["network"]["wifi_ipv4"] = "10.0.0.44"
+        ui.apply_runner_snapshot(snapshot)
+
+        rows = ui.wifi_network_rows
+
+        self.assertEqual([row.label for row in rows], ["..", "studio", "stage", "guest", "open", "RESCAN"])
+        self.assertFalse(rows[1].current)
+        self.assertTrue(rows[2].current)
+        self.assertTrue(rows[-1].action)
+
     def test_renderer_draw_network_uses_network_value_rows_on_oled(self) -> None:
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_direct_network())
@@ -376,6 +489,22 @@ class InstanceActionTests(unittest.TestCase):
                 ("wired", "LINK", True),
             ],
         )
+
+    def test_renderer_draw_wifi_network_picker_marks_current(self) -> None:
+        ui = ShadowboxUI()
+        snapshot = self._snapshot_with_direct_network()
+        snapshot.system["network"]["wifi_ssid"] = "studio"
+        ui.apply_runner_snapshot(snapshot)
+        ui.state.ui_mode = "WIFI_NETWORKS"
+        ui.state.wifi_network_cursor = 1
+
+        renderer = _CaptureRenderer()
+        renderer.draw(ui)
+
+        self.assertEqual(renderer.last_header, "WIFI NETWORKS")
+        self.assertEqual(renderer.last_items, ["..", "studio", "stage", "guest", "open", "RESCAN"])
+        self.assertEqual(renderer.last_current_indices, {1})
+        self.assertEqual(renderer.last_action_indices, {5})
 
     def test_instance_list_shows_add_and_remove_actions_without_patchers_or_instances(self) -> None:
         ui = self._apply_empty_snapshot()

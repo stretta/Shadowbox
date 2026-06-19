@@ -14,6 +14,8 @@ sys.modules.setdefault("pythonosc.udp_client", udp_client_module)
 
 from shadowbox.renderer import ShadowboxRenderer, format_param_value, param_midi_mapping_marker, param_unit, routing_port_display_name
 from shadowbox.rnbo import (
+    _discover_wifi_networks,
+    _wifi_scan_lines,
     discover_host_network,
     discover_instances,
     discover_set_presets,
@@ -72,6 +74,10 @@ class ParamMetadataTests(unittest.TestCase):
                 }.get(path, ""),
             ),
             mock.patch("shadowbox.rnbo.subprocess.run", return_value=completed),
+            mock.patch(
+                "shadowbox.rnbo._discover_wifi_networks",
+                return_value=[{"ssid": "studio", "saved": True, "connected": True, "signal": "80"}],
+            ),
             mock.patch("shadowbox.rnbo.socket.gethostname", return_value="shadowbox"),
         ):
             info = discover_host_network()
@@ -82,6 +88,7 @@ class ParamMetadataTests(unittest.TestCase):
         self.assertEqual(info["wired_link_local"], "169.254.12.34")
         self.assertEqual(info["wifi_name"], "wlan0")
         self.assertTrue(info["wifi_connected"])
+        self.assertEqual(info["wifi_ssid"], "studio")
         self.assertEqual(info["wifi_ipv4"], "10.0.0.55")
         self.assertEqual(info["primary_ipv4"], "10.0.0.55")
         self.assertTrue(info["direct_setup_available"])
@@ -106,6 +113,7 @@ class ParamMetadataTests(unittest.TestCase):
                 }.get(path, ""),
             ),
             mock.patch("shadowbox.rnbo.subprocess.run", return_value=completed),
+            mock.patch("shadowbox.rnbo._discover_wifi_networks", return_value=[]),
             mock.patch("shadowbox.rnbo.socket.gethostname", return_value="shadowbox"),
             mock.patch("shadowbox.rnbo.DIRECT_ETHERNET_IP", "10.42.0.1"),
             mock.patch("shadowbox.rnbo.DIRECT_ETHERNET_IFACE", "eth0"),
@@ -121,6 +129,7 @@ class ParamMetadataTests(unittest.TestCase):
         with (
             mock.patch("shadowbox.rnbo.os.listdir", return_value=[]),
             mock.patch("shadowbox.rnbo.subprocess.run", side_effect=OSError("missing ip")),
+            mock.patch("shadowbox.rnbo._discover_wifi_networks", return_value=[]),
             mock.patch("shadowbox.rnbo.socket.gethostname", return_value="shadowbox"),
         ):
             info = discover_host_network()
@@ -133,6 +142,49 @@ class ParamMetadataTests(unittest.TestCase):
         self.assertEqual(info["direct_setup_ip"], "")
         self.assertFalse(info["direct_setup_ready"])
         self.assertEqual(info["hostname_local"], "shadowbox.local")
+
+    def test_discover_wifi_networks_merges_saved_and_scanned_nmcli_rows(self) -> None:
+        def fake_nmcli(args, timeout=3.0):
+            if args[:2] == ["--fields", "NAME,TYPE,ACTIVE"]:
+                return ["studio-profile:802-11-wireless:yes", "wired:802-3-ethernet:no", "stage-profile:802-11-wireless:no"]
+            if args[:2] == ["--fields", "IN-USE,SSID,SIGNAL,SECURITY"]:
+                return ["*:studio:80:WPA2", ":guest:40:WPA1 WPA2"]
+            return []
+
+        def fake_connection_ssid(connection_id):
+            return {"studio-profile": "studio", "stage-profile": "stage"}.get(connection_id, "")
+
+        with (
+            mock.patch("shadowbox.rnbo._nmcli_lines", side_effect=fake_nmcli),
+            mock.patch("shadowbox.rnbo._nmcli_connection_ssid", side_effect=fake_connection_ssid),
+            mock.patch("shadowbox.rnbo._wifi_scan_lines", return_value=["*:studio:80:WPA2", ":guest:40:WPA1 WPA2"]),
+        ):
+            networks = _discover_wifi_networks()
+
+        self.assertEqual(
+            networks,
+            [
+                {"id": "studio-profile", "ssid": "studio", "saved": True, "connected": True, "signal": "80", "security": "WPA2"},
+                {"id": "stage-profile", "ssid": "stage", "saved": True, "connected": False, "signal": "", "security": ""},
+                {"id": "", "ssid": "guest", "saved": False, "connected": False, "signal": "40", "security": "WPA1 WPA2"},
+            ],
+        )
+
+    def test_wifi_scan_lines_prefers_sudo_helper_when_available(self) -> None:
+        completed = mock.Mock()
+        completed.returncode = 0
+        completed.stdout = " :Wefie:50:WPA2\n*:studio:80:WPA2\n"
+
+        with (
+            mock.patch("shadowbox.rnbo._wifi_network_helper_path", return_value="/tmp/wifi_network.sh"),
+            mock.patch("shadowbox.rnbo.os.path.exists", return_value=True),
+            mock.patch("shadowbox.rnbo.subprocess.run", return_value=completed) as run,
+        ):
+            lines = _wifi_scan_lines()
+
+        self.assertEqual(lines, [" :Wefie:50:WPA2", "*:studio:80:WPA2"])
+        run.assert_called_once()
+        self.assertEqual(run.call_args.args[0], ["sudo", "-n", "/tmp/wifi_network.sh", "list"])
 
     def test_numeric_step_prefers_metadata_edit_step(self) -> None:
         param = {"type": "f", "min": 0, "max": 100, "metadata": {"edit_step": 2.5}}

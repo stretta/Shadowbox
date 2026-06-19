@@ -211,6 +211,8 @@ else
 fi
 
 rsync "${RSYNC_OPTS[@]}" \
+  --exclude '.git' \
+  --exclude '.pytest_cache' \
   --exclude '.venv' \
   --exclude '__pycache__' \
   --exclude '*.pyc' \

@@ -44,6 +44,7 @@ OSC_LISTEN_HOST = "127.0.0.1"
 OSC_LISTEN_PORT = 13333
 POST_LOAD_VIEW_DEFAULT = "instance"
 DIRECT_ETHERNET_HELPER_DEFAULT = str(Path(__file__).resolve().parent.parent / "tools" / "direct_ethernet.sh")
+WIFI_NETWORK_HELPER_DEFAULT = str(Path(__file__).resolve().parent.parent / "tools" / "wifi_network.sh")
 
 
 def _env_float(name: str, default: float) -> float:
@@ -104,6 +105,10 @@ def _direct_ethernet_helper_path() -> str:
     return _env_text("SHADOWBOX_DIRECT_ETHERNET_HELPER", DIRECT_ETHERNET_HELPER_DEFAULT)
 
 
+def _wifi_network_helper_path() -> str:
+    return _env_text("SHADOWBOX_WIFI_NETWORK_HELPER", WIFI_NETWORK_HELPER_DEFAULT)
+
+
 def _short_error_text(message: str, limit: int = 48) -> str:
     text = " ".join(str(message or "").split())
     if len(text) <= limit:
@@ -128,6 +133,42 @@ def _run_direct_ethernet_helper(command: str) -> tuple[bool, str]:
         return False, "sudo unavailable"
     except subprocess.TimeoutExpired:
         return False, "network timeout"
+    except Exception as exc:
+        return False, _short_error_text(str(exc))
+
+    if result.returncode == 0:
+        return True, ""
+
+    detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
+    lowered = detail.lower()
+    if "password" in lowered and "sudo" in lowered:
+        return False, "sudo not configured"
+    return False, _short_error_text(detail)
+
+
+def _run_wifi_network_helper(command: str, ssid: str = "", password: str = "") -> tuple[bool, str]:
+    helper_path = _wifi_network_helper_path()
+    if not helper_path or not os.path.exists(helper_path):
+        return False, "helper missing"
+
+    args = ["sudo", "-n", helper_path, command]
+    if ssid:
+        args.append(ssid)
+    if password:
+        args.append(password)
+
+    try:
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except FileNotFoundError:
+        return False, "sudo unavailable"
+    except subprocess.TimeoutExpired:
+        return False, "wifi timeout"
     except Exception as exc:
         return False, _short_error_text(str(exc))
 
@@ -881,6 +922,44 @@ def main():
                         ui.set_network_error(error)
                     ui.state.ui_mode = "NETWORK"
                     ui.state.network_cursor = 1 if ui.network_value_rows else 0
+                    ui.set_busy(False)
+
+                elif action.kind == "connect_wifi":
+                    ui.set_busy(True, "network")
+                    ok, error = _run_wifi_network_helper("connect", action.ssid or "")
+                    sleep(0.5)
+                    ui.apply_runner_snapshot(rnbo.discover())
+                    if ok:
+                        ui.clear_network_error()
+                    else:
+                        ui.set_network_error(error)
+                    ui.state.ui_mode = "NETWORK"
+                    ui.state.network_cursor = 5 if len(ui.network_value_rows) >= 5 else 1
+                    ui.set_busy(False)
+
+                elif action.kind == "connect_wifi_new":
+                    ui.set_busy(True, "network")
+                    ok, error = _run_wifi_network_helper("connect-new", action.ssid or "", str(action.value or ""))
+                    sleep(0.5)
+                    ui.apply_runner_snapshot(rnbo.discover())
+                    if ok:
+                        ui.clear_network_error()
+                    else:
+                        ui.set_network_error(error)
+                    ui.state.ui_mode = "NETWORK"
+                    ui.state.network_cursor = 5 if len(ui.network_value_rows) >= 5 else 1
+                    ui.set_busy(False)
+
+                elif action.kind == "rescan_wifi":
+                    ui.set_busy(True, "network")
+                    ok, error = _run_wifi_network_helper("rescan")
+                    ui.apply_runner_snapshot(rnbo.discover())
+                    if ok:
+                        ui.clear_network_error()
+                    else:
+                        ui.set_network_error(error)
+                    ui.state.ui_mode = "WIFI_NETWORKS" if ui.network_wifi_available else "NETWORK"
+                    ui.state.wifi_network_cursor = ui.wifi_network_initial_cursor()
                     ui.set_busy(False)
 
                 elif action.kind == "save_state":

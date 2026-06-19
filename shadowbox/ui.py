@@ -60,6 +60,7 @@ NAME_EDITOR_DELETE = "DELETE CHAR"
 NAME_EDITOR_CLEAR = "CLEAR NAME"
 NAME_EDITOR_SAVE = "SAVE"
 NAME_EDITOR_CANCEL = "CANCEL"
+WIFI_PASSWORD_EDIT = "EDIT"
 NAME_OVERWRITE_CONFIRM_ITEMS = ["..", "OVERWRITE"]
 NAME_OVERWRITE_CONFIRM_BUTTONS = ["CANCEL", "OVERWRITE"]
 NAME_ERROR_DISMISS = "EDIT NAME"
@@ -70,11 +71,12 @@ PRESET_ACTION_REMOVE = "REMOVE"
 SET_MENU_CURRENT = "CURRENT SET"
 SET_MENU_LOAD = "LOAD SET"
 NAME_EDITOR_MAX_LEN = 24
+WIFI_PASSWORD_MAX_LEN = 63
 NAME_EDITOR_CHAR_OPTIONS: list[tuple[str, str]] = [
     ("SPACE", " "),
     ("-", "-"),
     ("_", "_"),
-] + [(char, char) for char in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"]
+] + [(char, char) for char in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.!@#$%&*+=?/,:;~"]
 NAME_TOUCH_LETTER_ROWS: list[list[str]] = [
     list("qwertyuiop"),
     list("asdfghjkl"),
@@ -82,7 +84,8 @@ NAME_TOUCH_LETTER_ROWS: list[list[str]] = [
 ]
 NAME_TOUCH_NUMBER_ROWS: list[list[str]] = [
     list("1234567890"),
-    list("-_."),
+    list("-_.!@#"),
+    list("$%&*+=?"),
 ]
 NAME_TOUCH_KEY_VALUES: list[str] = list(dict.fromkeys([char for row in NAME_TOUCH_LETTER_ROWS + NAME_TOUCH_NUMBER_ROWS for char in row]))
 NAME_INLINE_DELETE_LABEL = "DEL"
@@ -96,6 +99,7 @@ class UIAction:
     path: Optional[str] = None
     value: Any = None
     device_name: Optional[str] = None
+    ssid: Optional[str] = None
 
 
 @dataclass
@@ -132,6 +136,7 @@ class UIState:
     graph_startup_set_cursor: int = 0
     system_cursor: int = 0
     network_cursor: int = 0
+    wifi_network_cursor: int = 0
     system_audio_cursor: int = 0
     maint_cursor: int = 0
     audio_device_cursor: int = 0
@@ -161,6 +166,7 @@ class UIState:
     name_editor_path: str = ""
     name_editor_draft: str = ""
     name_editor_target_name: str = ""
+    pending_wifi_ssid: str = ""
     name_editor_cursor: int = 1
     name_inline_cursor: int = 0
     name_inline_edit_mode: bool = False
@@ -494,6 +500,7 @@ class ShadowboxUI:
         self.state.graph_startup_set_cursor = 1 if self.available_set_names else 0
         self.state.system_cursor = 1
         self.state.network_cursor = 1 if self.network_value_rows else 0
+        self.state.wifi_network_cursor = self.wifi_network_initial_cursor()
         self.state.system_audio_cursor = 1
         self.state.maint_cursor = 1 if self.maint_menu_items else 0
         self.state.audio_device_cursor = 1 if self.audio_options else 0
@@ -520,6 +527,7 @@ class ShadowboxUI:
         self.state.name_editor_path = ""
         self.state.name_editor_draft = ""
         self.state.name_editor_target_name = ""
+        self.state.pending_wifi_ssid = ""
         self.state.name_editor_cursor = 1
         self.state.name_inline_cursor = 0
         self.state.name_inline_edit_mode = False
@@ -591,6 +599,7 @@ class ShadowboxUI:
             self.state.network_cursor if self.state.network_cursor > 0 else 1,
             len(self.network_value_rows),
         )
+        self.state.wifi_network_cursor = clamp_index(self.state.wifi_network_cursor, len(self.wifi_network_rows))
         self.state.routing_port_cursor = clamp_index(self.state.routing_port_cursor, len(self.active_routing_ports) + 1)
         self.state.routing_target_cursor = clamp_index(self.state.routing_target_cursor, len(self.routing_assignment_rows))
         self.state.routing_add_cursor = clamp_index(self.state.routing_add_cursor, len(self.available_routing_add_targets) + 1)
@@ -1083,7 +1092,7 @@ class ShadowboxUI:
             ValueRow("state", self.network_setup_state_text, current=self.network_direct_setup_active or bool(self.state.network_error_message)),
             ValueRow("wired", "LINK" if self.network_wired_link else "DOWN", current=self.network_direct_setup_ready),
             ValueRow("eth ip", self.network_wired_ip_address),
-            ValueRow("wifi", "ON" if self.network_wifi_connected else "DOWN"),
+            ValueRow("wifi", self.network_wifi_action_label, current=self.network_wifi_connected),
             ValueRow("wifi ip", self.network_wifi_ip_address),
         ]
         if self.state.network_error_message:
@@ -1097,6 +1106,30 @@ class ShadowboxUI:
             ]
         )
         return rows
+
+    @property
+    def wifi_network_rows(self) -> list[MenuRow]:
+        rows = [MenuRow("..")]
+        networks = self.available_wifi_networks
+        if not self.network_wifi_available:
+            rows.append(MenuRow("wifi unavailable"))
+            return rows
+        if not networks:
+            rows.append(MenuRow("no networks"))
+        else:
+            current_ssid = self.network_wifi_ssid
+            for item in networks:
+                ssid = str(item.get("ssid", "") or "").strip()
+                if not ssid:
+                    continue
+                rows.append(MenuRow(ssid, current=bool(item.get("connected")) or ssid == current_ssid))
+            if len(rows) == 1:
+                rows.append(MenuRow("no networks"))
+        rows.append(MenuRow("RESCAN", action=True))
+        return rows
+
+    def wifi_network_initial_cursor(self) -> int:
+        return 1 if self.available_wifi_networks else max(0, len(self.wifi_network_rows) - 1)
 
     def suggested_set_save_name(self) -> str:
         base_name = self.current_set_name
@@ -1148,8 +1181,24 @@ class ShadowboxUI:
         text = re.sub(r"\s+", " ", str(value or "")).strip()
         return text[:NAME_EDITOR_MAX_LEN]
 
+    def _editor_draft_limit(self) -> int:
+        return WIFI_PASSWORD_MAX_LEN if self.state.name_editor_context == "wifi_password" else NAME_EDITOR_MAX_LEN
+
+    def normalize_editor_draft(self, value: str) -> str:
+        if self.state.name_editor_context == "wifi_password":
+            return str(value or "")[:WIFI_PASSWORD_MAX_LEN]
+        return self.normalize_name_draft(value)
+
     @property
     def name_editor_actions(self) -> list[str]:
+        if self.state.name_editor_context == "wifi_password":
+            return [
+                self.name_editor_confirm_label,
+                WIFI_PASSWORD_EDIT,
+                NAME_EDITOR_CLEAR,
+                NAME_EDITOR_DELETE,
+                NAME_EDITOR_CANCEL,
+            ]
         return [
             self.name_editor_confirm_label,
             NAME_EDITOR_GENERATE,
@@ -1163,7 +1212,8 @@ class ShadowboxUI:
     @property
     def name_editor_items(self) -> list[str]:
         draft = self.state.name_editor_draft if self.state.name_editor_draft else "(empty)"
-        return [f"NAME: {draft}"] + self.name_editor_actions
+        label = "PASS" if self.state.name_editor_context == "wifi_password" else "NAME"
+        return [f"{label}: {draft}"] + self.name_editor_actions
 
     @property
     def name_editor_title(self) -> str:
@@ -1179,19 +1229,23 @@ class ShadowboxUI:
             return "SAVE PRESET"
         if self.state.name_editor_context == "rename_preset":
             return "RENAME PRESET"
+        if self.state.name_editor_context == "wifi_password":
+            return "WIFI PASSWORD"
         return "NAME"
 
     @property
     def name_editor_confirm_label(self) -> str:
         if self.state.name_editor_context in {"rename_set", "rename_graph_preset", "rename_preset"}:
             return "RENAME"
+        if self.state.name_editor_context == "wifi_password":
+            return "CONNECT"
         return NAME_EDITOR_SAVE
 
     def _begin_name_editor(self, context: str, path: str, initial_draft: str, return_mode: str) -> None:
         self.state.name_editor_context = context
         self.state.name_editor_path = str(path or "")
         self.state.name_editor_return_mode = return_mode
-        self.state.name_editor_draft = self.normalize_name_draft(initial_draft)
+        self.state.name_editor_draft = self.normalize_editor_draft(initial_draft)
         self.state.name_editor_target_name = ""
         self.state.name_editor_cursor = 1
         self.state.name_inline_cursor = max(0, len(self.state.name_editor_draft) - 1)
@@ -1208,6 +1262,9 @@ class ShadowboxUI:
         self.state.name_editor_target_name = self.normalize_name_draft(current_name)
 
     def _cancel_name_editor(self) -> None:
+        if self.state.name_editor_context == "wifi_password":
+            self.state.name_editor_draft = ""
+            self.state.pending_wifi_ssid = ""
         self.state.ui_mode = self.state.name_editor_return_mode or "GRAPH_MENU"
         self.state.name_editor_cursor = 1
         self.state.name_inline_edit_mode = False
@@ -1273,17 +1330,17 @@ class ShadowboxUI:
             elif pos > 0:
                 draft = draft[: pos - 1] + draft[pos:]
                 self.state.name_inline_cursor = pos - 1
-            self.state.name_editor_draft = self.normalize_name_draft(draft)
+            self.state.name_editor_draft = self.normalize_editor_draft(draft)
             self.state.name_inline_edit_mode = False
             return
         char = NAME_EDITOR_CHAR_OPTIONS[self.state.name_inline_preview_index][1]
         if pos < len(draft):
             draft = draft[:pos] + char + draft[pos + 1 :]
         else:
-            if len(draft) >= NAME_EDITOR_MAX_LEN:
+            if len(draft) >= self._editor_draft_limit():
                 return
             draft = draft + char
-        self.state.name_editor_draft = self.normalize_name_draft(draft)
+        self.state.name_editor_draft = self.normalize_editor_draft(draft)
         self.state.name_inline_cursor = min(len(self.state.name_editor_draft), pos + 1)
         self.state.name_inline_edit_mode = False
 
@@ -1297,10 +1354,10 @@ class ShadowboxUI:
         draft = self.state.name_editor_draft
         if not draft and str(text).isspace():
             return
-        remaining = max(0, NAME_EDITOR_MAX_LEN - len(draft))
+        remaining = max(0, self._editor_draft_limit() - len(draft))
         if remaining <= 0:
             return
-        self.state.name_editor_draft = re.sub(r"\s+", " ", draft + str(text)[:remaining])[:NAME_EDITOR_MAX_LEN]
+        self.state.name_editor_draft = self.normalize_editor_draft(draft + str(text)[:remaining])
         self.state.name_inline_cursor = max(0, len(self.state.name_editor_draft) - 1)
 
     def _handle_name_keyboard_key(self, key_index: int | None) -> None:
@@ -1391,6 +1448,11 @@ class ShadowboxUI:
         if self.state.name_editor_context == "save_set" and self.state.name_editor_path:
             self.state.name_editor_draft = value
             self.queue_action(UIAction(kind="save_set", path=self.state.name_editor_path, value=value))
+        elif self.state.name_editor_context == "wifi_password" and self.state.pending_wifi_ssid:
+            self.queue_action(UIAction(kind="connect_wifi_new", ssid=self.state.pending_wifi_ssid, value=value))
+            self.state.ui_mode = "WIFI_NETWORKS"
+            self.state.name_editor_draft = ""
+            self.state.pending_wifi_ssid = ""
         elif self.state.name_editor_context == "rename_set" and self.state.name_editor_path:
             self.state.name_editor_draft = value
             self.queue_action(UIAction(kind="rename_set", path=self.state.name_editor_path, value=value))
@@ -1416,9 +1478,9 @@ class ShadowboxUI:
             self.queue_action(UIAction(kind="rename_preset", path=self.state.name_editor_path, value=value))
 
     def _submit_name_editor(self) -> None:
-        value = self.normalize_name_draft(self.state.name_editor_draft)
+        value = self.normalize_editor_draft(self.state.name_editor_draft)
         if not value:
-            self._show_name_error("ENTER NAME")
+            self._show_name_error("ENTER PASSWORD" if self.state.name_editor_context == "wifi_password" else "ENTER NAME")
             return
         if self.state.name_editor_context in {"save_set", "save_graph_preset", "save_preset"} and self._name_exists(value):
             self.state.name_editor_draft = value
@@ -1759,8 +1821,90 @@ class ShadowboxUI:
         return bool(self.network_info.get("wifi_connected"))
 
     @property
+    def network_wifi_available(self) -> bool:
+        return bool(self.network_info.get("wifi_name"))
+
+    @property
+    def network_wifi_ssid(self) -> str:
+        return str(self.network_info.get("wifi_ssid", "") or "").strip()
+
+    @property
+    def network_wifi_action_label(self) -> str:
+        if not self.network_wifi_available:
+            return "N/A"
+        if self.network_wifi_ssid:
+            return self.network_wifi_ssid
+        return "ON" if self.network_wifi_connected else "CHOOSE"
+
+    @property
     def network_wifi_ip_address(self) -> str:
         return str(self.network_info.get("wifi_ipv4", "") or "").strip() or "-"
+
+    @property
+    def available_wifi_networks(self) -> list[dict]:
+        raw = self.network_info.get("wifi_networks", [])
+        if not isinstance(raw, list):
+            return []
+        networks: list[dict] = []
+        seen: set[str] = set()
+        for item in raw:
+            if isinstance(item, dict):
+                connection_id = str(item.get("id", "") or "").strip()
+                ssid = str(item.get("ssid", "") or "").strip()
+                saved = bool(item.get("saved", True))
+                connected = bool(item.get("connected"))
+                signal = item.get("signal", "")
+                security = item.get("security", "")
+            else:
+                connection_id = ""
+                ssid = str(item or "").strip()
+                saved = True
+                connected = False
+                signal = ""
+                security = ""
+            if not ssid or ssid in seen:
+                continue
+            seen.add(ssid)
+            networks.append(
+                {
+                    "id": connection_id or ssid,
+                    "ssid": ssid,
+                    "saved": saved,
+                    "connected": connected,
+                    "signal": signal,
+                    "security": security,
+                }
+            )
+        return networks
+
+    @property
+    def selected_wifi_network_connection_id(self) -> str:
+        idx = self.state.wifi_network_cursor - 1
+        if 0 <= idx < len(self.available_wifi_networks):
+            network = self.available_wifi_networks[idx]
+            return str(network.get("id", "") or network.get("ssid", "") or "").strip()
+        return ""
+
+    @property
+    def selected_wifi_network(self) -> dict:
+        idx = self.state.wifi_network_cursor - 1
+        if 0 <= idx < len(self.available_wifi_networks):
+            return self.available_wifi_networks[idx]
+        return {}
+
+    @staticmethod
+    def _wifi_security_requires_password(security: object) -> bool:
+        text = str(security or "").strip()
+        return bool(text and text != "--")
+
+    def _begin_wifi_password_editor(self, ssid: str) -> None:
+        self.state.pending_wifi_ssid = str(ssid or "").strip()
+        self._begin_name_editor(
+            context="wifi_password",
+            path="",
+            initial_draft="",
+            return_mode="WIFI_NETWORKS",
+        )
 
     @property
     def network_direct_setup_ready(self) -> bool:
@@ -2118,6 +2262,7 @@ class ShadowboxUI:
             "GRAPH_PRESET_REMOVE_PICKER",
             "GRAPH_STARTUP",
             "GRAPH_STARTUP_SET_LIST",
+            "WIFI_NETWORKS",
             "NAME_EDITOR",
             "NAME_INLINE_EDITOR",
             "NAME_OVERWRITE_CONFIRM",
@@ -2556,6 +2701,9 @@ class ShadowboxUI:
         if mode == "NETWORK":
             scroll_cursor("network_cursor", len(self.network_value_rows))
             return
+        if mode == "WIFI_NETWORKS":
+            scroll_cursor("wifi_network_cursor", len(self.wifi_network_rows), first_index=0)
+            return
         if mode == "MAINT":
             scroll_cursor("maint_cursor", len(self.maint_menu_items))
             return
@@ -2721,7 +2869,11 @@ class ShadowboxUI:
         elif mode == "SYSTEM_MENU":
             handled = self._set_touch_cursor("system_cursor", row_index, len(self.system_menu_items) + 1)
         elif mode == "NETWORK":
-            handled = self._set_touch_cursor("network_cursor", row_index + 1, len(self.network_value_rows))
+            if self.network_value_rows:
+                self.state.network_cursor = max(1, min(row_index, len(self.network_value_rows)))
+                handled = True
+        elif mode == "WIFI_NETWORKS":
+            handled = self._set_touch_cursor("wifi_network_cursor", row_index, len(self.wifi_network_rows))
         elif mode == "SYSTEM_AUDIO":
             handled = self._set_touch_cursor("system_audio_cursor", row_index, len(SYSTEM_AUDIO_ITEMS) + 1)
         elif mode == "MAINT":
@@ -2768,7 +2920,8 @@ class ShadowboxUI:
             if self.state.name_inline_edit_mode:
                 self.state.name_inline_preview_index = self._cycle(self.state.name_inline_preview_index, self.inline_name_option_count, step)
             else:
-                max_pos = min(len(self.state.name_editor_draft), NAME_EDITOR_MAX_LEN - 1 if len(self.state.name_editor_draft) >= NAME_EDITOR_MAX_LEN else len(self.state.name_editor_draft))
+                draft_limit = self._editor_draft_limit()
+                max_pos = min(len(self.state.name_editor_draft), draft_limit - 1 if len(self.state.name_editor_draft) >= draft_limit else len(self.state.name_editor_draft))
                 self.state.name_inline_cursor = self._cycle(self.state.name_inline_cursor, max_pos + 1, step)
         elif self.state.ui_mode == "NAME_OVERWRITE_CONFIRM":
             self.state.name_overwrite_cursor = self._cycle(self.state.name_overwrite_cursor, len(self.overwrite_confirm_items), step)
@@ -2824,6 +2977,8 @@ class ShadowboxUI:
             self.state.system_cursor = self._cycle(self.state.system_cursor, len(self.system_menu_items) + 1, step)
         elif self.state.ui_mode == "NETWORK":
             self.state.network_cursor = self._cycle_one_based(self.state.network_cursor, len(self.network_value_rows), step)
+        elif self.state.ui_mode == "WIFI_NETWORKS":
+            self.state.wifi_network_cursor = self._cycle(self.state.wifi_network_cursor, len(self.wifi_network_rows), step)
         elif self.state.ui_mode == "SYSTEM_AUDIO":
             self.state.system_audio_cursor = self._cycle(self.state.system_audio_cursor, len(SYSTEM_AUDIO_ITEMS) + 1, step)
         elif self.state.ui_mode == "MAINT":
@@ -3030,7 +3185,7 @@ class ShadowboxUI:
                     self._regenerate_name_draft()
                 elif choice == NAME_EDITOR_ADD_DATE:
                     self.state.name_editor_draft = self.append_date_token(self.state.name_editor_draft)
-                elif choice == NAME_EDITOR_EDIT:
+                elif choice in {NAME_EDITOR_EDIT, WIFI_PASSWORD_EDIT}:
                     self._begin_inline_name_edit()
                 elif choice == NAME_EDITOR_CLEAR:
                     self.state.name_editor_draft = ""
@@ -3316,11 +3471,36 @@ class ShadowboxUI:
                     self.state.ui_mode = choice
 
         elif self.state.ui_mode == "NETWORK":
-            if self.state.network_cursor == 1 and self.network_direct_setup_available:
+            selected_row = self.network_value_rows[self.state.network_cursor - 1] if 0 < self.state.network_cursor <= len(self.network_value_rows) else None
+            if selected_row and selected_row.label == "setup" and self.network_direct_setup_available:
                 if self.network_direct_setup_active:
                     self.queue_action(UIAction(kind="disable_direct_ethernet"))
                 else:
                     self.queue_action(UIAction(kind="enable_direct_ethernet"))
+            elif selected_row and selected_row.label == "wifi" and self.network_wifi_available:
+                self.state.ui_mode = "WIFI_NETWORKS"
+                self.state.wifi_network_cursor = self.wifi_network_initial_cursor()
+
+        elif self.state.ui_mode == "WIFI_NETWORKS":
+            if self.state.wifi_network_cursor == 0:
+                self.state.ui_mode = "NETWORK"
+            elif (
+                self.network_wifi_available
+                and self.state.wifi_network_cursor == len(self.wifi_network_rows) - 1
+                and self.wifi_network_rows[self.state.wifi_network_cursor].label == "RESCAN"
+            ):
+                self.queue_action(UIAction(kind="rescan_wifi"))
+            else:
+                network = self.selected_wifi_network
+                ssid = str(network.get("ssid", "") or "").strip()
+                if network.get("saved"):
+                    connection_id = str(network.get("id", "") or ssid).strip()
+                    if connection_id:
+                        self.queue_action(UIAction(kind="connect_wifi", ssid=connection_id))
+                elif ssid and self._wifi_security_requires_password(network.get("security", "")):
+                    self._begin_wifi_password_editor(ssid)
+                elif ssid:
+                    self.queue_action(UIAction(kind="connect_wifi_new", ssid=ssid, value=""))
 
         elif self.state.ui_mode == "SYSTEM_AUDIO":
             if self.state.system_audio_cursor == 0:
@@ -3487,6 +3667,8 @@ class ShadowboxUI:
             self.state.ui_mode = "NAME_EDITOR"
         elif self.state.ui_mode == "NAME_EDITOR":
             self._cancel_name_editor()
+        elif self.state.ui_mode == "WIFI_NETWORKS":
+            self.state.ui_mode = "NETWORK"
         elif self.state.ui_mode == "GRAPH_STATUS":
             self.state.ui_mode = "GRAPH_SET_LIST"
         elif self.state.ui_mode == "GRAPH_STARTUP":

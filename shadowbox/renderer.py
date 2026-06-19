@@ -3992,6 +3992,7 @@ class ShadowboxRenderer:
             "SYSTEM_AUDIO_BUFFER": "BUFFER",
             "STATUS": "STATUS",
             "NETWORK": "NETWORK",
+            "WIFI_NETWORKS": "WIFI NETWORKS",
             "ABOUT": "ABOUT",
             "BRICK_PANEL": "BRICK PANEL",
             "MAINT": "MAINT",
@@ -4127,6 +4128,8 @@ class ShadowboxRenderer:
             self.draw_system_audio_buffer(ui)
         elif state.ui_mode == "NETWORK":
             self.draw_network(ui)
+        elif state.ui_mode == "WIFI_NETWORKS":
+            self.draw_menu_rows(ui.wifi_network_rows, state.wifi_network_cursor)
         elif state.ui_mode == "ABOUT":
             self.draw_about()
         elif state.ui_mode == "BRICK_PANEL":

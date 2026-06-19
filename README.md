@@ -87,6 +87,7 @@ https://www.adafruit.com/product/4484
 - Set load/save from published Runner capabilities
 - Set startup configuration through published Runner controls
 - System status display
+- WiFi network selection with password entry for first-time connections
 - Direct Ethernet rescue setup with a fixed fallback IP on `eth0`
 - Audio device switching
 - JACK restart
@@ -96,7 +97,8 @@ Shadowbox treats the published live OSCQuery runtime tree as the source of truth
 It does not maintain its own set model or restore set/session state from local persistence.
 Set load/save/startup behavior is executed only through Runner-published set and startup controls.
 A curated `NEW SET` action is acceptable when it maps directly to the published set load path using a verified backend template.
-The `SYSTEM -> NETWORK` screen also includes a local direct-Ethernet setup action that can assign a predictable fallback IP for headless rescue connections.
+The `SYSTEM -> NETWORK` screen also includes WiFi network selection and a local direct-Ethernet setup action that can assign a predictable fallback IP for headless rescue connections.
+The WiFi chooser uses NetworkManager's `nmcli` when available, connects saved profiles directly, opens an on-device password editor for first-time secured networks, and includes a `RESCAN` row for intentionally refreshing the access-point list.
 
 ---
 
@@ -499,7 +501,7 @@ The installer:
 - creates the virtual environment as your current user
 - upgrades `pip` and installs `requirements.txt`
 - persists the current `SHADOWBOX_*` environment variables to `/etc/default/shadowbox`
-- configures passwordless `sudo` for the direct Ethernet helper script
+- configures passwordless `sudo` for the direct Ethernet and WiFi network helper scripts
 - generates a systemd unit for the current repository path and current user
 - reloads systemd, enables `shadowbox`, and restarts the service
 
@@ -849,7 +851,7 @@ Why rerun `./install.sh` after pulling:
 - it refreshes system packages if new ones were added
 - it updates the Python virtual environment
 - it rewrites the systemd unit for the current checkout path and user
-- it refreshes the direct Ethernet helper sudoers entry
+- it refreshes the direct Ethernet and WiFi network helper sudoers entries
 - it preserves existing `/etc/default/shadowbox` settings and only updates
   `SHADOWBOX_*` variables you exported before running it
 - it restarts the `shadowbox` service

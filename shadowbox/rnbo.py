@@ -14,6 +14,7 @@ import socket
 import subprocess
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional
 
 from pythonosc.udp_client import SimpleUDPClient
@@ -25,6 +26,7 @@ OSCQUERY_URL = "http://127.0.0.1:5678"
 DIRECT_ETHERNET_IFACE = os.environ.get("SHADOWBOX_DIRECT_ETHERNET_IFACE", "eth0").strip() or "eth0"
 DIRECT_ETHERNET_CIDR = os.environ.get("SHADOWBOX_DIRECT_ETHERNET_CIDR", "10.42.0.1/24").strip() or "10.42.0.1/24"
 DIRECT_ETHERNET_IP = DIRECT_ETHERNET_CIDR.split("/", 1)[0].strip()
+WIFI_NETWORK_HELPER_DEFAULT = str(Path(__file__).resolve().parent.parent / "tools" / "wifi_network.sh")
 
 
 @dataclass
@@ -188,6 +190,146 @@ def _interface_has_carrier(name: str) -> bool | None:
     return None
 
 
+def _split_nmcli_terse(line: str) -> list[str]:
+    fields: list[str] = []
+    current: list[str] = []
+    escaped = False
+    for char in line:
+        if escaped:
+            current.append(char)
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == ":":
+            fields.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    if escaped:
+        current.append("\\")
+    fields.append("".join(current))
+    return fields
+
+
+def _nmcli_lines(args: list[str], timeout: float = 3.0) -> list[str]:
+    try:
+        result = subprocess.run(
+            ["nmcli", "--terse", "--escape", "yes"] + args,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=timeout,
+        )
+    except Exception:
+        return []
+    if result.returncode != 0:
+        return []
+    return [line for line in result.stdout.splitlines() if line.strip()]
+
+
+def _wifi_network_helper_path() -> str:
+    return os.environ.get("SHADOWBOX_WIFI_NETWORK_HELPER", WIFI_NETWORK_HELPER_DEFAULT).strip()
+
+
+def _wifi_scan_lines() -> list[str]:
+    helper_path = _wifi_network_helper_path()
+    if helper_path and os.path.exists(helper_path):
+        try:
+            result = subprocess.run(
+                ["sudo", "-n", helper_path, "list"],
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=2.0,
+            )
+        except Exception:
+            result = None
+        if result is not None and result.returncode == 0:
+            return [line for line in result.stdout.splitlines() if line.strip()]
+    return _nmcli_lines(["--fields", "IN-USE,SSID,SIGNAL,SECURITY", "device", "wifi", "list", "--rescan", "yes"], timeout=5.0)
+
+
+def _nmcli_connection_ssid(connection_id: str) -> str:
+    if not connection_id:
+        return ""
+    try:
+        result = subprocess.run(
+            ["nmcli", "--get-values", "802-11-wireless.ssid", "connection", "show", connection_id],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=2.0,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
+def _discover_wifi_networks() -> list[dict[str, Any]]:
+    saved_by_ssid: dict[str, str] = {}
+    saved_connections: list[dict[str, Any]] = []
+    for line in _nmcli_lines(["--fields", "NAME,TYPE,ACTIVE", "connection", "show"], timeout=2.0):
+        fields = _split_nmcli_terse(line)
+        if len(fields) >= 2 and fields[1] == "802-11-wireless" and fields[0].strip():
+            connection_id = fields[0].strip()
+            ssid = _nmcli_connection_ssid(connection_id) or connection_id
+            active = len(fields) >= 3 and fields[2].strip().lower() == "yes"
+            saved_by_ssid[ssid] = connection_id
+            saved_connections.append({"id": connection_id, "ssid": ssid, "active": active})
+
+    networks_by_ssid: dict[str, dict[str, Any]] = {}
+    lines = _wifi_scan_lines()
+    for line in lines:
+        fields = _split_nmcli_terse(line)
+        if len(fields) < 2:
+            continue
+        in_use = fields[0].strip() == "*"
+        ssid = fields[1].strip()
+        if not ssid:
+            continue
+        signal = fields[2].strip() if len(fields) > 2 else ""
+        security = fields[3].strip() if len(fields) > 3 else ""
+        connection_id = saved_by_ssid.get(ssid, "")
+        entry = networks_by_ssid.setdefault(
+            ssid,
+            {"id": connection_id, "ssid": ssid, "saved": bool(connection_id), "connected": False, "signal": signal, "security": security},
+        )
+        entry["connected"] = bool(entry.get("connected")) or in_use
+        if connection_id:
+            entry["id"] = connection_id
+            entry["saved"] = True
+        if signal and not entry.get("signal"):
+            entry["signal"] = signal
+        if security and not entry.get("security"):
+            entry["security"] = security
+
+    for item in saved_connections:
+        ssid = str(item.get("ssid", "") or "").strip()
+        if ssid:
+            networks_by_ssid.setdefault(
+                ssid,
+                {
+                    "id": str(item.get("id", "") or ""),
+                    "ssid": ssid,
+                    "saved": True,
+                    "connected": bool(item.get("active")),
+                    "signal": "",
+                    "security": "",
+                },
+            )
+
+    return sorted(
+        networks_by_ssid.values(),
+        key=lambda item: (
+            not bool(item.get("connected")),
+            not bool(item.get("saved")),
+            str(item.get("ssid", "")).lower(),
+        ),
+    )
+
+
 def _discover_ipv4_addresses() -> dict[str, list[str]]:
     try:
         result = subprocess.run(
@@ -270,6 +412,12 @@ def discover_host_network() -> dict[str, Any]:
     wifi_ipv4 = _first_non_link_local(wifi_ipv4_list) or _first_link_local(wifi_ipv4_list)
     primary_ipv4 = wifi_ipv4 or wired_ipv4
     wired_link_local = _first_link_local(wired_ipv4_list)
+    wifi_networks = _discover_wifi_networks() if wifi_name else []
+    wifi_ssid = ""
+    for item in wifi_networks:
+        if item.get("connected"):
+            wifi_ssid = str(item.get("ssid", "") or "").strip()
+            break
     direct_setup_active = DIRECT_ETHERNET_IP in {str(item).strip() for item in wired_ipv4_list if str(item).strip()}
     direct_setup_ready = bool(
         (wired_link and direct_setup_active)
@@ -294,7 +442,8 @@ def discover_host_network() -> dict[str, Any]:
         "wired_link_local": wired_link_local,
         "wifi_name": wifi_name,
         "wifi_connected": wifi_connected,
-        "wifi_ssid": "",
+        "wifi_ssid": wifi_ssid,
+        "wifi_networks": wifi_networks,
         "wifi_ipv4": wifi_ipv4,
         "primary_ipv4": primary_ipv4,
         "direct_setup_available": bool(wired_name),
@@ -916,6 +1065,7 @@ class RNBOClient:
                         "wifi_name": "",
                         "wifi_connected": False,
                         "wifi_ssid": "",
+                        "wifi_networks": [],
                         "wifi_ipv4": "",
                         "primary_ipv4": "",
                         "direct_setup_available": False,
