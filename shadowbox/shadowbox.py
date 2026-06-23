@@ -7,7 +7,7 @@ import re
 import subprocess
 from pathlib import Path
 from queue import Empty, SimpleQueue
-from threading import Thread
+from threading import Event, Thread
 from time import monotonic, sleep
 
 from pythonosc.dispatcher import Dispatcher
@@ -17,6 +17,7 @@ from shadowbox.display import load_display_from_env
 from shadowbox.encoder import EncoderInput
 from shadowbox.midi_mappings import apply_midi_profile_to_instance, save_instance_midi_profile
 from shadowbox.rnbo import RNBOClient
+from shadowbox.software_update import read_software_update_status, start_software_update_install
 from shadowbox.ui import ShadowboxUI
 from shadowbox.renderer import create_renderer, should_enable_touch_layout
 
@@ -73,6 +74,13 @@ def _env_text(name: str, default: str) -> str:
         return default
     text = str(value).strip()
     return text or default
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None or str(value).strip() == "":
+        return default
+    return str(value).strip().lower() not in {"0", "false", "no", "off"}
 
 
 DIM_TIMEOUT = max(0.0, _env_float("SHADOWBOX_DIM_TIMEOUT", DIM_TIMEOUT))
@@ -600,6 +608,12 @@ def main():
 
     # Always start clean at TOP level
     ui.reset_to_top()
+    ui.set_software_update_status(read_software_update_status(fetch=False).to_dict())
+    if _env_bool("SHADOWBOX_UPDATE_CHECK_ON_STARTUP", True):
+        Thread(
+            target=lambda: ui.set_software_update_status(read_software_update_status(fetch=True).to_dict()),
+            daemon=True,
+        ).start()
 
     last_frame = 0.0
     last_refresh = monotonic()
@@ -608,6 +622,7 @@ def main():
     is_dimmed = False
     is_sleeping = False
     dummy_audio_fallback_attempted = False
+    update_cancel_event: Event | None = None
 
     def mark_activity() -> None:
         nonlocal last_activity, is_dimmed, is_sleeping
@@ -961,6 +976,69 @@ def main():
                     ui.state.ui_mode = "WIFI_NETWORKS" if ui.network_wifi_available else "NETWORK"
                     ui.state.wifi_network_cursor = ui.wifi_network_initial_cursor()
                     ui.set_busy(False)
+
+                elif action.kind == "check_software_update":
+                    ui.set_busy(True, "update")
+                    ui.set_software_update_status(read_software_update_status(fetch=True).to_dict())
+                    ui.state.ui_mode = "SOFTWARE_UPDATE"
+                    ui.set_busy(False)
+
+                elif action.kind == "apply_software_update":
+                    if update_cancel_event is not None and not update_cancel_event.is_set():
+                        continue
+                    update_cancel_event = Event()
+                    ui.set_busy(True, "update")
+                    ui.set_software_update_status(
+                        {
+                            "state": "applying",
+                            "message": "starting",
+                            "available": False,
+                        }
+                    )
+                    ui.state.ui_mode = "SOFTWARE_UPDATE"
+
+                    def apply_update_worker(password: str, cancel_event: Event) -> None:
+                        nonlocal update_cancel_event
+
+                        def set_progress(message: str) -> None:
+                            ui.set_software_update_status(
+                                {
+                                    "state": "applying",
+                                    "message": message,
+                                    "available": False,
+                                }
+                            )
+                            ui.state.ui_mode = "SOFTWARE_UPDATE"
+
+                        ui.set_software_update_status(
+                            start_software_update_install(
+                                password,
+                                status_callback=set_progress,
+                                cancel_event=cancel_event,
+                            ).to_dict()
+                        )
+                        ui.state.ui_mode = "SOFTWARE_UPDATE"
+                        ui.set_busy(False)
+                        if update_cancel_event is cancel_event:
+                            update_cancel_event = None
+
+                    Thread(
+                        target=apply_update_worker,
+                        args=(str(action.value or ""), update_cancel_event),
+                        daemon=True,
+                    ).start()
+
+                elif action.kind == "cancel_software_update":
+                    if update_cancel_event is not None:
+                        update_cancel_event.set()
+                        ui.set_software_update_status(
+                            {
+                                "state": "applying",
+                                "message": "canceling",
+                                "available": False,
+                            }
+                        )
+                    ui.state.ui_mode = "SOFTWARE_UPDATE"
 
                 elif action.kind == "save_state":
                     ui.save_state()

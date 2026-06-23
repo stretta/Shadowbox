@@ -3500,6 +3500,9 @@ class ShadowboxRenderer:
     def draw_network(self, ui) -> None:
         self.draw_selectable_value_rows(ui.network_value_rows, ui.state.network_cursor)
 
+    def draw_software_update(self, ui) -> None:
+        self.draw_menu_rows(ui.software_update_rows, ui.state.software_update_cursor)
+
     def _name_key_index(self, char: str) -> int:
         try:
             return NAME_TOUCH_KEY_VALUES.index(char)
@@ -3993,6 +3996,7 @@ class ShadowboxRenderer:
             "STATUS": "STATUS",
             "NETWORK": "NETWORK",
             "WIFI_NETWORKS": "WIFI NETWORKS",
+            "SOFTWARE_UPDATE": "UPDATE",
             "ABOUT": "ABOUT",
             "BRICK_PANEL": "BRICK PANEL",
             "MAINT": "MAINT",
@@ -4128,6 +4132,8 @@ class ShadowboxRenderer:
             self.draw_system_audio_buffer(ui)
         elif state.ui_mode == "NETWORK":
             self.draw_network(ui)
+        elif state.ui_mode == "SOFTWARE_UPDATE":
+            self.draw_software_update(ui)
         elif state.ui_mode == "WIFI_NETWORKS":
             self.draw_menu_rows(ui.wifi_network_rows, state.wifi_network_cursor)
         elif state.ui_mode == "ABOUT":

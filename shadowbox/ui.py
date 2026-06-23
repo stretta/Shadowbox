@@ -139,6 +139,7 @@ class UIState:
     wifi_network_cursor: int = 0
     system_audio_cursor: int = 0
     maint_cursor: int = 0
+    software_update_cursor: int = 0
     audio_device_cursor: int = 0
     sample_rate_cursor: int = 0
     buffer_size_cursor: int = 0
@@ -178,6 +179,7 @@ class UIState:
     network_error_message: str = ""
     status_message: str = ""
     status_frames: int = 0
+    software_update: dict = field(default_factory=dict)
 
     busy: bool = False
     busy_reason: str = ""
@@ -503,6 +505,7 @@ class ShadowboxUI:
         self.state.wifi_network_cursor = self.wifi_network_initial_cursor()
         self.state.system_audio_cursor = 1
         self.state.maint_cursor = 1 if self.maint_menu_items else 0
+        self.state.software_update_cursor = self.software_update_check_cursor
         self.state.audio_device_cursor = 1 if self.audio_options else 0
         self.state.sample_rate_cursor = 1 if self.sample_rate_options else 0
         self.state.buffer_size_cursor = 1 if self.buffer_size_options else 0
@@ -554,6 +557,14 @@ class ShadowboxUI:
         if self.state.status_message:
             self.state.activity_ticks += 1
 
+    def set_software_update_status(self, status: dict) -> None:
+        self.state.software_update = dict(status or {})
+        self.state.software_update_cursor = clamp_index(
+            self.state.software_update_cursor if self.state.software_update_cursor > 0 else 1,
+            len(self.software_update_rows),
+        )
+        self.state.activity_ticks += 1
+
     def apply_runner_snapshot(self, snapshot) -> None:
         current_id = str(self.state.active_instance_id)
         current_param_path = self.selected_param.get("path") if self.selected_param else ""
@@ -598,6 +609,10 @@ class ShadowboxUI:
         self.state.network_cursor = clamp_index(
             self.state.network_cursor if self.state.network_cursor > 0 else 1,
             len(self.network_value_rows),
+        )
+        self.state.software_update_cursor = clamp_index(
+            self.state.software_update_cursor if self.state.software_update_cursor > 0 else 1,
+            len(self.software_update_rows),
         )
         self.state.wifi_network_cursor = clamp_index(self.state.wifi_network_cursor, len(self.wifi_network_rows))
         self.state.routing_port_cursor = clamp_index(self.state.routing_port_cursor, len(self.active_routing_ports) + 1)
@@ -781,7 +796,7 @@ class ShadowboxUI:
         items = ["STATUS", "AUDIO"]
         if self.graph_startup_menu_items:
             items.append("STARTUP")
-        items.extend(["NETWORK", "ABOUT"])
+        items.extend(["NETWORK", "UPDATE", "ABOUT"])
         if self.maint_menu_items:
             items.append("MAINT")
         return items
@@ -1108,6 +1123,48 @@ class ShadowboxUI:
         return rows
 
     @property
+    def software_update_value_rows(self) -> list[ValueRow]:
+        update = self.state.software_update
+        state = str(update.get("state", "unknown") or "unknown")
+        message = str(update.get("message", "not checked") or "not checked")
+        rows = [
+            ValueRow("state", message.upper(), current=state in {"available", "error", "dirty", "diverged", "applying"}),
+            ValueRow("branch", update.get("branch", "-")),
+            ValueRow("local", update.get("local", "-"), current=state in {"current", "ahead"}),
+            ValueRow("remote", update.get("remote", "-"), current=state == "available"),
+        ]
+        if update.get("commit_date"):
+            rows.append(ValueRow("date", update.get("commit_date")))
+        return rows
+
+    @property
+    def software_update_menu_items(self) -> list[str]:
+        if str(self.state.software_update.get("state", "")) == "applying":
+            return ["CANCEL UPDATE"]
+        items = ["CHECK"]
+        if bool(self.state.software_update.get("available")):
+            items.append("APPLY UPDATE")
+        return items
+
+    @property
+    def software_update_check_cursor(self) -> int:
+        return len(self.software_update_value_rows) + 1
+
+    @property
+    def software_update_rows(self) -> list[MenuRow]:
+        rows = [MenuRow("..")]
+        for row in self.software_update_value_rows:
+            rows.append(
+                MenuRow(
+                    f"{str(row.label).upper()}: {str(row.value)}",
+                    current=row.current,
+                    emphasis=row.emphasis,
+                )
+            )
+        rows.extend(MenuRow(item, action=True) for item in self.software_update_menu_items)
+        return rows
+
+    @property
     def wifi_network_rows(self) -> list[MenuRow]:
         rows = [MenuRow("..")]
         networks = self.available_wifi_networks
@@ -1182,16 +1239,16 @@ class ShadowboxUI:
         return text[:NAME_EDITOR_MAX_LEN]
 
     def _editor_draft_limit(self) -> int:
-        return WIFI_PASSWORD_MAX_LEN if self.state.name_editor_context == "wifi_password" else NAME_EDITOR_MAX_LEN
+        return WIFI_PASSWORD_MAX_LEN if self.state.name_editor_context in {"wifi_password", "software_update_password"} else NAME_EDITOR_MAX_LEN
 
     def normalize_editor_draft(self, value: str) -> str:
-        if self.state.name_editor_context == "wifi_password":
+        if self.state.name_editor_context in {"wifi_password", "software_update_password"}:
             return str(value or "")[:WIFI_PASSWORD_MAX_LEN]
         return self.normalize_name_draft(value)
 
     @property
     def name_editor_actions(self) -> list[str]:
-        if self.state.name_editor_context == "wifi_password":
+        if self.state.name_editor_context in {"wifi_password", "software_update_password"}:
             return [
                 self.name_editor_confirm_label,
                 WIFI_PASSWORD_EDIT,
@@ -1212,7 +1269,7 @@ class ShadowboxUI:
     @property
     def name_editor_items(self) -> list[str]:
         draft = self.state.name_editor_draft if self.state.name_editor_draft else "(empty)"
-        label = "PASS" if self.state.name_editor_context == "wifi_password" else "NAME"
+        label = "PASS" if self.state.name_editor_context in {"wifi_password", "software_update_password"} else "NAME"
         return [f"{label}: {draft}"] + self.name_editor_actions
 
     @property
@@ -1231,6 +1288,8 @@ class ShadowboxUI:
             return "RENAME PRESET"
         if self.state.name_editor_context == "wifi_password":
             return "WIFI PASSWORD"
+        if self.state.name_editor_context == "software_update_password":
+            return "SUDO PASSWORD"
         return "NAME"
 
     @property
@@ -1239,6 +1298,8 @@ class ShadowboxUI:
             return "RENAME"
         if self.state.name_editor_context == "wifi_password":
             return "CONNECT"
+        if self.state.name_editor_context == "software_update_password":
+            return "UPDATE"
         return NAME_EDITOR_SAVE
 
     def _begin_name_editor(self, context: str, path: str, initial_draft: str, return_mode: str) -> None:
@@ -1262,8 +1323,9 @@ class ShadowboxUI:
         self.state.name_editor_target_name = self.normalize_name_draft(current_name)
 
     def _cancel_name_editor(self) -> None:
-        if self.state.name_editor_context == "wifi_password":
+        if self.state.name_editor_context in {"wifi_password", "software_update_password"}:
             self.state.name_editor_draft = ""
+        if self.state.name_editor_context == "wifi_password":
             self.state.pending_wifi_ssid = ""
         self.state.ui_mode = self.state.name_editor_return_mode or "GRAPH_MENU"
         self.state.name_editor_cursor = 1
@@ -1453,6 +1515,10 @@ class ShadowboxUI:
             self.state.ui_mode = "WIFI_NETWORKS"
             self.state.name_editor_draft = ""
             self.state.pending_wifi_ssid = ""
+        elif self.state.name_editor_context == "software_update_password":
+            self.queue_action(UIAction(kind="apply_software_update", value=value))
+            self.state.ui_mode = "SOFTWARE_UPDATE"
+            self.state.name_editor_draft = ""
         elif self.state.name_editor_context == "rename_set" and self.state.name_editor_path:
             self.state.name_editor_draft = value
             self.queue_action(UIAction(kind="rename_set", path=self.state.name_editor_path, value=value))
@@ -1480,7 +1546,11 @@ class ShadowboxUI:
     def _submit_name_editor(self) -> None:
         value = self.normalize_editor_draft(self.state.name_editor_draft)
         if not value:
-            self._show_name_error("ENTER PASSWORD" if self.state.name_editor_context == "wifi_password" else "ENTER NAME")
+            self._show_name_error(
+                "ENTER PASSWORD"
+                if self.state.name_editor_context in {"wifi_password", "software_update_password"}
+                else "ENTER NAME"
+            )
             return
         if self.state.name_editor_context in {"save_set", "save_graph_preset", "save_preset"} and self._name_exists(value):
             self.state.name_editor_draft = value
@@ -2701,6 +2771,9 @@ class ShadowboxUI:
         if mode == "NETWORK":
             scroll_cursor("network_cursor", len(self.network_value_rows))
             return
+        if mode == "SOFTWARE_UPDATE":
+            scroll_cursor("software_update_cursor", len(self.software_update_rows) - 1, first_index=0)
+            return
         if mode == "WIFI_NETWORKS":
             scroll_cursor("wifi_network_cursor", len(self.wifi_network_rows), first_index=0)
             return
@@ -2872,6 +2945,8 @@ class ShadowboxUI:
             if self.network_value_rows:
                 self.state.network_cursor = max(1, min(row_index, len(self.network_value_rows)))
                 handled = True
+        elif mode == "SOFTWARE_UPDATE":
+            handled = self._set_touch_cursor("software_update_cursor", row_index, len(self.software_update_rows))
         elif mode == "WIFI_NETWORKS":
             handled = self._set_touch_cursor("wifi_network_cursor", row_index, len(self.wifi_network_rows))
         elif mode == "SYSTEM_AUDIO":
@@ -2977,6 +3052,8 @@ class ShadowboxUI:
             self.state.system_cursor = self._cycle(self.state.system_cursor, len(self.system_menu_items) + 1, step)
         elif self.state.ui_mode == "NETWORK":
             self.state.network_cursor = self._cycle_one_based(self.state.network_cursor, len(self.network_value_rows), step)
+        elif self.state.ui_mode == "SOFTWARE_UPDATE":
+            self.state.software_update_cursor = self._cycle(self.state.software_update_cursor, len(self.software_update_rows), step)
         elif self.state.ui_mode == "WIFI_NETWORKS":
             self.state.wifi_network_cursor = self._cycle(self.state.wifi_network_cursor, len(self.wifi_network_rows), step)
         elif self.state.ui_mode == "SYSTEM_AUDIO":
@@ -3463,6 +3540,9 @@ class ShadowboxUI:
                 elif choice == "NETWORK":
                     self.state.ui_mode = "NETWORK"
                     self.state.network_cursor = 1 if self.network_value_rows else 0
+                elif choice == "UPDATE":
+                    self.state.ui_mode = "SOFTWARE_UPDATE"
+                    self.state.software_update_cursor = self.software_update_check_cursor
                 elif choice == "MAINT":
                     self.state.ui_mode = "MAINT"
                     self.state.maint_cursor = 1 if self.maint_menu_items else 0
@@ -3480,6 +3560,29 @@ class ShadowboxUI:
             elif selected_row and selected_row.label == "wifi" and self.network_wifi_available:
                 self.state.ui_mode = "WIFI_NETWORKS"
                 self.state.wifi_network_cursor = self.wifi_network_initial_cursor()
+
+        elif self.state.ui_mode == "SOFTWARE_UPDATE":
+            if self.state.software_update_cursor == 0:
+                self.state.ui_mode = "SYSTEM_MENU"
+            else:
+                row = (
+                    self.software_update_rows[self.state.software_update_cursor]
+                    if self.state.software_update_cursor < len(self.software_update_rows)
+                    else None
+                )
+                if row and row.action:
+                    choice = str(row.label)
+                    if choice == "CHECK":
+                        self.queue_action(UIAction(kind="check_software_update"))
+                    elif choice == "APPLY UPDATE":
+                        self._begin_name_editor(
+                            context="software_update_password",
+                            path="",
+                            initial_draft="",
+                            return_mode="SOFTWARE_UPDATE",
+                        )
+                    elif choice == "CANCEL UPDATE":
+                        self.queue_action(UIAction(kind="cancel_software_update"))
 
         elif self.state.ui_mode == "WIFI_NETWORKS":
             if self.state.wifi_network_cursor == 0:
@@ -3696,7 +3799,7 @@ class ShadowboxUI:
             self.state.ui_mode = "TOP"
         elif self.state.ui_mode == "REMOVE_INSTANCE_CONFIRM":
             self._cancel_remove_instance_confirm()
-        elif self.state.ui_mode in ("STATUS", "NETWORK", "ABOUT", "MAINT"):
+        elif self.state.ui_mode in ("STATUS", "NETWORK", "SOFTWARE_UPDATE", "ABOUT", "MAINT"):
             self._about_press_count = 0
             self.state.ui_mode = "SYSTEM_MENU"
         elif self.state.ui_mode in ("SYSTEM_AUDIO_DEVICE", "SYSTEM_AUDIO_RATE", "SYSTEM_AUDIO_BUFFER"):

@@ -420,6 +420,7 @@ Initial system areas:
 - status
 - audio device selection
 - network status, WiFi network selection, and direct Ethernet rescue setup
+- software update status and a fast-forward update action for git checkouts
 - about screen
 - maintenance actions
 
@@ -430,6 +431,7 @@ Rules:
 - Host-derived `SYSTEM` data should stay read-only unless there is a deliberately integrated control path for that feature
 - `NETWORK` may include a local `DIRECT ETHERNET SETUP` action that manages a fixed fallback address on `eth0` for headless recovery
 - Direct Ethernet setup must be tightly scoped: touch only the configured Ethernet interface and only the configured fallback subnet
+- `UPDATE` may check the checkout's configured upstream branch and run only a fast-forward update path; dirty or diverged local checkouts must not be applied from the unit UI
 
 Live runtime authority:
 - Shadowbox reflects the currently published live runtime state

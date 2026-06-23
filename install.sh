@@ -21,6 +21,12 @@ EOF
 DISPLAY_KIND="${SHADOWBOX_DISPLAY:-st7789_raw}"
 START_SERVICE=1
 
+install_status() {
+    if [[ -n "${SHADOWBOX_INSTALL_STATUS_FILE:-}" ]]; then
+        printf '%s\n' "$*" > "${SHADOWBOX_INSTALL_STATUS_FILE}" 2>/dev/null || true
+    fi
+}
+
 while [[ "$#" -gt 0 ]]; do
     case "$1" in
         --display)
@@ -65,6 +71,20 @@ if [[ "${EUID}" -eq 0 ]]; then
     echo "./install.sh"
     exit 1
 fi
+
+cleanup_sudo_password_file() {
+    if [[ -n "${SHADOWBOX_SUDO_PASSWORD_FILE:-}" && "${SHADOWBOX_SUDO_PASSWORD_FILE}" == /tmp/shadowbox-sudo.* ]]; then
+        rm -f "${SHADOWBOX_SUDO_PASSWORD_FILE}"
+    fi
+}
+trap cleanup_sudo_password_file EXIT
+
+sudo() {
+    if [[ -n "${SHADOWBOX_SUDO_PASSWORD_FILE:-}" && -f "${SHADOWBOX_SUDO_PASSWORD_FILE}" ]]; then
+        command sudo -S -p "" -v < "${SHADOWBOX_SUDO_PASSWORD_FILE}" || return
+    fi
+    command sudo "$@"
+}
 
 REPO_DIR="$(pwd)"
 RUN_USER="$(id -un)"
@@ -170,14 +190,17 @@ configure_quiet_boot() {
 echo "Shadowbox installer"
 echo "==================="
 echo "Display backend: ${DISPLAY_KIND}"
+install_status "starting"
 if [[ "${START_SERVICE}" -eq 0 ]]; then
     echo "Service start: disabled for this install"
 fi
 
 echo "Updating system..."
+install_status "apt update"
 sudo apt update
 
 echo "Installing system dependencies..."
+install_status "system packages"
 SYSTEM_PACKAGES=(
     python3-venv \
     python3-pip \
@@ -198,6 +221,7 @@ sudo apt install -y \
     "${SYSTEM_PACKAGES[@]}"
 
 echo "Installing bundled IBM Plex fonts..."
+install_status "fonts"
 if compgen -G "${FONT_SOURCE_DIR}/*.ttf" >/dev/null; then
     sudo install -d -m 0755 "${FONT_INSTALL_DIR}"
     sudo install -m 0644 "${FONT_SOURCE_DIR}"/*.ttf "${FONT_INSTALL_DIR}/"
@@ -210,6 +234,7 @@ fi
 case "${DISPLAY_KIND}" in
     ssd1306|ssd1309)
         echo "Installing OLED/I2C dependencies..."
+        install_status "i2c setup"
         sudo apt install -y \
             python3-smbus \
             i2c-tools
@@ -232,13 +257,16 @@ esac
 
 if [[ "${ENABLE_SPI}" -eq 1 ]]; then
     echo "Enabling SPI..."
+    install_status "spi setup"
     sudo raspi-config nonint do_spi 0
 fi
 
+install_status "quiet boot"
 configure_quiet_boot
 
 if [[ "${ENABLE_PIGPIOD}" -eq 1 && "${START_SERVICE}" -eq 1 ]]; then
     echo "Starting pigpio daemon..."
+    install_status "pigpio"
     sudo systemctl enable pigpiod
     sudo systemctl start pigpiod
 elif [[ "${ENABLE_PIGPIOD}" -eq 1 ]]; then
@@ -248,16 +276,19 @@ else
 fi
 
 echo "Creating Python virtual environment..."
+install_status "venv"
 python3 -m venv .venv
 
 echo "Activating venv..."
 source .venv/bin/activate
 
 echo "Installing Python dependencies..."
+install_status "python deps"
 pip install --upgrade pip
 pip install -r requirements.txt
 
 echo "Persisting Shadowbox environment..."
+install_status "runtime config"
 TMP_ENV="$(mktemp)"
 if sudo test -f "${DEFAULT_ENV_PATH}"; then
     sudo cat "${DEFAULT_ENV_PATH}" > "${TMP_ENV}"
@@ -292,6 +323,7 @@ sudo install -m 0644 "${TMP_ENV}" "${DEFAULT_ENV_PATH}"
 rm -f "${TMP_ENV}"
 
 echo "Configuring direct Ethernet helper..."
+install_status "direct ethernet helper"
 chmod 0755 "${DIRECT_ETHERNET_HELPER}"
 TMP_SUDOERS="$(mktemp)"
 cat > "${TMP_SUDOERS}" <<EOF
@@ -302,6 +334,7 @@ sudo install -m 0440 "${TMP_SUDOERS}" "${DIRECT_ETHERNET_SUDOERS_PATH}"
 rm -f "${TMP_SUDOERS}"
 
 echo "Configuring WiFi network helper..."
+install_status "wifi helper"
 chmod 0755 "${WIFI_NETWORK_HELPER}"
 TMP_SUDOERS="$(mktemp)"
 cat > "${TMP_SUDOERS}" <<EOF
@@ -312,6 +345,7 @@ sudo install -m 0440 "${TMP_SUDOERS}" "${WIFI_NETWORK_SUDOERS_PATH}"
 rm -f "${TMP_SUDOERS}"
 
 echo "Installing systemd service..."
+install_status "service"
 PIGPIOD_UNIT_DEPENDENCIES=""
 if [[ "${ENABLE_PIGPIOD}" -eq 1 ]]; then
     PIGPIOD_UNIT_DEPENDENCIES=$'Wants=pigpiod.service\nAfter=pigpiod.service'
@@ -342,6 +376,7 @@ if [[ "${START_SERVICE}" -eq 1 ]]; then
     sudo systemctl enable shadowbox
 
     echo "Starting Shadowbox..."
+    install_status "restart service"
     sudo systemctl restart shadowbox
 else
     sudo systemctl disable shadowbox >/dev/null 2>&1 || true
@@ -352,6 +387,7 @@ fi
 
 echo ""
 echo "Install complete."
+install_status "complete"
 echo ""
 echo "Reboot recommended:"
 echo "sudo reboot"

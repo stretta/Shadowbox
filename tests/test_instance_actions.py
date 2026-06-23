@@ -381,6 +381,68 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(ui.state.ui_mode, "WIFI_NETWORKS")
         self.assertEqual(ui.state.wifi_network_cursor, 1)
 
+    def test_system_menu_includes_update_screen(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.ui_mode = "SYSTEM_MENU"
+        ui.state.system_cursor = ui.system_menu_items.index("UPDATE") + 1
+
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        self.assertEqual(ui.state.ui_mode, "SOFTWARE_UPDATE")
+        self.assertEqual(ui.state.software_update_cursor, ui.software_update_check_cursor)
+
+    def test_update_check_action_is_queued(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.ui_mode = "SOFTWARE_UPDATE"
+        ui.state.software_update_cursor = ui.software_update_check_cursor
+
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        self.assertEqual(ui.pop_actions()[0].kind, "check_software_update")
+
+    def test_update_apply_prompts_for_sudo_password_when_available(self) -> None:
+        ui = ShadowboxUI()
+        ui.set_software_update_status({"available": True, "message": "1 update"})
+        ui.state.ui_mode = "SOFTWARE_UPDATE"
+        ui.state.software_update_cursor = ui.software_update_check_cursor + 1
+
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        self.assertEqual(ui.software_update_menu_items, ["CHECK", "APPLY UPDATE"])
+        self.assertEqual(ui.state.ui_mode, "NAME_EDITOR")
+        self.assertEqual(ui.state.name_editor_context, "software_update_password")
+        self.assertEqual(ui.name_editor_title, "SUDO PASSWORD")
+        self.assertEqual(ui.name_editor_confirm_label, "UPDATE")
+
+    def test_update_password_submit_queues_apply_action(self) -> None:
+        ui = ShadowboxUI()
+        ui._begin_name_editor(
+            context="software_update_password",
+            path="",
+            initial_draft="c74rnbo",
+            return_mode="SOFTWARE_UPDATE",
+        )
+        ui.state.name_editor_cursor = 1
+
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        action = ui.pop_actions()[0]
+        self.assertEqual(action.kind, "apply_software_update")
+        self.assertEqual(action.value, "c74rnbo")
+        self.assertEqual(ui.state.ui_mode, "SOFTWARE_UPDATE")
+        self.assertEqual(ui.state.name_editor_draft, "")
+
+    def test_update_applying_row_queues_cancel_action(self) -> None:
+        ui = ShadowboxUI()
+        ui.set_software_update_status({"state": "applying", "message": "python deps"})
+        ui.state.ui_mode = "SOFTWARE_UPDATE"
+        ui.state.software_update_cursor = ui.software_update_check_cursor
+
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        self.assertEqual(ui.software_update_menu_items, ["CANCEL UPDATE"])
+        self.assertEqual(ui.pop_actions()[0].kind, "cancel_software_update")
+
     def test_network_touch_wifi_row_opens_wifi_network_picker(self) -> None:
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_direct_network())
