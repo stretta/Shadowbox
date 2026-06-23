@@ -2,6 +2,63 @@
 
 set -e
 
+usage() {
+    cat <<EOF
+Usage: ./install.sh [--display DISPLAY_BACKEND] [--no-start]
+
+Options:
+  --display DISPLAY_BACKEND  Set SHADOWBOX_DISPLAY for this install.
+                             Example: waveshare_5inch_dsi
+  --no-start                 Install the service but do not enable or start it.
+                             Use when display/input hardware is not attached yet.
+  -h, --help                 Show this help.
+
+SHADOWBOX_DISPLAY can still be set in the environment. --display takes
+precedence when both are provided.
+EOF
+}
+
+DISPLAY_KIND="${SHADOWBOX_DISPLAY:-st7789_raw}"
+START_SERVICE=1
+
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        --display)
+            if [[ "$#" -lt 2 || "$2" == -* ]]; then
+                echo "Missing value for --display."
+                usage
+                exit 1
+            fi
+            DISPLAY_KIND="$2"
+            shift 2
+            ;;
+        --display=*)
+            DISPLAY_KIND="${1#*=}"
+            if [[ -z "${DISPLAY_KIND}" ]]; then
+                echo "Missing value for --display."
+                usage
+                exit 1
+            fi
+            shift
+            ;;
+        --no-start)
+            START_SERVICE=0
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1"
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+export SHADOWBOX_DISPLAY="${DISPLAY_KIND}"
+
 if [[ "${EUID}" -eq 0 ]]; then
     echo "Do not run install.sh with sudo."
     echo "Run it as your normal user from the repository root:"
@@ -14,14 +71,21 @@ RUN_USER="$(id -un)"
 VENV_PYTHON="${REPO_DIR}/.venv/bin/python"
 SERVICE_PATH="/etc/systemd/system/shadowbox.service"
 DEFAULT_ENV_PATH="/etc/default/shadowbox"
-DISPLAY_KIND="${SHADOWBOX_DISPLAY:-st7789_raw}"
 ENABLE_SPI=1
+ENABLE_PIGPIOD=1
 FONT_SOURCE_DIR="${REPO_DIR}/assets/fonts"
 FONT_INSTALL_DIR="/usr/local/share/fonts/shadowbox/ibm-plex"
 DIRECT_ETHERNET_HELPER="${REPO_DIR}/tools/direct_ethernet.sh"
 WIFI_NETWORK_HELPER="${REPO_DIR}/tools/wifi_network.sh"
 DIRECT_ETHERNET_SUDOERS_PATH="/etc/sudoers.d/shadowbox-direct-ethernet"
 WIFI_NETWORK_SUDOERS_PATH="/etc/sudoers.d/shadowbox-wifi-network"
+
+case "${DISPLAY_KIND}" in
+    waveshare_5inch_dsi)
+        ENABLE_SPI=0
+        ENABLE_PIGPIOD=0
+        ;;
+esac
 
 boot_file_path() {
     local basename="$1"
@@ -106,20 +170,32 @@ configure_quiet_boot() {
 echo "Shadowbox installer"
 echo "==================="
 echo "Display backend: ${DISPLAY_KIND}"
+if [[ "${START_SERVICE}" -eq 0 ]]; then
+    echo "Service start: disabled for this install"
+fi
 
 echo "Updating system..."
 sudo apt update
 
 echo "Installing system dependencies..."
-sudo apt install -y \
+SYSTEM_PACKAGES=(
     python3-venv \
     python3-pip \
-    pigpio \
     fontconfig \
     libopenjp2-7 \
-    libopenblas0 \
-    python3-spidev \
-    python3-rpi.gpio
+    libopenblas0
+)
+
+if [[ "${ENABLE_PIGPIOD}" -eq 1 ]]; then
+    SYSTEM_PACKAGES+=(
+        pigpio \
+        python3-spidev \
+        python3-rpi.gpio
+    )
+fi
+
+sudo apt install -y \
+    "${SYSTEM_PACKAGES[@]}"
 
 echo "Installing bundled IBM Plex fonts..."
 if compgen -G "${FONT_SOURCE_DIR}/*.ttf" >/dev/null; then
@@ -161,9 +237,15 @@ fi
 
 configure_quiet_boot
 
-echo "Starting pigpio daemon..."
-sudo systemctl enable pigpiod
-sudo systemctl start pigpiod
+if [[ "${ENABLE_PIGPIOD}" -eq 1 && "${START_SERVICE}" -eq 1 ]]; then
+    echo "Starting pigpio daemon..."
+    sudo systemctl enable pigpiod
+    sudo systemctl start pigpiod
+elif [[ "${ENABLE_PIGPIOD}" -eq 1 ]]; then
+    echo "Skipping pigpio daemon start because --no-start was provided."
+else
+    echo "Skipping pigpio daemon for DSI touch display backend."
+fi
 
 echo "Creating Python virtual environment..."
 python3 -m venv .venv
@@ -230,11 +312,15 @@ sudo install -m 0440 "${TMP_SUDOERS}" "${WIFI_NETWORK_SUDOERS_PATH}"
 rm -f "${TMP_SUDOERS}"
 
 echo "Installing systemd service..."
+PIGPIOD_UNIT_DEPENDENCIES=""
+if [[ "${ENABLE_PIGPIOD}" -eq 1 ]]; then
+    PIGPIOD_UNIT_DEPENDENCIES=$'Wants=pigpiod.service\nAfter=pigpiod.service'
+fi
+
 sudo tee "${SERVICE_PATH}" >/dev/null <<EOF
 [Unit]
 Description=Shadowbox RNBO Hardware UI
-Wants=pigpiod.service
-After=pigpiod.service
+${PIGPIOD_UNIT_DEPENDENCIES}
 
 [Service]
 User=${RUN_USER}
@@ -252,10 +338,17 @@ WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload
-sudo systemctl enable shadowbox
+if [[ "${START_SERVICE}" -eq 1 ]]; then
+    sudo systemctl enable shadowbox
 
-echo "Starting Shadowbox..."
-sudo systemctl restart shadowbox
+    echo "Starting Shadowbox..."
+    sudo systemctl restart shadowbox
+else
+    sudo systemctl disable shadowbox >/dev/null 2>&1 || true
+    echo "Shadowbox service installed but not enabled or started."
+    echo "After attaching the display/input hardware, run:"
+    echo "sudo systemctl enable --now shadowbox"
+fi
 
 echo ""
 echo "Install complete."

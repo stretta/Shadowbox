@@ -473,14 +473,35 @@ From the repository root:
 Do not run the installer with `sudo`. Run it as your normal user from the
 repository root and let it prompt for `sudo` only when needed.
 
-The installer checks `SHADOWBOX_DISPLAY` to decide whether I2C setup is needed.
-For TFT and DSI builds, export the display backend before running it so the
-installer can skip OLED/I2C setup:
+The installer checks the display backend to decide whether I2C or SPI setup is
+needed. For TFT and DSI builds, pass the display backend so the installer can
+choose the right hardware setup and persist it for future boots:
 
 ```
-export SHADOWBOX_DISPLAY=st7789_raw
-./install.sh
+./install.sh --display st7789_raw
 ```
+
+For the Waveshare 5-inch DSI touch build:
+
+```
+./install.sh --display waveshare_5inch_dsi
+```
+
+If you are provisioning the Pi before attaching the Waveshare display/touch
+hardware, install the service without enabling or starting it yet:
+
+```
+./install.sh --display waveshare_5inch_dsi --no-start
+```
+
+After attaching the hardware and rebooting, start Shadowbox:
+
+```
+sudo systemctl enable --now shadowbox
+```
+
+You can still set `SHADOWBOX_DISPLAY` in the environment instead; `--display`
+takes precedence when both are provided.
 
 This installs the service:
 
@@ -494,16 +515,19 @@ The installer:
 - installs the required system packages
 - enables I2C automatically for OLED backends
 - enables SPI automatically for SPI display backends
+- skips SPI, I2C, and the system `pigpio` daemon package for the Waveshare
+  5-inch DSI touch backend
 - suppresses Raspberry Pi firmware splash, Plymouth graphics, kernel boot log,
   and systemd status output on the touch display so Shadowbox owns the visible
   boot screen
-- enables and starts `pigpiod`
+- enables and starts `pigpiod` only for display/input backends that need it
 - creates the virtual environment as your current user
 - upgrades `pip` and installs `requirements.txt`
 - persists the current `SHADOWBOX_*` environment variables to `/etc/default/shadowbox`
 - configures passwordless `sudo` for the direct Ethernet and WiFi network helper scripts
 - generates a systemd unit for the current repository path and current user
-- reloads systemd, enables `shadowbox`, and restarts the service
+- reloads systemd, enables `shadowbox`, and restarts the service unless
+  `--no-start` is provided
 
 It uses `sudo` only for system package, hardware interface, and service steps.
 If the installer changes I2C or SPI state on a fresh system, a reboot is still
