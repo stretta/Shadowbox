@@ -305,6 +305,11 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
             return
         self._draw.point((x, y), fill=self.fg_color if on else self.bg_color)
 
+    def pixel_color(self, x: int, y: int, color: tuple[int, int, int]) -> None:
+        if not (0 <= x < self.width and 0 <= y < self.height):
+            return
+        self._draw.point((x, y), fill=self._normalize_color(color))
+
     def hline(self, x: int, y: int, w: int, on: bool = True) -> None:
         if w <= 0:
             return

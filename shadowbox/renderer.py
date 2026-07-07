@@ -2365,6 +2365,34 @@ class ShadowboxRenderer:
                     err += dx
                     y += sy
 
+    def _draw_polyline_theme(self, points: list[tuple[int, int]], color: str) -> None:
+        pixel_color = getattr(self.display, "pixel_color", None)
+        if not callable(pixel_color):
+            self._draw_polyline(points, True)
+            return
+        if len(points) < 2:
+            return
+        theme_color = self._theme(color)
+        for (x0, y0), (x1, y1) in zip(points, points[1:]):
+            dx = abs(x1 - x0)
+            dy = -abs(y1 - y0)
+            sx = 1 if x0 < x1 else -1
+            sy = 1 if y0 < y1 else -1
+            err = dx + dy
+            x = x0
+            y = y0
+            while True:
+                pixel_color(x, y, theme_color)
+                if x == x1 and y == y1:
+                    break
+                e2 = 2 * err
+                if e2 >= dy:
+                    err += dy
+                    x += sx
+                if e2 <= dx:
+                    err += dx
+                    y += sy
+
     def _scope_time_label(self, sample_count: int, sample_rate: Any) -> str:
         seconds = scope_time_seconds(sample_count, sample_rate)
         if seconds is None:
@@ -3154,20 +3182,16 @@ class ShadowboxRenderer:
         samples = list(getattr(state, "edit_scope_samples", []) or [])
         if self.touch_layout_enabled:
             panel_w = 720
-            panel_h = 306
+            panel_h = 360
             panel_x = max(40, (self.display.width - panel_w) // 2)
             panel_y = self.edit_content_top(panel_h)
-            x, y, w, h = panel_x + 24, panel_y + 58, panel_w - 48, 178
+            x, y, w, h = panel_x + 24, panel_y + 24, panel_w - 48, 236
             label_scale = 2
-            value_y = panel_y + panel_h - 36
-            time_label_y = value_y - 2
+            value_y = panel_y + panel_h - 30
 
             if self.has_color:
                 self._rounded_theme(panel_x, panel_y, panel_w, panel_h, 14, "panel", True)
                 self._rect_theme(panel_x, panel_y, panel_w, panel_h, "line", False)
-                self._text_theme("TIME DOMAIN", panel_x + 24, panel_y + 18, "muted", 2, "medium")
-                self._hline_theme(panel_x + 24, panel_y + 52, panel_w - 48, "line")
-                self._fill_theme(panel_x + 24, panel_y + 54, 96, 4, "accent")
             else:
                 self.display.rect(panel_x, panel_y, panel_w, panel_h, True, False)
             self.display.rect(x, y, w, h, True, False)
@@ -3179,18 +3203,35 @@ class ShadowboxRenderer:
                 if len(visible) == 1:
                     visible = visible * 2
                 points: list[tuple[int, int]] = []
-                denom = max(1, len(visible) - 1)
                 for idx, sample in enumerate(visible):
-                    sx = x + 1 + int(round(idx * (w - 3) / denom))
+                    sx = x + w - len(visible) - 1 + idx
                     sy = mid_y - int(round(max(-1.0, min(1.0, float(sample))) * ((h - 3) / 2)))
                     points.append((sx, max(y + 1, min(y + h - 2, sy))))
-                self._draw_polyline(points, True)
+                if self.has_color:
+                    self._draw_polyline_theme(points, "accent")
+                else:
+                    self._draw_polyline(points, True)
             else:
                 self._text_theme("waiting", panel_x + 24, y + 6, "muted", 2, "medium")
 
             sample_rate = getattr(state, "edit_value", None)
             time_label = self._scope_time_label(min(len(samples), max(0, w - 2)), sample_rate)
             value_text = format_param_value(param, sample_rate)
+            pmin = param.get("min")
+            pmax = param.get("max")
+            if isinstance(sample_rate, (int, float)) and isinstance(pmin, (int, float)) and isinstance(pmax, (int, float)) and pmax > pmin:
+                norm = (sample_rate - pmin) / (pmax - pmin)
+                rail_y = value_y - 36
+                self._draw_continuous_bar(norm, panel_x + 24, rail_y, panel_w - 48, 18)
+                self._record_touch_target(
+                    "edit_slider",
+                    panel_x + 24,
+                    rail_y - 24,
+                    panel_w - 48,
+                    72,
+                    action_kind="set_edit_value",
+                    button_id="value_slider",
+                )
             footer = f"{value_text}  {time_label}"
             self._text_theme(shorten(footer, 30), panel_x + 24, value_y, "text", label_scale, "medium")
             return
@@ -3217,9 +3258,8 @@ class ShadowboxRenderer:
             if len(visible) == 1:
                 visible = visible * 2
             points: list[tuple[int, int]] = []
-            denom = max(1, len(visible) - 1)
             for idx, sample in enumerate(visible):
-                sx = x + 1 + int(round(idx * (w - 3) / denom))
+                sx = x + w - len(visible) - 1 + idx
                 sy = mid_y - int(round(max(-1.0, min(1.0, float(sample))) * ((h - 3) / 2)))
                 points.append((sx, max(y + 1, min(y + h - 2, sy))))
             self._draw_polyline(points, True)

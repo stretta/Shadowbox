@@ -2322,7 +2322,7 @@ class ShadowboxUI:
 
     def should_pause_refresh(self) -> bool:
         if self.state.ui_mode == "EDIT" and self.selected_param:
-            if is_step16_param(self.selected_param) or is_pitch_display_param(self.selected_param) or is_scope_param(self.selected_param):
+            if is_step16_param(self.selected_param) or is_pitch_display_param(self.selected_param):
                 return False
         return self.state.ui_mode in {
             "GRAPH_MENU",
@@ -2413,7 +2413,7 @@ class ShadowboxUI:
         if self.state.ui_mode != "EDIT" or normalized_value is None:
             return
         param = self.selected_param
-        if param is None or is_ttid_param(param) or is_step16_param(param) or is_pitch_display_param(param) or is_scope_param(param) or is_enum_param(param):
+        if param is None or is_ttid_param(param) or is_step16_param(param) or is_pitch_display_param(param) or is_enum_param(param):
             return
         pmin = param.get("min")
         pmax = param.get("max")
@@ -2435,7 +2435,10 @@ class ShadowboxUI:
         self.state.edit_value = value
         param["value"] = value
         self.state.activity_ticks += 1
-        if not is_discrete_param(param):
+        normalized_path = str(param.get("normalized_path", "") or "")
+        if is_scope_param(param) and normalized_path:
+            self.queue_action(UIAction(kind="set_param", path=normalized_path, value=fraction))
+        elif not is_discrete_param(param):
             self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
         if not pressed:
             self.queue_action(UIAction(kind="save_state"))

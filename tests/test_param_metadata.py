@@ -694,6 +694,49 @@ class ParamMetadataTests(unittest.TestCase):
         self.assertEqual(instances[0]["preset_destroy_path"], "/rnbo/inst/1/presets/destroy")
         self.assertEqual(instances[0]["current_preset_name"], "Bass")
 
+    def test_discover_params_include_normalized_child_path(self) -> None:
+        tree = {
+            "CONTENTS": {
+                "rnbo": {
+                    "CONTENTS": {
+                        "inst": {
+                            "CONTENTS": {
+                                "1": {
+                                    "CONTENTS": {
+                                        "params": {
+                                            "CONTENTS": {
+                                                "SamplingRate": {
+                                                    "FULL_PATH": "/rnbo/inst/1/params/SamplingRate",
+                                                    "VALUE": 10.0,
+                                                    "TYPE": "f",
+                                                    "ACCESS": 3,
+                                                    "RANGE": [{"MIN": 10.0, "MAX": 100.0}],
+                                                    "CONTENTS": {
+                                                        "normalized": {
+                                                            "FULL_PATH": "/rnbo/inst/1/params/SamplingRate/normalized",
+                                                            "VALUE": 0.0,
+                                                            "TYPE": "f",
+                                                        }
+                                                    },
+                                                }
+                                            }
+                                        },
+                                    }
+                                }
+                            }
+                        },
+                    }
+                }
+            }
+        }
+
+        instances = discover_instances(tree)
+
+        param = instances[0]["params"][0]
+        self.assertEqual(param["path"], "/rnbo/inst/1/params/SamplingRate")
+        self.assertEqual(param["normalized_path"], "/rnbo/inst/1/params/SamplingRate/normalized")
+        self.assertEqual(param["max"], 100.0)
+
     def test_discover_system_includes_set_name_and_sets_section(self) -> None:
         tree = {
             "CONTENTS": {

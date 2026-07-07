@@ -9,7 +9,7 @@ from typing import Any
 
 SCOPE_EDITOR_NAMES = {"scope", "scope_display", "time_domain_scope"}
 SCOPE_DEFAULT_STATE = "scope"
-SCOPE_MAX_SAMPLES = 512
+SCOPE_MAX_SAMPLES = 1024
 
 
 def normalize_editor_name(value: Any) -> str:

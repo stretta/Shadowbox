@@ -525,10 +525,12 @@ def _discover_instance_params(instance_root: dict) -> list[dict]:
                 full_path = node.get("FULL_PATH")
                 if isinstance(full_path, str) and full_path and full_path not in seen_paths:
                     info = extract_range_info(node)
+                    normalized_path = safe_get(node, ["CONTENTS", "normalized", "FULL_PATH"], "")
                     results.append(
                         {
                             "name": full_name,
                             "path": full_path,
+                            "normalized_path": str(normalized_path or ""),
                             "value": node.get("VALUE"),
                             "type": node.get("TYPE", ""),
                             "min": info["min"],
