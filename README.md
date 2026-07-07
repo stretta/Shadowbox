@@ -861,11 +861,23 @@ If Shadowbox is already installed on the Pi and you want to update it to the
 latest version from this repository, use one of these paths.
 
 The unit UI includes `SYSTEM -> UPDATE` for installed git checkouts. `CHECK`
-fetches the configured upstream branch and compares it with the local commit.
-`APPLY UPDATE` appears only when the checkout can fast-forward; it refuses dirty
-or diverged local checkouts, prompts for the Pi user's sudo password, pulls with
+fetches the configured upstream branch for Shadowbox and, when present, the
+companion ShadowscoreServer checkout at `/home/pi/ShadowscoreServer`.
+`UPDATE BOX` appears only when Shadowbox can fast-forward; it refuses dirty or
+diverged local checkouts, prompts for the Pi user's sudo password, pulls with
 `--ff-only`, then runs `./install.sh` so dependencies, service files, helper
 sudoers entries, and the `shadowbox` restart follow the normal install path.
+
+The same screen can manage ShadowscoreServer, which has no dedicated hardware
+UI of its own. If `/home/pi/ShadowscoreServer` is missing, `INSTALL SCORE`
+prompts for sudo and runs the upstream installer from
+`https://github.com/stretta/ShadowscoreServer` with these defaults:
+`SHADOWSCORE_ROLE=host`, `SHADOWSCORE_INSTALL_DIR=/home/pi/ShadowscoreServer`,
+and the installer's default public URL of `http://$(hostname).local:8790`.
+If ShadowscoreServer is already installed and has upstream updates,
+`UPDATE SCORE` fast-forwards that checkout, runs `npm install --omit=dev`, and
+restarts the enabled Shadowscore systemd service without rewriting the local
+role/config file.
 
 On launch, Shadowbox reads the local checkout status immediately and checks the
 remote upstream in the background. Set `SHADOWBOX_UPDATE_CHECK_ON_STARTUP=0` in

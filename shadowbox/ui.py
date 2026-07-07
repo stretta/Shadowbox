@@ -558,7 +558,10 @@ class ShadowboxUI:
             self.state.activity_ticks += 1
 
     def set_software_update_status(self, status: dict) -> None:
-        self.state.software_update = dict(status or {})
+        next_status = dict(status or {})
+        if "targets" not in next_status:
+            next_status = {"targets": {"shadowbox": next_status}, **next_status}
+        self.state.software_update = next_status
         self.state.software_update_cursor = clamp_index(
             self.state.software_update_cursor if self.state.software_update_cursor > 0 else 1,
             len(self.software_update_rows),
@@ -1124,26 +1127,47 @@ class ShadowboxUI:
 
     @property
     def software_update_value_rows(self) -> list[ValueRow]:
+        targets = self.software_update_targets
+        shadowbox = targets.get("shadowbox", {})
+        shadowscore = targets.get("shadowscore", {})
+        rows = self._software_update_target_rows("box", shadowbox)
+        if shadowscore:
+            rows.extend(self._software_update_target_rows("score", shadowscore))
+        return rows
+
+    @property
+    def software_update_targets(self) -> dict:
         update = self.state.software_update
+        targets = update.get("targets") if isinstance(update, dict) else None
+        if isinstance(targets, dict):
+            return targets
+        return {"shadowbox": update if isinstance(update, dict) else {}}
+
+    def _software_update_target_rows(self, prefix: str, update: dict) -> list[ValueRow]:
         state = str(update.get("state", "unknown") or "unknown")
         message = str(update.get("message", "not checked") or "not checked")
         rows = [
-            ValueRow("state", message.upper(), current=state in {"available", "error", "dirty", "diverged", "applying"}),
-            ValueRow("branch", update.get("branch", "-")),
-            ValueRow("local", update.get("local", "-"), current=state in {"current", "ahead"}),
-            ValueRow("remote", update.get("remote", "-"), current=state == "available"),
+            ValueRow(prefix, message.upper(), current=state in {"available", "error", "dirty", "diverged", "applying", "missing"}),
+            ValueRow(f"{prefix} local", update.get("local", "-"), current=state in {"current", "ahead"}),
         ]
-        if update.get("commit_date"):
-            rows.append(ValueRow("date", update.get("commit_date")))
+        remote = update.get("remote", "")
+        if remote and remote != "-":
+            rows.append(ValueRow(f"{prefix} remote", remote, current=state == "available"))
         return rows
 
     @property
     def software_update_menu_items(self) -> list[str]:
         if str(self.state.software_update.get("state", "")) == "applying":
             return ["CANCEL UPDATE"]
+        targets = self.software_update_targets
         items = ["CHECK"]
-        if bool(self.state.software_update.get("available")):
-            items.append("APPLY UPDATE")
+        if bool(targets.get("shadowbox", {}).get("available")):
+            items.append("UPDATE BOX")
+        shadowscore = targets.get("shadowscore", {})
+        if str(shadowscore.get("state", "")) == "missing":
+            items.append("INSTALL SCORE")
+        elif bool(shadowscore.get("available")):
+            items.append("UPDATE SCORE")
         return items
 
     @property
@@ -1516,7 +1540,7 @@ class ShadowboxUI:
             self.state.name_editor_draft = ""
             self.state.pending_wifi_ssid = ""
         elif self.state.name_editor_context == "software_update_password":
-            self.queue_action(UIAction(kind="apply_software_update", value=value))
+            self.queue_action(UIAction(kind="apply_software_update", path=self.state.name_editor_path, value=value))
             self.state.ui_mode = "SOFTWARE_UPDATE"
             self.state.name_editor_draft = ""
         elif self.state.name_editor_context == "rename_set" and self.state.name_editor_path:
@@ -3577,10 +3601,11 @@ class ShadowboxUI:
                     choice = str(row.label)
                     if choice == "CHECK":
                         self.queue_action(UIAction(kind="check_software_update"))
-                    elif choice == "APPLY UPDATE":
+                    elif choice in {"APPLY UPDATE", "UPDATE BOX", "INSTALL SCORE", "UPDATE SCORE"}:
+                        target = "shadowscore" if "SCORE" in choice else "shadowbox"
                         self._begin_name_editor(
                             context="software_update_password",
-                            path="",
+                            path=target,
                             initial_draft="",
                             return_mode="SOFTWARE_UPDATE",
                         )

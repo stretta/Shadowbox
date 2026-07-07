@@ -17,7 +17,11 @@ from shadowbox.display import load_display_from_env
 from shadowbox.encoder import EncoderInput
 from shadowbox.midi_mappings import apply_midi_profile_to_instance, save_instance_midi_profile
 from shadowbox.rnbo import RNBOClient
-from shadowbox.software_update import read_software_update_status, start_software_update_install
+from shadowbox.software_update import (
+    read_all_software_update_status,
+    start_shadowscore_update_install,
+    start_software_update_install,
+)
 from shadowbox.ui import ShadowboxUI
 from shadowbox.renderer import create_renderer, should_enable_touch_layout
 
@@ -650,10 +654,10 @@ def main():
 
     # Always start clean at TOP level
     ui.reset_to_top()
-    ui.set_software_update_status(read_software_update_status(fetch=False).to_dict())
+    ui.set_software_update_status(read_all_software_update_status(fetch=False))
     if _env_bool("SHADOWBOX_UPDATE_CHECK_ON_STARTUP", True):
         Thread(
-            target=lambda: ui.set_software_update_status(read_software_update_status(fetch=True).to_dict()),
+            target=lambda: ui.set_software_update_status(read_all_software_update_status(fetch=True)),
             daemon=True,
         ).start()
 
@@ -1021,7 +1025,7 @@ def main():
 
                 elif action.kind == "check_software_update":
                     ui.set_busy(True, "update")
-                    ui.set_software_update_status(read_software_update_status(fetch=True).to_dict())
+                    ui.set_software_update_status(read_all_software_update_status(fetch=True))
                     ui.state.ui_mode = "SOFTWARE_UPDATE"
                     ui.set_busy(False)
 
@@ -1029,36 +1033,55 @@ def main():
                     if update_cancel_event is not None and not update_cancel_event.is_set():
                         continue
                     update_cancel_event = Event()
+                    update_target = str(action.path or "shadowbox")
                     ui.set_busy(True, "update")
-                    ui.set_software_update_status(
-                        {
-                            "state": "applying",
-                            "message": "starting",
-                            "available": False,
-                        }
-                    )
+                    applying_statuses = dict(ui.state.software_update or {})
+                    applying_targets = dict(applying_statuses.get("targets", {}))
+                    applying_targets[update_target] = {
+                        "state": "applying",
+                        "message": "starting",
+                        "available": False,
+                    }
+                    applying_statuses["targets"] = applying_targets
+                    applying_statuses["state"] = "applying"
+                    applying_statuses["message"] = "starting"
+                    applying_statuses["available"] = False
+                    ui.set_software_update_status(applying_statuses)
                     ui.state.ui_mode = "SOFTWARE_UPDATE"
 
-                    def apply_update_worker(password: str, cancel_event: Event) -> None:
+                    def apply_update_worker(target: str, password: str, cancel_event: Event) -> None:
                         nonlocal update_cancel_event
 
                         def set_progress(message: str) -> None:
-                            ui.set_software_update_status(
-                                {
-                                    "state": "applying",
-                                    "message": message,
-                                    "available": False,
-                                }
-                            )
+                            statuses = dict(ui.state.software_update or {})
+                            targets = dict(statuses.get("targets", {}))
+                            targets[target] = {
+                                "state": "applying",
+                                "message": message,
+                                "available": False,
+                            }
+                            statuses["targets"] = targets
+                            statuses["state"] = "applying"
+                            statuses["message"] = message
+                            statuses["available"] = False
+                            ui.set_software_update_status(statuses)
                             ui.state.ui_mode = "SOFTWARE_UPDATE"
 
-                        ui.set_software_update_status(
-                            start_software_update_install(
+                        if target == "shadowscore":
+                            status = start_shadowscore_update_install(
                                 password,
                                 status_callback=set_progress,
                                 cancel_event=cancel_event,
-                            ).to_dict()
-                        )
+                            )
+                        else:
+                            status = start_software_update_install(
+                                password,
+                                status_callback=set_progress,
+                                cancel_event=cancel_event,
+                            )
+                        statuses = read_all_software_update_status(fetch=False)
+                        statuses["targets"][target] = status.to_dict()
+                        ui.set_software_update_status(statuses)
                         ui.state.ui_mode = "SOFTWARE_UPDATE"
                         ui.set_busy(False)
                         if update_cancel_event is cancel_event:
@@ -1066,7 +1089,7 @@ def main():
 
                     Thread(
                         target=apply_update_worker,
-                        args=(str(action.value or ""), update_cancel_event),
+                        args=(update_target, str(action.value or ""), update_cancel_event),
                         daemon=True,
                     ).start()
 

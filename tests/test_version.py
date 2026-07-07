@@ -1,7 +1,12 @@
 import unittest
 from unittest.mock import patch
 
-from shadowbox.software_update import read_software_update_status, start_software_update_install
+from shadowbox.software_update import (
+    read_shadowscore_update_status,
+    read_software_update_status,
+    start_shadowscore_update_install,
+    start_software_update_install,
+)
 from shadowbox.version import GitVersionInfo, build_label, display_branch_name, read_git_version_info
 
 
@@ -100,6 +105,27 @@ class VersionTests(unittest.TestCase):
 
         self.assertEqual(status.state, "error")
         self.assertEqual(status.message, "install timeout use ssh")
+
+    @patch("shadowbox.software_update.SHADOWSCORE_INSTALL_DIR")
+    def test_shadowscore_update_status_reports_missing_when_not_installed(self, install_dir) -> None:
+        install_dir.__truediv__.return_value.exists.return_value = False
+
+        status = read_shadowscore_update_status()
+
+        self.assertEqual(status.state, "missing")
+        self.assertFalse(status.installed)
+
+    @patch("shadowbox.software_update._run_command_with_status", return_value=(True, "installed"))
+    @patch("shadowbox.software_update._validate_sudo_password", return_value="")
+    @patch("shadowbox.software_update.read_shadowscore_update_status")
+    def test_shadowscore_install_uses_remote_installer_when_missing(self, read_status, _validate_sudo, run_command) -> None:
+        read_status.return_value.state = "missing"
+
+        status = start_shadowscore_update_install("password")
+
+        self.assertEqual(status.state, "applied")
+        self.assertEqual(status.message, "installed")
+        self.assertIn("curl -fsSL", run_command.call_args.args[0][2])
 
 
 if __name__ == "__main__":

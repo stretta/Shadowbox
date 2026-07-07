@@ -408,7 +408,7 @@ class InstanceActionTests(unittest.TestCase):
 
         ui.handle_event(types.SimpleNamespace(kind="short_press"))
 
-        self.assertEqual(ui.software_update_menu_items, ["CHECK", "APPLY UPDATE"])
+        self.assertEqual(ui.software_update_menu_items, ["CHECK", "UPDATE BOX"])
         self.assertEqual(ui.state.ui_mode, "NAME_EDITOR")
         self.assertEqual(ui.state.name_editor_context, "software_update_password")
         self.assertEqual(ui.name_editor_title, "SUDO PASSWORD")
@@ -428,6 +428,46 @@ class InstanceActionTests(unittest.TestCase):
 
         action = ui.pop_actions()[0]
         self.assertEqual(action.kind, "apply_software_update")
+        self.assertEqual(action.value, "c74rnbo")
+        self.assertEqual(ui.state.ui_mode, "SOFTWARE_UPDATE")
+        self.assertEqual(ui.state.name_editor_draft, "")
+
+    def test_update_screen_includes_shadowscore_install_action_when_missing(self) -> None:
+        ui = ShadowboxUI()
+        ui.set_software_update_status(
+            {
+                "targets": {
+                    "shadowbox": {"state": "current", "message": "up to date", "available": False},
+                    "shadowscore": {"state": "missing", "message": "not installed", "installed": False},
+                }
+            }
+        )
+
+        self.assertIn("INSTALL SCORE", ui.software_update_menu_items)
+        self.assertTrue(any(row.label == "score" and row.value == "NOT INSTALLED" for row in ui.software_update_value_rows))
+
+    def test_update_score_prompts_for_sudo_password_with_shadowscore_target(self) -> None:
+        ui = ShadowboxUI()
+        ui.set_software_update_status(
+            {
+                "targets": {
+                    "shadowbox": {"state": "current", "message": "up to date", "available": False},
+                    "shadowscore": {"state": "available", "message": "1 update", "available": True},
+                }
+            }
+        )
+        ui.state.ui_mode = "SOFTWARE_UPDATE"
+        ui.state.software_update_cursor = len(ui.software_update_rows) - 1
+
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+        ui.pop_actions()
+        ui.state.name_editor_draft = "c74rnbo"
+        ui.state.name_editor_cursor = 1
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        action = ui.pop_actions()[0]
+        self.assertEqual(action.kind, "apply_software_update")
+        self.assertEqual(action.path, "shadowscore")
         self.assertEqual(action.value, "c74rnbo")
         self.assertEqual(ui.state.ui_mode, "SOFTWARE_UPDATE")
         self.assertEqual(ui.state.name_editor_draft, "")
