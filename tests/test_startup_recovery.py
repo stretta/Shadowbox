@@ -66,6 +66,9 @@ from shadowbox.shadowbox import (
     JACK_CARD_PATH_DEFAULT,
     JACK_RESTART_PATH_DEFAULT,
     _audio_needs_dummy_fallback,
+    _snapshot_ready,
+    _snapshot_waiting_for_instances,
+    _startup_status_lines,
     _try_dummy_audio_fallback,
     _try_startup_audio_recovery,
 )
@@ -155,3 +158,50 @@ def test_audio_fallback_is_needed_when_current_card_is_not_available():
     }
 
     assert _audio_needs_dummy_fallback(audio)
+
+
+def test_startup_waits_when_set_is_published_before_instances():
+    snapshot = SimpleNamespace(
+        instances=[],
+        patchers=["ShadowScoreClient"],
+        add_instance_path="/rnbo/inst/control/load",
+        remove_instance_path="/rnbo/inst/control/unload",
+        system={
+            "set_name": "Finch",
+            "sets": {
+                "current_name": "Finch",
+                "initial_value": "Finch",
+                "auto_start_last": True,
+            },
+            "status": {"runner_version": "1.4.3"},
+            "audio": {"current_card": "hw:Dummy", "card_options": ["hw:Dummy"], "sample_rate_options": [48000]},
+            "maint": {"jack_restart_path": "/rnbo/jack/restart"},
+        },
+    )
+
+    assert _snapshot_waiting_for_instances(snapshot)
+    assert not _snapshot_ready(snapshot)
+    assert _startup_status_lines(snapshot, stable_passes=0) == ("loading set", "Finch")
+
+
+def test_startup_allows_empty_runner_when_no_set_is_expected():
+    snapshot = SimpleNamespace(
+        instances=[],
+        patchers=["Empty"],
+        add_instance_path="/rnbo/inst/control/load",
+        remove_instance_path="",
+        system={
+            "set_name": "",
+            "sets": {
+                "current_name": "",
+                "initial_value": "",
+                "auto_start_last": False,
+            },
+            "status": {"runner_version": "1.4.3"},
+            "audio": {"current_card": "hw:Dummy", "card_options": ["hw:Dummy"], "sample_rate_options": [48000]},
+            "maint": {"jack_restart_path": "/rnbo/jack/restart"},
+        },
+    )
+
+    assert not _snapshot_waiting_for_instances(snapshot)
+    assert _snapshot_ready(snapshot)

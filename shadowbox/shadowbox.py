@@ -251,6 +251,8 @@ def _capture_index(name: str) -> int:
 def _snapshot_ready(snapshot) -> bool:
     if snapshot is None:
         return False
+    if _snapshot_waiting_for_instances(snapshot):
+        return False
     audio = snapshot.system.get("audio", {})
     status = snapshot.system.get("status", {})
     maint = snapshot.system.get("maint", {})
@@ -265,6 +267,40 @@ def _snapshot_ready(snapshot) -> bool:
         or audio.get("sample_rate_options")
         or maint.get("jack_restart_path")
     )
+
+
+def _snapshot_waiting_for_instances(snapshot) -> bool:
+    if snapshot is None or snapshot.instances:
+        return False
+    system = snapshot.system if isinstance(snapshot.system, dict) else {}
+    sets = system.get("sets", {})
+    if not isinstance(sets, dict):
+        return False
+
+    current_name = str(sets.get("current_name", "") or system.get("set_name", "") or "").strip()
+    initial_value = str(sets.get("initial_value", "") or "").strip()
+    auto_start_last = sets.get("auto_start_last") is True
+    return bool(current_name or initial_value or auto_start_last)
+
+
+def _snapshot_loading_set_label(snapshot) -> str:
+    if snapshot is None:
+        return ""
+    system = snapshot.system if isinstance(snapshot.system, dict) else {}
+    sets = system.get("sets", {})
+    if not isinstance(sets, dict):
+        sets = {}
+    for value in (
+        sets.get("current_name", ""),
+        system.get("set_name", ""),
+        sets.get("initial_value", ""),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text
+    if sets.get("auto_start_last") is True:
+        return "last set"
+    return ""
 
 
 def _snapshot_signature(snapshot) -> tuple:
@@ -395,6 +431,11 @@ def _apply_saved_midi_profile(ui, rnbo, instance_id: str) -> int:
 def _startup_status_lines(snapshot, stable_passes: int = 0, recovery_active: bool = False) -> tuple[str, str]:
     if recovery_active:
         return "recovering audio", "waiting for OSCQuery"
+    if _snapshot_waiting_for_instances(snapshot):
+        label = _snapshot_loading_set_label(snapshot)
+        if label:
+            return "loading set", label
+        return "loading instances", "waiting for RNBO"
     if _snapshot_ready(snapshot):
         if stable_passes < STARTUP_STABLE_PASSES:
             return "RNBO found", "stabilizing..."
@@ -575,6 +616,7 @@ def main():
                 STARTUP_DISCOVERY_TIMEOUT > 0.0
                 and (now - startup_started) >= STARTUP_DISCOVERY_TIMEOUT
                 and not _snapshot_ready(current_snapshot)
+                and not _snapshot_waiting_for_instances(current_snapshot)
             ):
                 if not startup_recovery_attempted:
                     startup_recovery_attempted = True
