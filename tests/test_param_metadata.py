@@ -799,6 +799,7 @@ class ParamMetadataTests(unittest.TestCase):
         self.assertEqual(system["set_name"], "StudioA")
         self.assertEqual(system["sets"]["current_name"], "StudioA")
         self.assertEqual(system["sets"]["available_sets"], ["StudioA"])
+        self.assertNotIn("network", system)
 
 
 if __name__ == "__main__":

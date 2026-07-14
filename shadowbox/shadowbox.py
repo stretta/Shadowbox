@@ -14,6 +14,7 @@ from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import ThreadingOSCUDPServer
 
 from shadowbox.display import load_display_from_env
+from shadowbox.discovery import DiscoveryCoordinator, NetworkOperationCoordinator
 from shadowbox.encoder import EncoderInput
 from shadowbox.midi_mappings import apply_midi_profile_to_instance, save_instance_midi_profile
 from shadowbox.rnbo import RNBOClient
@@ -24,6 +25,8 @@ from shadowbox.software_update import (
 )
 from shadowbox.ui import ShadowboxUI
 from shadowbox.renderer import create_renderer, should_enable_touch_layout
+from shadowbox.performance import PerformanceProbe, Timer
+from shadowbox.render_scheduler import RenderScheduler
 
 
 FPS = 20
@@ -550,6 +553,9 @@ def main():
     osc_listener = RunnerOSCListener()
     encoder = EncoderInput()
     ui = ShadowboxUI(rnbo=rnbo)
+    perf = PerformanceProbe()
+    display.performance_probe = perf
+    scheduler = RenderScheduler(mode=os.environ.get("SHADOWBOX_RENDER_SCHEDULER", "dirty").strip().lower())
     renderer = create_renderer(display=display)
     renderer.set_touch_mode(should_enable_touch_layout(encoder.input_kind))
     renderer.draw_startup_status("SHADOWBOX", "starting Shadowbox", "please wait", activity_phase=0.0)
@@ -655,9 +661,10 @@ def main():
     # Always start clean at TOP level
     ui.reset_to_top()
     ui.set_software_update_status(read_all_software_update_status(fetch=False))
+    update_status_queue: SimpleQueue[dict] = SimpleQueue()
     if _env_bool("SHADOWBOX_UPDATE_CHECK_ON_STARTUP", True):
         Thread(
-            target=lambda: ui.set_software_update_status(read_all_software_update_status(fetch=True)),
+            target=lambda: update_status_queue.put(read_all_software_update_status(fetch=True)),
             daemon=True,
         ).start()
 
@@ -667,7 +674,6 @@ def main():
 
     is_dimmed = False
     is_sleeping = False
-    dummy_audio_fallback_attempted = False
     update_cancel_event: Event | None = None
 
     def mark_activity() -> None:
@@ -682,14 +688,25 @@ def main():
             display.set_contrast(brightness_normal)
             is_dimmed = False
 
+    discovery = DiscoveryCoordinator(rnbo, metrics=perf)
+    discovery.start()
+    network_operations = NetworkOperationCoordinator(rnbo, _run_direct_ethernet_helper, _run_wifi_network_helper)
+    network_operations.start()
+    previous_mode = ui.state.ui_mode
+    lifecycle_context: dict[str, dict] = {}
+
     try:
         while True:
+            loop_started = monotonic()
             now = monotonic()
 
             # Pull pending hardware events
             events = encoder.get_events()
             if events:
                 mark_activity()
+                scheduler.request("input", input_event=True)
+                perf.increment("input_batches")
+                perf.increment("input_events", len(events))
 
             for event in events:
                 ui.handle_event(event)
@@ -705,6 +722,89 @@ def main():
                     or ui.apply_instance_midi_learn_update(instance_id, full_path, value)
                 ):
                     ui.state.activity_ticks += 1
+
+            for result in discovery.drain():
+                perf.observe(f"discovery_{result.kind}", result.duration)
+                if discovery.is_stale(result):
+                    perf.increment("discovery_stale")
+                    continue
+                if result.error:
+                    ui.set_status_message(f"Refresh failed: {_short_error_text(result.error)}")
+                    if (result.kind == "runner" and ui.state.busy_reason not in {"network", "update"}) or (
+                        result.kind != "runner" and ui.state.busy_reason == "network"
+                    ):
+                        ui.set_busy(False)
+                    scheduler.request("discovery_error")
+                    continue
+                if result.kind == "runner":
+                    ui.apply_runner_snapshot(result.value)
+                    context = lifecycle_context.pop(result.reason, {})
+                    if result.reason == "add instance":
+                        before_ids = context.get("before_ids", [])
+                        after_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
+                        new_ids = [item for item in after_ids if item not in before_ids]
+                        if new_ids:
+                            new_id = new_ids[-1]
+                            changed = _assign_next_unused_inputs(ui, rnbo, new_id)
+                            changed = _assign_next_unused_outputs(ui, rnbo, new_id) or changed
+                            applied = apply_midi_profile_to_instance(_instance_by_id(ui, new_id), rnbo)
+                            if changed or applied:
+                                discovery.request("runner", "finish add instance", delay=0.1)
+                            ui.state.active_instance_id = new_id
+                            ui.state.instance_cursor = after_ids.index(new_id) + 1
+                            _apply_post_load_view(ui)
+                    elif result.reason == "replace instance":
+                        before_ids = context.get("before_ids", [])
+                        target_id = context.get("target_id", "")
+                        target_index = context.get("target_index", 0)
+                        after_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
+                        new_ids = [item for item in after_ids if item not in before_ids]
+                        replacement_id = target_id if target_id in after_ids else (new_ids[-1] if new_ids else (after_ids[min(target_index, len(after_ids) - 1)] if after_ids else ""))
+                        if replacement_id:
+                            apply_midi_profile_to_instance(_instance_by_id(ui, replacement_id), rnbo)
+                            ui.state.active_instance_id = replacement_id
+                            ui.state.instance_cursor = after_ids.index(replacement_id) + 1
+                        _apply_post_load_view(ui)
+                    elif result.reason == "remove instance":
+                        after_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
+                        if after_ids:
+                            new_index = min(context.get("removed_index", 0), len(after_ids) - 1)
+                            ui.state.active_instance_id = after_ids[new_index]
+                            ui.state.instance_cursor = new_index + 1
+                        ui.state.pending_remove_instance_id = ""
+                        ui.state.remove_instance_origin = ""
+                        ui.state.ui_mode = "INSTANCE_LIST"
+                else:
+                    ui.apply_network_snapshot(result.value)
+                    if result.kind in {"wifi_list", "wifi_rescan"}:
+                        ui.state.ui_mode = "WIFI_NETWORKS" if ui.network_wifi_available else "NETWORK"
+                        ui.state.wifi_network_cursor = ui.wifi_network_initial_cursor()
+                if (result.kind == "runner" and ui.state.busy_reason not in {"network", "update"}) or (
+                    result.kind != "runner" and ui.state.busy_reason == "network"
+                ):
+                    ui.set_busy(False)
+                scheduler.request("discovery")
+
+            for result in network_operations.drain():
+                ui.apply_network_snapshot(result.network)
+                if result.ok:
+                    ui.clear_network_error()
+                else:
+                    ui.set_network_error(_short_error_text(result.error))
+                ui.state.ui_mode = "NETWORK"
+                ui.state.network_cursor = 5 if result.kind.startswith("connect_wifi") and len(ui.network_value_rows) >= 5 else 1
+                ui.set_busy(False)
+                scheduler.request("network_operation")
+
+            while True:
+                try:
+                    ui.set_software_update_status(update_status_queue.get_nowait())
+                    if ui.state.busy_reason == "update":
+                        ui.state.ui_mode = "SOFTWARE_UPDATE"
+                        ui.set_busy(False)
+                    scheduler.request("update_status")
+                except Empty:
+                    break
 
             # Pull pending RNBO actions requested by UI
             for action in ui.pop_actions():
@@ -724,122 +824,107 @@ def main():
                     if action.path is not None:
                         ui.set_busy(True, "load")
                         rnbo.send_value(action.path, action.value)
-                        sleep(0.2)
-                        ui.apply_runner_snapshot(rnbo.discover())
+                        discovery.request("runner", "load preset", delay=0.2)
                         ui.set_status_message(f"Loaded {action.value}")
-                        ui.set_busy(False)
 
                 elif action.kind == "load_set":
                     if action.path is not None:
                         ui.set_busy(True, "load")
                         # Runner set loads currently append, so clear the live graph first
                         # when the published global unload path is available.
-                        if ui.state.remove_instance_path:
-                            rnbo.send_value(ui.state.remove_instance_path, -1)
-                            sleep(0.1)
-                        rnbo.send_value(action.path, action.value)
-                        sleep(0.2)
-                        ui.apply_runner_snapshot(rnbo.discover())
+                        remove_path = ui.state.remove_instance_path
+                        load_path = action.path
+                        load_value = action.value
+
+                        def load_set_worker(remove_path=remove_path, load_path=load_path, load_value=load_value):
+                            if remove_path:
+                                rnbo.send_value(remove_path, -1)
+                                sleep(0.1)
+                            rnbo.send_value(load_path, load_value)
+                            discovery.request("runner", "load set", delay=0.2)
+
+                        Thread(target=load_set_worker, daemon=True).start()
                         ui.state.ui_mode = "GRAPH_MENU"
                         ui.state.graph_menu_cursor = 1 if ui.graph_menu_items else 0
                         ui.set_status_message(f"Loaded {action.value}")
-                        ui.set_busy(False)
 
                 elif action.kind == "load_graph_preset":
                     if action.path is not None:
                         ui.set_busy(True, "load")
                         rnbo.send_value(action.path, action.value)
-                        sleep(0.2)
-                        ui.apply_runner_snapshot(rnbo.discover())
+                        discovery.request("runner", "load graph preset", delay=0.2)
                         ui.state.ui_mode = "GRAPH_PRESET_LIST"
                         ui.state.graph_preset_cursor = ui.graph_preset_initial_cursor()
                         ui.set_status_message(f"Loaded {action.value}")
-                        ui.set_busy(False)
 
                 elif action.kind == "save_graph_preset":
                     if action.path is not None:
                         ui.set_busy(True, "save")
                         rnbo.send_value(action.path, action.value)
-                        sleep(0.2)
-                        ui.apply_runner_snapshot(rnbo.discover())
+                        discovery.request("runner", "save graph preset", delay=0.2)
                         ui.state.ui_mode = "GRAPH_PRESET_LIST"
                         ui.state.graph_preset_cursor = ui.graph_preset_initial_cursor()
                         ui.set_status_message(f"Saved {action.value}")
-                        ui.set_busy(False)
 
                 elif action.kind == "rename_graph_preset":
                     if action.path is not None:
                         ui.set_busy(True, "rename")
                         rnbo.send_value(action.path, action.value)
-                        sleep(0.2)
-                        ui.apply_runner_snapshot(rnbo.discover())
+                        discovery.request("runner", "rename graph preset", delay=0.2)
                         ui.state.ui_mode = "GRAPH_PRESET_LIST"
                         ui.state.graph_preset_cursor = ui.graph_preset_initial_cursor()
-                        ui.set_busy(False)
 
                 elif action.kind == "delete_graph_preset":
                     if action.path is not None:
                         ui.set_busy(True, "delete")
                         rnbo.send_value(action.path, action.value)
-                        sleep(0.2)
-                        ui.apply_runner_snapshot(rnbo.discover())
+                        discovery.request("runner", "delete graph preset", delay=0.2)
                         ui.state.ui_mode = "GRAPH_PRESET_LIST"
                         ui.state.graph_preset_cursor = ui.graph_preset_initial_cursor()
                         ui.set_status_message(f"Removed {action.value}")
-                        ui.set_busy(False)
 
                 elif action.kind == "save_set":
                     if action.path is not None:
                         ui.set_busy(True, "save")
                         rnbo.send_value(action.path, action.value)
-                        sleep(0.2)
-                        ui.apply_runner_snapshot(rnbo.discover())
+                        discovery.request("runner", "save set", delay=0.2)
                         ui.state.ui_mode = "GRAPH_MENU"
                         ui.state.graph_menu_cursor = 1 if ui.graph_menu_items else 0
                         ui.set_status_message(f"Saved {action.value}")
-                        ui.set_busy(False)
 
                 elif action.kind == "rename_set":
                     if action.path is not None:
                         ui.set_busy(True, "rename")
                         rnbo.send_value(action.path, action.value)
-                        sleep(0.2)
-                        ui.apply_runner_snapshot(rnbo.discover())
+                        discovery.request("runner", "rename set", delay=0.2)
                         ui.state.ui_mode = "GRAPH_STATUS"
                         ui.state.graph_menu_cursor = 1
-                        ui.set_busy(False)
 
                 elif action.kind == "save_preset":
                     if action.path is not None:
                         ui.set_busy(True, "save")
                         rnbo.send_value(action.path, action.value)
-                        sleep(0.2)
-                        ui.apply_runner_snapshot(rnbo.discover())
+                        discovery.request("runner", "save preset", delay=0.2)
                         ui.state.ui_mode = "PRESET_LIST"
                         ui.state.preset_cursor = ui.preset_initial_cursor()
                         ui.set_status_message(f"Saved {action.value}")
-                        ui.set_busy(False)
 
                 elif action.kind == "rename_preset":
                     if action.path is not None:
                         ui.set_busy(True, "rename")
                         rnbo.send_value(action.path, action.value)
-                        sleep(0.2)
-                        ui.apply_runner_snapshot(rnbo.discover())
+                        discovery.request("runner", "rename preset", delay=0.2)
                         ui.state.ui_mode = "PRESET_LIST"
                         ui.state.preset_cursor = ui.preset_initial_cursor()
-                        ui.set_busy(False)
 
                 elif action.kind == "delete_preset":
                     if action.path is not None:
                         ui.set_busy(True, "delete")
                         rnbo.send_value(action.path, action.value)
-                        sleep(0.2)
-                        ui.apply_runner_snapshot(rnbo.discover())
+                        discovery.request("runner", "delete preset", delay=0.2)
                         ui.state.ui_mode = "PRESET_LIST"
                         ui.state.preset_cursor = ui.preset_initial_cursor()
                         ui.set_status_message(f"Removed {action.value}")
-                        ui.set_busy(False)
 
                 elif action.kind == "set_graph_startup":
                     updates = action.value if isinstance(action.value, list) else []
@@ -852,41 +937,22 @@ def main():
                             if path is None or str(path) == "":
                                 continue
                             rnbo.send_value(str(path), value)
-                        sleep(0.1)
-                        ui.apply_runner_snapshot(rnbo.discover())
+                        discovery.request("runner", "set graph startup", delay=0.1)
                         ui.state.ui_mode = "GRAPH_STARTUP"
-                        ui.set_busy(False)
 
                 elif action.kind == "set_routing":
                     if action.path is not None:
                         ui.set_busy(True, "routing")
                         rnbo.send_value(action.path, action.value)
-                        sleep(0.1)
-                        ui.apply_runner_snapshot(rnbo.discover())
-                        ui.set_busy(False)
+                        discovery.request("runner", "set routing", delay=0.1)
 
                 elif action.kind == "add_instance":
                     if action.path is not None:
                         ui.set_busy(True, "load")
                         before_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
                         rnbo.send_value(action.path, action.value)
-                        after_ids, new_ids = _discover_new_instance_ids(ui, rnbo, before_ids)
-                        if not new_ids and _try_dummy_audio_fallback(ui, rnbo):
-                            rnbo.send_value(action.path, action.value)
-                            after_ids, new_ids = _discover_new_instance_ids(ui, rnbo, before_ids)
-                        if new_ids:
-                            changed = _assign_next_unused_inputs(ui, rnbo, new_ids[-1])
-                            changed = _assign_next_unused_outputs(ui, rnbo, new_ids[-1]) or changed
-                            if changed:
-                                sleep(0.1)
-                                ui.apply_runner_snapshot(rnbo.discover())
-                                after_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
-                            _apply_saved_midi_profile(ui, rnbo, new_ids[-1])
-                            after_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
-                            ui.state.active_instance_id = str(new_ids[-1])
-                            ui.state.instance_cursor = after_ids.index(new_ids[-1]) + 1
-                            _apply_post_load_view(ui)
-                        ui.set_busy(False)
+                        lifecycle_context["add instance"] = {"before_ids": before_ids}
+                        discovery.request("runner", "add instance", delay=0.25)
 
                 elif action.kind == "replace_instance":
                     if action.path is not None:
@@ -895,29 +961,8 @@ def main():
                         before_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
                         target_index = before_ids.index(target_id) if target_id in before_ids else max(ui.state.instance_cursor - 1, 0)
                         rnbo.send_value(action.path, action.value)
-                        sleep(0.2)
-                        ui.apply_runner_snapshot(rnbo.discover())
-                        after_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
-                        replacement_id = ""
-                        if target_id in after_ids:
-                            replacement_id = str(target_id)
-                        else:
-                            new_ids = [item for item in after_ids if item not in before_ids]
-                            if new_ids:
-                                replacement_id = new_ids[-1]
-                            elif after_ids:
-                                fallback_index = min(target_index, len(after_ids) - 1)
-                                replacement_id = str(after_ids[fallback_index])
-                            else:
-                                ui.state.active_instance_id = ""
-                                ui.state.instance_cursor = 0
-                        if replacement_id:
-                            _apply_saved_midi_profile(ui, rnbo, replacement_id)
-                            after_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
-                            ui.state.active_instance_id = replacement_id
-                            ui.state.instance_cursor = after_ids.index(replacement_id) + 1 if replacement_id in after_ids else 1
-                        _apply_post_load_view(ui)
-                        ui.set_busy(False)
+                        lifecycle_context["replace instance"] = {"before_ids": before_ids, "target_id": target_id, "target_index": target_index}
+                        discovery.request("runner", "replace instance", delay=0.25)
 
                 elif action.kind == "remove_instance":
                     if action.path is not None:
@@ -926,108 +971,55 @@ def main():
                         before_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
                         removed_index = before_ids.index(removed_id) if removed_id in before_ids else max(ui.state.instance_cursor - 1, 0)
                         rnbo.send_value(action.path, action.value)
-                        sleep(0.2)
-                        ui.apply_runner_snapshot(rnbo.discover())
-                        after_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
-                        if after_ids:
-                            new_index = min(removed_index, len(after_ids) - 1)
-                            ui.state.active_instance_id = str(after_ids[new_index])
-                            ui.state.instance_cursor = after_ids.index(ui.state.active_instance_id) + 1
-                        else:
-                            ui.state.active_instance_id = ""
-                            ui.state.instance_cursor = 0
-                        ui.state.pending_remove_instance_id = ""
-                        ui.state.remove_instance_origin = ""
-                        ui.state.ui_mode = "INSTANCE_LIST"
-                        ui.set_busy(False)
+                        lifecycle_context["remove instance"] = {"removed_index": removed_index}
+                        discovery.request("runner", "remove instance", delay=0.25)
 
                 elif action.kind == "set_audio_device":
                     ui.set_busy(True, "audio")
-                    rnbo.set_audio_device(action.device_name)
+                    card_path = ui.state.system.get("audio", {}).get("card_path", JACK_CARD_PATH_DEFAULT)
+                    rnbo.send_value(card_path, action.device_name)
                     rnbo.restart_jack(ui.state.system.get("maint", {}).get("jack_restart_path", ""))
-                    sleep(0.6)
-                    ui.apply_runner_snapshot(rnbo.discover())
-                    ui.set_busy(False)
+                    discovery.request("runner", "set audio device", delay=0.6)
 
                 elif action.kind == "set_jack_config":
                     if action.path is not None:
                         ui.set_busy(True, "audio")
                         rnbo.send_value(action.path, action.value)
                         rnbo.restart_jack(ui.state.system.get("maint", {}).get("jack_restart_path", ""))
-                        sleep(0.6)
-                        ui.apply_runner_snapshot(rnbo.discover())
-                        ui.set_busy(False)
+                        discovery.request("runner", "set jack config", delay=0.6)
 
                 elif action.kind == "restart_jack":
                     ui.set_busy(True, "audio")
                     rnbo.restart_jack(ui.state.system.get("maint", {}).get("jack_restart_path", ""))
-                    sleep(0.6)
-                    ui.apply_runner_snapshot(rnbo.discover())
-                    ui.set_busy(False)
+                    discovery.request("runner", "restart jack", delay=0.6)
 
                 elif action.kind == "refresh_snapshot":
                     ui.set_busy(True, "refresh")
-                    ui.apply_runner_snapshot(rnbo.discover())
-                    ui.set_busy(False)
+                    discovery.request("runner", "manual refresh")
 
                 elif action.kind in {"enable_direct_ethernet", "disable_direct_ethernet"}:
                     ui.set_busy(True, "network")
-                    ok, error = _run_direct_ethernet_helper(
-                        "enable" if action.kind == "enable_direct_ethernet" else "disable"
-                    )
-                    sleep(0.1)
-                    ui.apply_runner_snapshot(rnbo.discover())
-                    if ok:
-                        ui.clear_network_error()
-                    else:
-                        ui.set_network_error(error)
-                    ui.state.ui_mode = "NETWORK"
-                    ui.state.network_cursor = 1 if ui.network_value_rows else 0
-                    ui.set_busy(False)
+                    network_operations.request(action.kind)
 
                 elif action.kind == "connect_wifi":
                     ui.set_busy(True, "network")
-                    ok, error = _run_wifi_network_helper("connect", action.ssid or "")
-                    sleep(0.5)
-                    ui.apply_runner_snapshot(rnbo.discover())
-                    if ok:
-                        ui.clear_network_error()
-                    else:
-                        ui.set_network_error(error)
-                    ui.state.ui_mode = "NETWORK"
-                    ui.state.network_cursor = 5 if len(ui.network_value_rows) >= 5 else 1
-                    ui.set_busy(False)
+                    network_operations.request("connect_wifi", action.ssid or "")
 
                 elif action.kind == "connect_wifi_new":
                     ui.set_busy(True, "network")
-                    ok, error = _run_wifi_network_helper("connect-new", action.ssid or "", str(action.value or ""))
-                    sleep(0.5)
-                    ui.apply_runner_snapshot(rnbo.discover())
-                    if ok:
-                        ui.clear_network_error()
-                    else:
-                        ui.set_network_error(error)
-                    ui.state.ui_mode = "NETWORK"
-                    ui.state.network_cursor = 5 if len(ui.network_value_rows) >= 5 else 1
-                    ui.set_busy(False)
+                    network_operations.request("connect_wifi_new", action.ssid or "", str(action.value or ""))
 
                 elif action.kind == "rescan_wifi":
                     ui.set_busy(True, "network")
-                    ok, error = _run_wifi_network_helper("rescan")
-                    ui.apply_runner_snapshot(rnbo.discover())
-                    if ok:
-                        ui.clear_network_error()
-                    else:
-                        ui.set_network_error(error)
-                    ui.state.ui_mode = "WIFI_NETWORKS" if ui.network_wifi_available else "NETWORK"
-                    ui.state.wifi_network_cursor = ui.wifi_network_initial_cursor()
-                    ui.set_busy(False)
+                    discovery.request("wifi_rescan", "explicit rescan")
 
                 elif action.kind == "check_software_update":
                     ui.set_busy(True, "update")
-                    ui.set_software_update_status(read_all_software_update_status(fetch=True))
                     ui.state.ui_mode = "SOFTWARE_UPDATE"
-                    ui.set_busy(False)
+                    Thread(
+                        target=lambda: update_status_queue.put(read_all_software_update_status(fetch=True)),
+                        daemon=True,
+                    ).start()
 
                 elif action.kind == "apply_software_update":
                     if update_cancel_event is not None and not update_cancel_event.is_set():
@@ -1112,11 +1104,15 @@ def main():
             if (now - last_refresh) >= REFRESH_SECONDS:
                 last_refresh = now
                 if not ui.should_pause_refresh():
-                    ui.set_busy(True, "refresh")
-                    ui.apply_runner_snapshot(rnbo.discover())
-                    if not dummy_audio_fallback_attempted and _try_dummy_audio_fallback(ui, rnbo):
-                        dummy_audio_fallback_attempted = True
-                    ui.set_busy(False)
+                    discovery.request("runner", "periodic")
+
+            if ui.state.ui_mode != previous_mode:
+                previous_mode = ui.state.ui_mode
+                scheduler.request("mode")
+                if previous_mode == "NETWORK":
+                    discovery.request("network_status", "network screen")
+                elif previous_mode == "WIFI_NETWORKS":
+                    discovery.request("wifi_list", "wifi screen")
 
             # OLED dim / sleep policy
             idle = now - last_activity
@@ -1128,22 +1124,41 @@ def main():
             elif (not is_dimmed) and idle >= DIM_TIMEOUT:
                 display.set_contrast(brightness_dim)
                 is_dimmed = True
+                scheduler.request("dim")
 
-            # Draw at fixed-ish frame rate, but allow selected screens to opt into a faster animation cadence.
-            is_turbo_frame = ui.uses_turbo_rendering
-            target_frame_dt = TURBO_FRAME_DT if is_turbo_frame else FRAME_DT
-            frame_scale = target_frame_dt / FRAME_DT if is_turbo_frame else 1.0
-            if (not is_sleeping) and (now - last_frame) >= target_frame_dt:
+            if ui.render_revision:
+                scheduler.request(ui.last_render_reason)
+                ui.render_revision = 0
+
+            if (not is_sleeping) and scheduler.should_render(ui, now):
                 last_frame = now
-                ui.advance_frame(frame_scale=frame_scale)
+                frame_rate = scheduler.frame_rate(ui) or FPS
+                advance_animation = scheduler.animation_due(ui, now)
+                if advance_animation:
+                    ui.advance_frame(frame_scale=(1.0 / frame_rate) / FRAME_DT)
+                render_timer = Timer(perf, "render")
                 renderer.draw(ui, touch_state=encoder.touch_sample())
+                render_timer.stop()
                 encoder.set_touch_layout(renderer.touch_layout)
+                # Use the presentation-complete timestamp.  Reusing ``now``
+                # from the top of the loop hid the entire draw/framebuffer
+                # duration and made the latency probe report near-zero values.
+                presented_at = monotonic()
+                input_latency = scheduler.rendered(presented_at, animation_advanced=advance_animation)
+                if input_latency is not None:
+                    perf.observe("input_to_render", input_latency)
+                perf.increment(f"frames_{ui.state.ui_mode.lower()}")
+
+            perf.observe("main_loop", monotonic() - loop_started)
+            perf.maybe_log()
 
             sleep(0.001)
 
     except KeyboardInterrupt:
         pass
     finally:
+        discovery.stop()
+        network_operations.stop()
         try:
             rnbo.send_value("/rnbo/listeners/del", osc_listener.listener_spec)
         except Exception:

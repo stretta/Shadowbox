@@ -1,11 +1,13 @@
 import importlib
 import os
+import struct
 import sys
 import types
 import unittest
 from unittest import mock
 
 from shadowbox.touch import TouchAction, TouchLayout, direct_action_for_point, zone_for_point
+from shadowbox.touch import ABS_X, ABS_Y, BTN_TOUCH, EV_ABS, EV_KEY, EV_SYN, TouchZoneReader, _EVENT_STRUCT
 
 
 class TouchZoneMappingTests(unittest.TestCase):
@@ -42,6 +44,52 @@ class TouchDirectMappingTests(unittest.TestCase):
             direct_action_for_point((100 + 40) / 799, (120 + 48) / 479, layout=layout),
             TouchAction("tap_step16", index=7),
         )
+
+
+class TouchEventParsingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.read_fd, self.write_fd = os.pipe()
+        os.set_blocking(self.read_fd, False)
+        self.reader = TouchZoneReader.__new__(TouchZoneReader)
+        self.reader.fd = self.read_fd
+        self.reader.width = 800
+        self.reader.height = 480
+        self.reader.min_x = 0
+        self.reader.max_x = 799
+        self.reader.min_y = 0
+        self.reader.max_y = 479
+        self.reader.x = 0
+        self.reader.y = 0
+        self.reader.pressed = False
+
+    def tearDown(self) -> None:
+        self.reader.close()
+        os.close(self.write_fd)
+
+    def _write_events(self, *events: tuple[int, int, int]) -> None:
+        payload = b"".join(_EVENT_STRUCT.pack(0, 0, event_type, code, value) for event_type, code, value in events)
+        os.write(self.write_fd, payload)
+
+    def test_event_record_uses_native_kernel_abi(self) -> None:
+        self.assertEqual(_EVENT_STRUCT.size, struct.calcsize("@llHHi"))
+
+    def test_pressed_motion_streams_on_each_syn_report(self) -> None:
+        self._write_events(
+            (EV_ABS, ABS_X, 100),
+            (EV_ABS, ABS_Y, 200),
+            (EV_KEY, BTN_TOUCH, 1),
+            (EV_SYN, 0, 0),
+        )
+        down = self.reader.read_samples()
+        self.assertEqual([(item.x, item.y, item.pressed) for item in down], [(100, 200, True)])
+
+        self._write_events((EV_ABS, ABS_X, 300), (EV_SYN, 0, 0))
+        moved = self.reader.read_samples()
+        self.assertEqual([(item.x, item.y, item.pressed) for item in moved], [(300, 200, True)])
+
+        self._write_events((EV_KEY, BTN_TOUCH, 0), (EV_SYN, 0, 0))
+        released = self.reader.read_samples()
+        self.assertEqual([(item.x, item.y, item.pressed) for item in released], [(300, 200, False)])
 
 
 class _FakeTouchReader:

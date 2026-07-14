@@ -166,6 +166,27 @@ class ShadowboxRenderer:
         self.touch_layout: TouchLayout | None = None
         self._touch_state: TouchSample | None = None
         self._touch_mode = False
+        self._scope_points_cache_key = None
+        self._scope_points_cache: list[tuple[int, int]] = []
+
+    def _scope_points(self, samples, x: int, y: int, w: int, h: int) -> list[tuple[int, int]]:
+        key = (id(samples), getattr(samples, "revision", None), len(samples), x, y, w, h)
+        if key == self._scope_points_cache_key:
+            return self._scope_points_cache
+        visible = samples[-max(1, w - 2):]
+        if len(visible) == 1:
+            visible = visible * 2
+        mid_y = y + h // 2
+        points = [
+            (
+                x + w - len(visible) - 1 + idx,
+                max(y + 1, min(y + h - 2, mid_y - int(round(max(-1.0, min(1.0, float(sample))) * ((h - 3) / 2))))),
+            )
+            for idx, sample in enumerate(visible)
+        ]
+        self._scope_points_cache_key = key
+        self._scope_points_cache = points
+        return points
 
     def _text(self, text: str, x: int, y: int, scale: int = 1, weight: str = "regular", on: bool = True) -> None:
         self.display.text_with_style(str(text), x, y, scale, weight, on=on)
@@ -2345,6 +2366,10 @@ class ShadowboxRenderer:
     def _draw_polyline(self, points: list[tuple[int, int]], on: bool = True) -> None:
         if len(points) < 2:
             return
+        polyline = getattr(self.display, "polyline", None)
+        if callable(polyline):
+            polyline(points, on)
+            return
         for (x0, y0), (x1, y1) in zip(points, points[1:]):
             dx = abs(x1 - x0)
             dy = -abs(y1 - y0)
@@ -2366,13 +2391,17 @@ class ShadowboxRenderer:
                     y += sy
 
     def _draw_polyline_theme(self, points: list[tuple[int, int]], color: str) -> None:
+        if len(points) < 2:
+            return
+        theme_color = self._theme(color)
+        polyline_color = getattr(self.display, "polyline_color", None)
+        if callable(polyline_color):
+            polyline_color(points, theme_color)
+            return
         pixel_color = getattr(self.display, "pixel_color", None)
         if not callable(pixel_color):
             self._draw_polyline(points, True)
             return
-        if len(points) < 2:
-            return
-        theme_color = self._theme(color)
         for (x0, y0), (x1, y1) in zip(points, points[1:]):
             dx = abs(x1 - x0)
             dy = -abs(y1 - y0)
@@ -3179,7 +3208,7 @@ class ShadowboxRenderer:
             self.text_center_scaled(status_text, status_y, status_scale)
 
     def draw_edit_scope(self, ui, param, state) -> None:
-        samples = list(getattr(state, "edit_scope_samples", []) or [])
+        samples = getattr(state, "edit_scope_samples", []) or []
         if self.touch_layout_enabled:
             panel_w = 720
             panel_h = 360
@@ -3199,14 +3228,7 @@ class ShadowboxRenderer:
             self.display.hline(x + 1, mid_y, max(0, w - 2), True)
 
             if samples and w > 2 and h > 2:
-                visible = samples[-max(1, w - 2):]
-                if len(visible) == 1:
-                    visible = visible * 2
-                points: list[tuple[int, int]] = []
-                for idx, sample in enumerate(visible):
-                    sx = x + w - len(visible) - 1 + idx
-                    sy = mid_y - int(round(max(-1.0, min(1.0, float(sample))) * ((h - 3) / 2)))
-                    points.append((sx, max(y + 1, min(y + h - 2, sy))))
+                points = self._scope_points(samples, x, y, w, h)
                 if self.has_color:
                     self._draw_polyline_theme(points, "accent")
                 else:
@@ -3254,14 +3276,7 @@ class ShadowboxRenderer:
         self.display.hline(x + 1, mid_y, max(0, w - 2), True)
 
         if samples and w > 2 and h > 2:
-            visible = samples[-max(1, w - 2):]
-            if len(visible) == 1:
-                visible = visible * 2
-            points: list[tuple[int, int]] = []
-            for idx, sample in enumerate(visible):
-                sx = x + w - len(visible) - 1 + idx
-                sy = mid_y - int(round(max(-1.0, min(1.0, float(sample))) * ((h - 3) / 2)))
-                points.append((sx, max(y + 1, min(y + h - 2, sy))))
+            points = self._scope_points(samples, x, y, w, h)
             self._draw_polyline(points, True)
         else:
             self.text_center("waiting", mid_y - 4)

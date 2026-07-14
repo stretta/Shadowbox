@@ -231,9 +231,9 @@ def _wifi_network_helper_path() -> str:
     return os.environ.get("SHADOWBOX_WIFI_NETWORK_HELPER", WIFI_NETWORK_HELPER_DEFAULT).strip()
 
 
-def _wifi_scan_lines() -> list[str]:
+def _wifi_scan_lines(*, active_scan: bool = True) -> list[str]:
     helper_path = _wifi_network_helper_path()
-    if helper_path and os.path.exists(helper_path):
+    if active_scan and helper_path and os.path.exists(helper_path):
         try:
             result = subprocess.run(
                 ["sudo", "-n", helper_path, "list"],
@@ -246,7 +246,10 @@ def _wifi_scan_lines() -> list[str]:
             result = None
         if result is not None and result.returncode == 0:
             return [line for line in result.stdout.splitlines() if line.strip()]
-    return _nmcli_lines(["--fields", "IN-USE,SSID,SIGNAL,SECURITY", "device", "wifi", "list", "--rescan", "yes"], timeout=5.0)
+    return _nmcli_lines(
+        ["--fields", "IN-USE,SSID,SIGNAL,SECURITY", "device", "wifi", "list", "--rescan", "yes" if active_scan else "no"],
+        timeout=5.0 if active_scan else 2.0,
+    )
 
 
 def _nmcli_connection_ssid(connection_id: str) -> str:
@@ -267,7 +270,7 @@ def _nmcli_connection_ssid(connection_id: str) -> str:
     return result.stdout.strip()
 
 
-def _discover_wifi_networks() -> list[dict[str, Any]]:
+def _discover_wifi_networks(*, active_scan: bool = True) -> list[dict[str, Any]]:
     saved_by_ssid: dict[str, str] = {}
     saved_connections: list[dict[str, Any]] = []
     for line in _nmcli_lines(["--fields", "NAME,TYPE,ACTIVE", "connection", "show"], timeout=2.0):
@@ -280,7 +283,7 @@ def _discover_wifi_networks() -> list[dict[str, Any]]:
             saved_connections.append({"id": connection_id, "ssid": ssid, "active": active})
 
     networks_by_ssid: dict[str, dict[str, Any]] = {}
-    lines = _wifi_scan_lines()
+    lines = _wifi_scan_lines(active_scan=active_scan)
     for line in lines:
         fields = _split_nmcli_terse(line)
         if len(fields) < 2:
@@ -330,6 +333,14 @@ def _discover_wifi_networks() -> list[dict[str, Any]]:
     )
 
 
+def _active_wifi_ssid() -> str:
+    for line in _nmcli_lines(["--fields", "NAME,TYPE", "connection", "show", "--active"], timeout=2.0):
+        fields = _split_nmcli_terse(line)
+        if len(fields) >= 2 and fields[1].strip() == "802-11-wireless":
+            return _nmcli_connection_ssid(fields[0].strip()) or fields[0].strip()
+    return ""
+
+
 def _discover_ipv4_addresses() -> dict[str, list[str]]:
     try:
         result = subprocess.run(
@@ -377,7 +388,7 @@ def _first_link_local(addresses: list[str]) -> str:
     return ""
 
 
-def discover_host_network() -> dict[str, Any]:
+def discover_host_network(*, include_wifi_list: bool = True, active_scan: bool = True) -> dict[str, Any]:
     interfaces = _list_network_interfaces()
     ipv4_by_interface = _discover_ipv4_addresses()
 
@@ -412,12 +423,16 @@ def discover_host_network() -> dict[str, Any]:
     wifi_ipv4 = _first_non_link_local(wifi_ipv4_list) or _first_link_local(wifi_ipv4_list)
     primary_ipv4 = wifi_ipv4 or wired_ipv4
     wired_link_local = _first_link_local(wired_ipv4_list)
-    wifi_networks = _discover_wifi_networks() if wifi_name else []
+    # Wi-Fi enumeration is intentionally opt-in.  OSCQuery/runner refreshes
+    # happen frequently and must never launch nmcli or the privileged helper.
+    wifi_networks = _discover_wifi_networks(active_scan=active_scan) if wifi_name and include_wifi_list else []
     wifi_ssid = ""
     for item in wifi_networks:
         if item.get("connected"):
             wifi_ssid = str(item.get("ssid", "") or "").strip()
             break
+    if wifi_name and not wifi_ssid and not include_wifi_list:
+        wifi_ssid = _active_wifi_ssid()
     direct_setup_active = DIRECT_ETHERNET_IP in {str(item).strip() for item in wired_ipv4_list if str(item).strip()}
     direct_setup_ready = bool(
         (wired_link and direct_setup_active)
@@ -951,7 +966,6 @@ def discover_system(tree: dict) -> dict:
         "set_name": sets.get("current_name", ""),
         "sets": sets,
         "set_presets": set_presets,
-        "network": discover_host_network(),
         "maint": {
             "jack_restart_path": str(jack_restart_path) if jack_restart_path is not None else "",
         },
@@ -969,13 +983,16 @@ class RNBOClient:
         self.port = port
         self.oscquery_url = oscquery_url
         self.client = SimpleUDPClient(self.host, self.port)
+        self.log_sends = os.environ.get("SHADOWBOX_OSC_LOG", "").strip().lower() in {"1", "true", "yes", "on"}
 
     def send_value(self, path: str, value: Any) -> None:
-        print("send:", path, value)
+        if self.log_sends:
+            print("send:", path, value)
         self.client.send_message(path, value)
 
     def send_trigger(self, path: str) -> None:
-        print("trigger:", path)
+        if self.log_sends:
+            print("trigger:", path)
         self.client.send_message(path, [])
 
     def set_param(self, path: str, value: Any) -> None:
@@ -996,16 +1013,19 @@ class RNBOClient:
         with urllib.request.urlopen(self.oscquery_url, timeout=2) as response:
             return json.loads(response.read().decode("utf-8"))
 
-    def discover(self) -> RNBOSnapshot:
+    def discover_runner_strict(self) -> RNBOSnapshot:
+        tree = self.fetch_tree()
+        return RNBOSnapshot(
+            instances=discover_instances(tree),
+            patchers=discover_patchers(tree),
+            add_instance_path=discover_add_instance_path(tree),
+            remove_instance_path=discover_remove_instance_path(tree),
+            system=discover_system(tree),
+        )
+
+    def discover_runner(self) -> RNBOSnapshot:
         try:
-            tree = self.fetch_tree()
-            return RNBOSnapshot(
-                instances=discover_instances(tree),
-                patchers=discover_patchers(tree),
-                add_instance_path=discover_add_instance_path(tree),
-                remove_instance_path=discover_remove_instance_path(tree),
-                system=discover_system(tree),
-            )
+            return self.discover_runner_strict()
         except Exception as e:
             print("OSCQuery discovery failed:", e)
             return RNBOSnapshot(
@@ -1080,3 +1100,17 @@ class RNBOClient:
                     },
                 },
             )
+
+    def discover(self) -> RNBOSnapshot:
+        """Compatibility alias for runner-only discovery.
+
+        Host networking is deliberately excluded; callers that need it must
+        request it explicitly through ``discover_network_status``.
+        """
+        return self.discover_runner()
+
+    def discover_network_status(self) -> dict[str, Any]:
+        return discover_host_network(include_wifi_list=False)
+
+    def discover_wifi_networks(self, *, active_scan: bool = False) -> dict[str, Any]:
+        return discover_host_network(include_wifi_list=True, active_scan=active_scan)

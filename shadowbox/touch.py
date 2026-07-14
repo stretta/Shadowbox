@@ -19,10 +19,10 @@ ABS_Y = 0x01
 ABS_MT_POSITION_X = 0x35
 ABS_MT_POSITION_Y = 0x36
 
-# Raspberry Pi OS exposes 32-bit timeval fields in evdev here even on aarch64.
-# Use a standard-size format so event parsing does not depend on Python's native
-# long size on the host running the code.
-_EVENT_STRUCT = struct.Struct("=llHHi")
+# ``input_event`` contains a native ``timeval``.  Its two longs are 64-bit on
+# wren's aarch64 Raspberry Pi OS (24-byte records) and 32-bit on a 32-bit OS
+# (16-byte records), so the parser must follow the running kernel ABI.
+_EVENT_STRUCT = struct.Struct("@llHHi")
 _ABSINFO_STRUCT = struct.Struct("iiiiii")
 
 

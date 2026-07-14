@@ -69,6 +69,11 @@ class _TouchScopeDisplay(_ScopeDisplay):
         self.ops.append(("pixel_color", x, y, color))
 
 
+class _AcceleratedTouchScopeDisplay(_TouchScopeDisplay):
+    def polyline_color(self, points, color) -> None:
+        self.ops.append(("polyline_color", list(points), color))
+
+
 class ScopeEditorTests(unittest.TestCase):
     def test_normalize_scope_samples_clips_numeric_inputs(self) -> None:
         self.assertEqual(normalize_scope_samples([-2, "-0.5", 0.25, 3, True, "bad"]), [-1.0, -0.5, 0.25, 1.0])
@@ -213,6 +218,19 @@ class ScopeEditorTests(unittest.TestCase):
         color_pixels = [op for op in display.ops if op[0] == "pixel_color"]
         self.assertTrue(color_pixels)
         self.assertTrue(all(op[3] == (21, 193, 129) for op in color_pixels))
+
+    def test_touch_scope_uses_accelerated_polyline_when_available(self) -> None:
+        display = _AcceleratedTouchScopeDisplay()
+        renderer = ShadowboxRenderer(display)
+        renderer.set_touch_mode(True)
+        state = SimpleNamespace(edit_scope_samples=[-1.0, 0.0, 1.0], edit_value=48000.0)
+
+        renderer.draw_edit_scope(SimpleNamespace(), {"metadata": {"editor": "scope"}, "value": 48000.0}, state)
+
+        lines = [op for op in display.ops if op[0] == "polyline_color"]
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0][2], (21, 193, 129))
+        self.assertFalse(any(op[0] == "pixel_color" for op in display.ops))
 
     def test_touch_scope_history_can_fill_left_edge(self) -> None:
         display = _TouchScopeDisplay()

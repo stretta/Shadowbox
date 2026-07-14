@@ -416,6 +416,8 @@ class ValueRow:
 class ShadowboxUI:
     def __init__(self, rnbo=None):
         self.rnbo = rnbo
+        self.render_revision = 0
+        self.last_render_reason = "startup"
         self.state = UIState()
         self._actions: list[UIAction] = []
         self._saved_state_cache = load_state_file()
@@ -550,12 +552,19 @@ class ShadowboxUI:
         self.state.busy_reason = reason
         if busy:
             self.state.activity_ticks += 1
+        self.request_render("busy")
+
+    def request_render(self, reason: str = "state") -> int:
+        self.render_revision += 1
+        self.last_render_reason = str(reason)
+        return self.render_revision
 
     def set_status_message(self, message: str, frames: int = 36) -> None:
         self.state.status_message = str(message or "")
         self.state.status_frames = max(0, int(frames))
         if self.state.status_message:
             self.state.activity_ticks += 1
+        self.request_render("status")
 
     def set_software_update_status(self, status: dict) -> None:
         next_status = dict(status or {})
@@ -567,6 +576,7 @@ class ShadowboxUI:
             len(self.software_update_rows),
         )
         self.state.activity_ticks += 1
+        self.request_render("software_update")
 
     def apply_runner_snapshot(self, snapshot) -> None:
         current_id = str(self.state.active_instance_id)
@@ -577,7 +587,10 @@ class ShadowboxUI:
         self.state.patchers = snapshot.patchers
         self.state.add_instance_path = snapshot.add_instance_path
         self.state.remove_instance_path = snapshot.remove_instance_path
-        self.state.system = snapshot.system
+        cached_network = self.state.system.get("network", {}) if isinstance(self.state.system, dict) else {}
+        self.state.system = dict(snapshot.system)
+        if cached_network:
+            self.state.system["network"] = cached_network
         self._sync_audio_index()
         self._cleanup_current_presets()
 
@@ -645,6 +658,21 @@ class ShadowboxUI:
                 self.state.edit_value = normalize_current_value_for_edit(self.selected_param)
             else:
                 self.state.edit_value = normalize_current_value_for_edit(self.selected_param)
+        self.request_render("runner_snapshot")
+
+    def apply_network_snapshot(self, network: dict) -> None:
+        system = dict(self.state.system or {})
+        previous = system.get("network", {}) if isinstance(system.get("network", {}), dict) else {}
+        merged = dict(previous)
+        merged.update(dict(network or {}))
+        # Status-only refreshes preserve the cached Wi-Fi list.
+        if "wifi_networks" not in network and "wifi_networks" in previous:
+            merged["wifi_networks"] = previous["wifi_networks"]
+        system["network"] = merged
+        self.state.system = system
+        self.state.network_cursor = clamp_index(self.state.network_cursor or 1, len(self.network_value_rows))
+        self.state.wifi_network_cursor = clamp_index(self.state.wifi_network_cursor, len(self.wifi_network_rows))
+        self.request_render("network_snapshot")
 
     def apply_instance_state_update(self, instance_id: str, path: str, value: Any) -> bool:
         instance_id = str(instance_id)
@@ -664,6 +692,8 @@ class ShadowboxUI:
                         and self.active_scope_state_value is item
                     ):
                         self.state.edit_scope_samples = append_scope_samples(self.state.edit_scope_samples, value)
+                    if self.state.ui_mode == "EDIT" and self.state.active_instance_id == instance_id:
+                        self.request_render("osc_state")
                     return True
         return False
 
@@ -680,9 +710,17 @@ class ShadowboxUI:
                 param_path = str(param.get("path", ""))
                 if param_path != path:
                     continue
+                previous = param.get("value")
+                values_match = previous == value
+                if isinstance(previous, (int, float)) and isinstance(value, (int, float)):
+                    values_match = abs(float(previous) - float(value)) < 1e-9
+                if values_match:
+                    return True
                 param["value"] = value
                 if self.state.ui_mode == "EDIT" and self.selected_param is param:
                     self.state.edit_value = normalize_current_value_for_edit(param)
+                if self.state.active_instance_id == instance_id and self.state.ui_mode in {"PARAM_LIST", "EDIT"}:
+                    self.request_render("osc_param")
                 return True
         return False
 
@@ -2345,9 +2383,6 @@ class ShadowboxUI:
         return actions
 
     def should_pause_refresh(self) -> bool:
-        if self.state.ui_mode == "EDIT" and self.selected_param:
-            if is_step16_param(self.selected_param) or is_pitch_display_param(self.selected_param):
-                return False
         return self.state.ui_mode in {
             "GRAPH_MENU",
             "GRAPH_SET_LIST",

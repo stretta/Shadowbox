@@ -13,6 +13,7 @@ import glob
 import mmap
 import os
 from pathlib import Path
+from time import monotonic
 
 from shadowbox.display.base import DisplayBackend
 from shadowbox.display.tft_text import line_height, measure_text, render_text_line_mask, render_text_mask
@@ -65,6 +66,9 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
         self._bytes_per_pixel = 4
         self._backlight_dir = Path(backlight_path) if backlight_path else self._find_backlight_dir()
         self._backlight_max = self._read_backlight_max()
+        self._canvas_revision = 0
+        self._last_frame_key: tuple[int, int] | None = None
+        self.performance_probe = None
 
     @staticmethod
     def _sysfs_int(path: str | Path) -> int | None:
@@ -147,6 +151,10 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
 
     def clear(self) -> None:
         self._draw.rectangle((0, 0, self.width, self.height), fill=self.bg_color)
+        self._mark_dirty()
+
+    def _mark_dirty(self) -> None:
+        self._canvas_revision += 1
 
     def _frame_image(self) -> Image.Image:
         logical = self._canvas
@@ -279,9 +287,24 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
     def show(self) -> None:
         if self.is_sleeping or self._fb_map is None:
             return
-        frame = self._pack_frame(self._frame_image())
+        frame_key = (self._canvas_revision, self._contrast_level)
+        if frame_key == self._last_frame_key:
+            probe = self.performance_probe
+            if probe is not None:
+                probe.increment("framebuffer_identical_skipped")
+            return
+        image = self._frame_image()
+        pack_started = monotonic()
+        frame = self._pack_frame(image)
+        probe = self.performance_probe
+        if probe is not None:
+            probe.observe("framebuffer_pack", monotonic() - pack_started)
+        show_started = monotonic()
         self._fb_map.seek(0)
         self._fb_map.write(frame)
+        self._last_frame_key = frame_key
+        if probe is not None:
+            probe.observe("framebuffer_show", monotonic() - show_started)
 
     def set_contrast(self, value: int) -> None:
         contrast = max(0, min(255, int(value)))
@@ -304,21 +327,37 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
         if not (0 <= x < self.width and 0 <= y < self.height):
             return
         self._draw.point((x, y), fill=self.fg_color if on else self.bg_color)
+        self._mark_dirty()
 
     def pixel_color(self, x: int, y: int, color: tuple[int, int, int]) -> None:
         if not (0 <= x < self.width and 0 <= y < self.height):
             return
         self._draw.point((x, y), fill=self._normalize_color(color))
+        self._mark_dirty()
+
+    def polyline(self, points: list[tuple[int, int]], on: bool = True) -> None:
+        if len(points) < 2:
+            return
+        self._draw.line(points, fill=self.fg_color if on else self.bg_color)
+        self._mark_dirty()
+
+    def polyline_color(self, points: list[tuple[int, int]], color: tuple[int, int, int]) -> None:
+        if len(points) < 2:
+            return
+        self._draw.line(points, fill=self._normalize_color(color))
+        self._mark_dirty()
 
     def hline(self, x: int, y: int, w: int, on: bool = True) -> None:
         if w <= 0:
             return
         self._draw.line((x, y, x + w - 1, y), fill=self.fg_color if on else self.bg_color)
+        self._mark_dirty()
 
     def vline(self, x: int, y: int, h: int, on: bool = True) -> None:
         if h <= 0:
             return
         self._draw.line((x, y, x, y + h - 1), fill=self.fg_color if on else self.bg_color)
+        self._mark_dirty()
 
     def rect(self, x: int, y: int, w: int, h: int, on: bool = True, fill: bool = False) -> None:
         if w <= 0 or h <= 0:
@@ -326,8 +365,10 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
         color = self.fg_color if on else self.bg_color
         if fill:
             self._draw.rectangle((x, y, x + w - 1, y + h - 1), outline=color, fill=color)
+            self._mark_dirty()
             return
         self._draw.rectangle((x, y, x + w - 1, y + h - 1), outline=color, fill=None)
+        self._mark_dirty()
 
     def fill_rect_level(self, x: int, y: int, w: int, h: int, level: int) -> None:
         if w <= 0 or h <= 0:
@@ -338,6 +379,7 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
             for idx in range(3)
         )
         self._draw.rectangle((x, y, x + w - 1, y + h - 1), outline=fill, fill=fill)
+        self._mark_dirty()
 
     def _normalize_color(self, color: tuple[int, int, int]) -> tuple[int, int, int]:
         return tuple(max(0, min(255, int(channel))) for channel in color[:3])
@@ -347,12 +389,14 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
             return
         fill = self._normalize_color(color)
         self._draw.rectangle((x, y, x + w - 1, y + h - 1), outline=fill, fill=fill)
+        self._mark_dirty()
 
     def rect_color(self, x: int, y: int, w: int, h: int, color: tuple[int, int, int], fill: bool = False) -> None:
         if w <= 0 or h <= 0:
             return
         outline = self._normalize_color(color)
         self._draw.rectangle((x, y, x + w - 1, y + h - 1), outline=outline, fill=outline if fill else None)
+        self._mark_dirty()
 
     def rounded_rect_color(
         self,
@@ -373,16 +417,19 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
             outline=outline,
             fill=outline if fill else None,
         )
+        self._mark_dirty()
 
     def hline_color(self, x: int, y: int, w: int, color: tuple[int, int, int]) -> None:
         if w <= 0:
             return
         self._draw.line((x, y, x + w - 1, y), fill=self._normalize_color(color))
+        self._mark_dirty()
 
     def vline_color(self, x: int, y: int, h: int, color: tuple[int, int, int]) -> None:
         if h <= 0:
             return
         self._draw.line((x, y, x, y + h - 1), fill=self._normalize_color(color))
+        self._mark_dirty()
 
     def text_color(self, s: str, x: int, y: int, color: tuple[int, int, int], scale: int = 1, weight: str = "regular") -> None:
         mask = render_text_mask(str(s), scale, weight)
@@ -395,6 +442,7 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
                 Image.Resampling.LANCZOS,
             )
         self._canvas.paste(self._normalize_color(color), (x, y, x + mask.width, y + mask.height), mask)
+        self._mark_dirty()
 
     def text_line_color(self, s: str, x: int, y: int, color: tuple[int, int, int], scale: int = 1, weight: str = "regular") -> None:
         mask = render_text_line_mask(str(s), scale, weight)
@@ -407,6 +455,7 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
                 Image.Resampling.LANCZOS,
             )
         self._canvas.paste(self._normalize_color(color), (x, y, x + mask.width, y + mask.height), mask)
+        self._mark_dirty()
 
     def text(self, s: str, x: int, y: int, on: bool = True) -> None:
         self.text_with_style(s, x, y, 1, "regular", on=on)
@@ -426,6 +475,7 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
             )
         color = self.fg_color if on else self.bg_color
         self._canvas.paste(color, (x, y, x + mask.width, y + mask.height), mask)
+        self._mark_dirty()
 
     def measure_text(self, s: str, scale: int = 1, weight: str = "regular") -> tuple[int, int]:
         width, height = measure_text(str(s), scale, weight)

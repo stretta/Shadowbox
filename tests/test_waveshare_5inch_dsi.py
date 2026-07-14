@@ -161,6 +161,59 @@ class Waveshare5InchDSITests(unittest.TestCase):
             display.wake()
             self.assertEqual((backlight / "brightness").read_text(encoding="ascii"), "128\n")
 
+    def test_identical_frames_are_not_written_twice(self) -> None:
+        display = self.Display(
+            physical_width=1,
+            physical_height=1,
+            logical_width=1,
+            logical_height=1,
+            pixel_format="rgb888",
+        )
+        display._stride = 3
+        class Framebuffer:
+            def __init__(self):
+                self.writes = 0
+
+            def seek(self, _position):
+                pass
+
+            def write(self, _value):
+                self.writes += 1
+
+        display._fb_map = Framebuffer()
+        display._frame_image = lambda: _ImageBytes(bytes([1, 2, 3]))
+        display.show()
+        display.show()
+        self.assertEqual(display._fb_map.writes, 1)
+
+        display.pixel(0, 0)
+        display.show()
+        self.assertEqual(display._fb_map.writes, 2)
+
+    def test_show_packs_changed_frame_without_preconverting_image(self) -> None:
+        display = self.Display(
+            physical_width=1,
+            physical_height=1,
+            logical_width=1,
+            logical_height=1,
+            pixel_format="bgrx8888",
+        )
+        display._stride = 4
+
+        class Framebuffer:
+            def seek(self, _position):
+                pass
+
+            def write(self, _value):
+                pass
+
+        image = _ImageRawBytes(bytes([1, 2, 3]), bytes([3, 2, 1, 0]))
+        display._fb_map = Framebuffer()
+        display._frame_image = lambda: image
+        display.show()
+
+        self.assertEqual(image.raw_calls, [("raw", "BGRX")])
+
 
 if __name__ == "__main__":
     unittest.main()

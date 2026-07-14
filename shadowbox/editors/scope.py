@@ -4,12 +4,35 @@ from __future__ import annotations
 
 import math
 import re
+from collections import deque
 from typing import Any
 
 
 SCOPE_EDITOR_NAMES = {"scope", "scope_display", "time_domain_scope"}
 SCOPE_DEFAULT_STATE = "scope"
 SCOPE_MAX_SAMPLES = 1024
+
+
+class ScopeSampleBuffer(deque):
+    """Bounded sample history with a cheap render-cache revision."""
+
+    def __init__(self, values=(), *, maxlen: int = SCOPE_MAX_SAMPLES):
+        super().__init__(values, maxlen=maxlen)
+        self.revision = 0
+
+    def extend_samples(self, values) -> None:
+        super().extend(values)
+        self.revision += 1
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return list(self)[index]
+        return super().__getitem__(index)
+
+    def __eq__(self, other) -> bool:
+        if isinstance(other, (list, tuple)):
+            return list(self) == list(other)
+        return super().__eq__(other)
 
 
 def normalize_editor_name(value: Any) -> str:
@@ -56,11 +79,15 @@ def normalize_scope_samples(value: Any) -> list[float]:
     return samples
 
 
-def append_scope_samples(existing: list[float], value: Any, max_samples: int = SCOPE_MAX_SAMPLES) -> list[float]:
+def append_scope_samples(existing, value: Any, max_samples: int = SCOPE_MAX_SAMPLES) -> ScopeSampleBuffer:
     samples = normalize_scope_samples(value)
-    if not samples:
-        return list(existing)[-max_samples:]
-    return (list(existing) + samples)[-max_samples:]
+    if isinstance(existing, ScopeSampleBuffer) and existing.maxlen == max_samples:
+        buffer = existing
+    else:
+        buffer = ScopeSampleBuffer(list(existing)[-max_samples:], maxlen=max_samples)
+    if samples:
+        buffer.extend_samples(samples)
+    return buffer
 
 
 def scope_time_seconds(sample_count: int, sample_rate: Any) -> float | None:

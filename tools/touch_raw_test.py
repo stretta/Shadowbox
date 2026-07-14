@@ -9,7 +9,7 @@ import sys
 import time
 
 
-EVENT_STRUCT = struct.Struct("=llHHi")
+EVENT_STRUCT = struct.Struct("@llHHi")
 NAMES = {
     (0, 0): "SYN_REPORT",
     (1, 330): "BTN_TOUCH",
