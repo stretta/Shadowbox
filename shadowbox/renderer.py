@@ -3546,6 +3546,55 @@ class ShadowboxRenderer:
     def draw_system_audio_device(self, ui) -> None:
         self.draw_menu_rows(ui.audio_device_rows, ui.state.audio_device_cursor)
 
+    def draw_system_audio_restart(self, ui) -> None:
+        device_name = str(ui.state.audio_restart_device or "").strip()
+        if self.is_five_inch_touch:
+            max_text_w = self.display.width - 96
+
+            def centered_theme(text: str, y: int, scale: int, weight: str, color: str) -> None:
+                fitted = self._truncate_to_width(text, max_text_w, scale, weight)
+                text_w, _ = self._measure_text(fitted, scale, weight)
+                self._text_theme(fitted, max(0, (self.display.width - text_w) // 2), y, color, scale, weight)
+
+            centered_theme("DEVICE SELECTED", self.content_top + 28, 2, "semibold", "muted")
+
+            device_text = device_name or "Audio device"
+            device_scale = 5
+            while device_scale > 2 and self._measure_text(device_text, device_scale, "semibold")[0] > max_text_w:
+                device_scale -= 1
+            centered_theme(device_text, self.content_top + 72, device_scale, "semibold", "text")
+
+            divider_y = self.content_top + 72 + self._line_height(device_scale, "semibold") + 20
+            self._hline_theme(96, divider_y, self.display.width - 192, "line")
+            centered_theme("RESTARTING JACK", divider_y + 34, 3, "semibold", "accent")
+            centered_theme("Audio is coming back online", divider_y + 98, 2, "medium", "muted")
+
+            bar_w = min(560, self.display.width - 160)
+            bar_x = (self.display.width - bar_w) // 2
+            bar_y = min(self.display.height - 34, divider_y + 158)
+            phase = (int(ui.state.activity_ticks) % 30) / 30.0
+            self._draw_startup_activity_bar(bar_x, bar_y, bar_w, 14, phase)
+            return
+        if self.is_tft:
+            scale = self._hero_scale(1)
+            line_h = self._line_height(scale, "medium")
+            lines = ["Selected"]
+            if device_name:
+                lines.append(device_name)
+            lines.extend(["JACK is restarting", "Please wait..."])
+            start_y = max(self.content_top + 8, (self.display.height - (len(lines) * line_h)) // 2)
+            for idx, line in enumerate(lines):
+                self.text_center_scaled(
+                    self._truncate_to_width(line, self.display.width - 24, scale, "medium"),
+                    start_y + (idx * line_h),
+                    scale,
+                )
+            return
+        lines = [device_name or "Audio selected", "JACK restarting", "Please wait..."]
+        y_positions = [18, 34, 50] if self.is_tall else [12, 22, 22]
+        for line, y in zip(lines if self.is_tall else lines[1:], y_positions):
+            self.text_center(shorten(line, self.text_cols), y)
+
     def draw_system_audio_rate(self, ui) -> None:
         self.draw_menu_rows(ui.sample_rate_rows, ui.state.sample_rate_cursor)
 
@@ -4048,6 +4097,7 @@ class ShadowboxRenderer:
             "SYSTEM_AUDIO_DEVICE": "DEVICE",
             "SYSTEM_AUDIO_RATE": "RATE",
             "SYSTEM_AUDIO_BUFFER": "BUFFER",
+            "SYSTEM_AUDIO_RESTART": "AUDIO",
             "STATUS": "STATUS",
             "NETWORK": "NETWORK",
             "WIFI_NETWORKS": "WIFI NETWORKS",
@@ -4061,7 +4111,7 @@ class ShadowboxRenderer:
             header = state.status_message
         if state.ui_mode == "EDIT":
             header = self.edit_header_title(ui.selected_param)
-        self._show_back_button = self.touch_layout_enabled and state.ui_mode != "TOP"
+        self._show_back_button = self.touch_layout_enabled and state.ui_mode not in {"TOP", "SYSTEM_AUDIO_RESTART"}
         if not (self.touch_layout_enabled and state.ui_mode == "TOP"):
             self.draw_header(
                 header,
@@ -4185,6 +4235,8 @@ class ShadowboxRenderer:
             self.draw_system_audio_rate(ui)
         elif state.ui_mode == "SYSTEM_AUDIO_BUFFER":
             self.draw_system_audio_buffer(ui)
+        elif state.ui_mode == "SYSTEM_AUDIO_RESTART":
+            self.draw_system_audio_restart(ui)
         elif state.ui_mode == "NETWORK":
             self.draw_network(ui)
         elif state.ui_mode == "SOFTWARE_UPDATE":

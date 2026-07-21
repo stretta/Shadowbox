@@ -66,6 +66,7 @@ from shadowbox.shadowbox import (
     JACK_CARD_PATH_DEFAULT,
     JACK_RESTART_PATH_DEFAULT,
     _audio_needs_dummy_fallback,
+    _jack_restart_ready,
     _snapshot_ready,
     _snapshot_waiting_for_instances,
     _startup_status_lines,
@@ -117,6 +118,15 @@ class _FakeUI:
 
     def apply_runner_snapshot(self, snapshot):
         self.snapshots.append(snapshot)
+
+
+def test_jack_restart_ready_requires_selected_card_and_live_jack_info():
+    def snapshot(card, cpu_load):
+        return SimpleNamespace(system={"audio": {"current_card": card}, "status": {"cpu_load": cpu_load}})
+
+    assert not _jack_restart_ready(snapshot("hw:USB", None), "hw:USB")
+    assert not _jack_restart_ready(snapshot("hw:Dummy", 0.0), "hw:USB")
+    assert _jack_restart_ready(snapshot("hw:USB", 0.0), "hw:USB")
 
 
 def test_startup_audio_recovery_sends_default_runner_paths():

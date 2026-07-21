@@ -43,6 +43,8 @@ STARTUP_AUDIO_RECOVERY_HOLD_SECONDS = 3.0
 STARTUP_AUDIO_RECOVERY_DEVICE = "hw:Dummy"
 JACK_CARD_PATH_DEFAULT = "/rnbo/jack/config/card"
 JACK_RESTART_PATH_DEFAULT = "/rnbo/jack/restart"
+JACK_RESTART_TIMEOUT_SECONDS = 30.0
+JACK_RESTART_POLL_SECONDS = 0.75
 
 DIM_TIMEOUT = 120.0
 SLEEP_TIMEOUT = 600.0
@@ -102,6 +104,10 @@ STARTUP_AUDIO_RECOVERY_HOLD_SECONDS = max(
 STARTUP_AUDIO_RECOVERY_DEVICE = _env_text(
     "SHADOWBOX_STARTUP_AUDIO_RECOVERY_DEVICE",
     STARTUP_AUDIO_RECOVERY_DEVICE,
+)
+JACK_RESTART_TIMEOUT_SECONDS = max(
+    1.0,
+    _env_float("SHADOWBOX_JACK_RESTART_TIMEOUT", JACK_RESTART_TIMEOUT_SECONDS),
 )
 TURBO_FPS = max(1, _env_int("SHADOWBOX_TURBO_FPS", _env_int("SHADOWBOX_BRICK_PANEL_FPS", TURBO_FPS)))
 TURBO_FRAME_DT = 1.0 / TURBO_FPS
@@ -403,6 +409,23 @@ def _try_startup_audio_recovery(rnbo, device_name: str = STARTUP_AUDIO_RECOVERY_
         return False
 
 
+def _jack_restart_ready(snapshot, expected_card: str = "") -> bool:
+    system = getattr(snapshot, "system", {})
+    if not isinstance(system, dict):
+        return False
+    audio = system.get("audio", {})
+    status = system.get("status", {})
+    if not isinstance(audio, dict) or not isinstance(status, dict):
+        return False
+    current_card = str(audio.get("current_card", "") or "").strip()
+    expected_card = str(expected_card or "").strip()
+    if expected_card and current_card != expected_card:
+        return False
+    # cpu_load is published by JACK's live info tree. A card configuration can
+    # reappear before the audio server itself is ready, so the config alone is
+    # not a sufficient completion callback.
+    return bool(current_card and status.get("cpu_load") is not None)
+
 def _discover_new_instance_ids(ui, rnbo, before_ids: list[str], attempts: int = 5, delay: float = 0.2) -> tuple[list[str], list[str]]:
     after_ids: list[str] = [str(inst.get("id", "")) for inst in ui.state.instances]
     new_ids = [item for item in after_ids if item not in before_ids]
@@ -694,6 +717,7 @@ def main():
     network_operations.start()
     previous_mode = ui.state.ui_mode
     lifecycle_context: dict[str, dict] = {}
+    jack_restart_context: dict[str, object] = {}
 
     try:
         while True:
@@ -728,7 +752,17 @@ def main():
                 if discovery.is_stale(result):
                     perf.increment("discovery_stale")
                     continue
+                is_jack_restart = result.kind == "runner" and result.reason == "jack restart" and bool(jack_restart_context)
                 if result.error:
+                    if is_jack_restart:
+                        elapsed = now - float(jack_restart_context.get("started_at", now))
+                        if elapsed < JACK_RESTART_TIMEOUT_SECONDS:
+                            discovery.request("runner", "jack restart", delay=JACK_RESTART_POLL_SECONDS)
+                        else:
+                            ui.fail_audio_restart("JACK did not restart")
+                            jack_restart_context.clear()
+                        scheduler.request("jack_restart")
+                        continue
                     ui.set_status_message(f"Refresh failed: {_short_error_text(result.error)}")
                     if (result.kind == "runner" and ui.state.busy_reason not in {"network", "update"}) or (
                         result.kind != "runner" and ui.state.busy_reason == "network"
@@ -738,6 +772,19 @@ def main():
                     continue
                 if result.kind == "runner":
                     ui.apply_runner_snapshot(result.value)
+                    if is_jack_restart:
+                        expected_card = str(jack_restart_context.get("expected_card", "") or "")
+                        elapsed = now - float(jack_restart_context.get("started_at", now))
+                        if _jack_restart_ready(result.value, expected_card):
+                            ui.finish_audio_restart()
+                            jack_restart_context.clear()
+                        elif elapsed < JACK_RESTART_TIMEOUT_SECONDS:
+                            discovery.request("runner", "jack restart", delay=JACK_RESTART_POLL_SECONDS)
+                            scheduler.request("jack_restart")
+                            continue
+                        else:
+                            ui.fail_audio_restart("JACK did not restart")
+                            jack_restart_context.clear()
                     context = lifecycle_context.pop(result.reason, {})
                     if result.reason == "add instance":
                         before_ids = context.get("before_ids", [])
@@ -975,23 +1022,27 @@ def main():
                         discovery.request("runner", "remove instance", delay=0.25)
 
                 elif action.kind == "set_audio_device":
-                    ui.set_busy(True, "audio")
+                    ui.begin_audio_restart(action.device_name or "", "SYSTEM_AUDIO_DEVICE")
+                    jack_restart_context = {"started_at": monotonic(), "expected_card": action.device_name or ""}
                     card_path = ui.state.system.get("audio", {}).get("card_path", JACK_CARD_PATH_DEFAULT)
                     rnbo.send_value(card_path, action.device_name)
                     rnbo.restart_jack(ui.state.system.get("maint", {}).get("jack_restart_path", ""))
-                    discovery.request("runner", "set audio device", delay=0.6)
+                    discovery.request("runner", "jack restart", delay=0.6)
 
                 elif action.kind == "set_jack_config":
                     if action.path is not None:
-                        ui.set_busy(True, "audio")
+                        return_mode = "SYSTEM_AUDIO_RATE" if "sample_rate" in str(action.path) else "SYSTEM_AUDIO_BUFFER"
+                        ui.begin_audio_restart(ui.state.audio_restart_device, return_mode)
+                        jack_restart_context = {"started_at": monotonic(), "expected_card": ""}
                         rnbo.send_value(action.path, action.value)
                         rnbo.restart_jack(ui.state.system.get("maint", {}).get("jack_restart_path", ""))
-                        discovery.request("runner", "set jack config", delay=0.6)
+                        discovery.request("runner", "jack restart", delay=0.6)
 
                 elif action.kind == "restart_jack":
-                    ui.set_busy(True, "audio")
+                    ui.begin_audio_restart("", "MAINT")
+                    jack_restart_context = {"started_at": monotonic(), "expected_card": ""}
                     rnbo.restart_jack(ui.state.system.get("maint", {}).get("jack_restart_path", ""))
-                    discovery.request("runner", "restart jack", delay=0.6)
+                    discovery.request("runner", "jack restart", delay=0.6)
 
                 elif action.kind == "refresh_snapshot":
                     ui.set_busy(True, "refresh")

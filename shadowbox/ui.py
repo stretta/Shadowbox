@@ -185,6 +185,9 @@ class UIState:
     busy_reason: str = ""
     activity_ticks: int = 0
 
+    audio_restart_device: str = ""
+    audio_restart_return_mode: str = "SYSTEM_AUDIO_DEVICE"
+
     saved_audio_card: str = ""
     current_presets: dict[str, str] = field(default_factory=dict)
 
@@ -553,6 +556,23 @@ class ShadowboxUI:
         if busy:
             self.state.activity_ticks += 1
         self.request_render("busy")
+
+    def begin_audio_restart(self, device_name: str = "", return_mode: str = "SYSTEM_AUDIO_DEVICE") -> None:
+        self.state.audio_restart_device = str(device_name or "").strip()
+        self.state.audio_restart_return_mode = str(return_mode or "SYSTEM_AUDIO_DEVICE")
+        self.state.ui_mode = "SYSTEM_AUDIO_RESTART"
+        self.set_busy(True, "audio")
+
+    def finish_audio_restart(self) -> None:
+        device_name = self.state.audio_restart_device
+        self.state.ui_mode = self.state.audio_restart_return_mode
+        self.set_busy(False)
+        self.set_status_message(f"{device_name} ready" if device_name else "JACK ready")
+
+    def fail_audio_restart(self, message: str) -> None:
+        self.state.ui_mode = self.state.audio_restart_return_mode
+        self.set_busy(False)
+        self.set_status_message(str(message or "JACK restart failed"), frames=60)
 
     def request_render(self, reason: str = "state") -> int:
         self.render_revision += 1
@@ -2415,12 +2435,15 @@ class ShadowboxUI:
             "SYSTEM_AUDIO_DEVICE",
             "SYSTEM_AUDIO_RATE",
             "SYSTEM_AUDIO_BUFFER",
+            "SYSTEM_AUDIO_RESTART",
             "BRICK_PANEL",
         }
 
     def advance_frame(self, frame_scale: float = 1.0) -> None:
         if self.state.ui_mode == "BRICK_PANEL":
             self.brick_panel.update(frame_scale=frame_scale)
+        if self.state.busy:
+            self.state.activity_ticks += max(1, int(round(frame_scale)))
         if self.state.status_frames > 0:
             self.state.status_frames = max(0, self.state.status_frames - max(1, int(round(frame_scale))))
             if self.state.status_frames == 0:
@@ -3688,6 +3711,7 @@ class ShadowboxUI:
                 self.state.ui_mode = "SYSTEM_AUDIO"
             elif self.audio_options:
                 chosen = self.audio_options[self.state.audio_device_cursor - 1]
+                self.begin_audio_restart(chosen, "SYSTEM_AUDIO_DEVICE")
                 self.queue_action(UIAction(kind="set_audio_device", device_name=chosen))
 
         elif self.state.ui_mode == "SYSTEM_AUDIO_RATE":
@@ -3697,6 +3721,7 @@ class ShadowboxUI:
                 audio = self.state.system.get("audio", {})
                 path = audio.get("sample_rate_path")
                 value = self.sample_rate_options[self.state.sample_rate_cursor - 1]
+                self.begin_audio_restart(f"{value} Hz", "SYSTEM_AUDIO_RATE")
                 self.queue_action(UIAction(kind="set_jack_config", path=path, value=value))
 
         elif self.state.ui_mode == "SYSTEM_AUDIO_BUFFER":
@@ -3706,6 +3731,7 @@ class ShadowboxUI:
                 audio = self.state.system.get("audio", {})
                 path = audio.get("period_frames_path")
                 value = self.buffer_size_options[self.state.buffer_size_cursor - 1]
+                self.begin_audio_restart(f"{value} frames", "SYSTEM_AUDIO_BUFFER")
                 self.queue_action(UIAction(kind="set_jack_config", path=path, value=value))
 
         elif self.state.ui_mode == "MAINT":

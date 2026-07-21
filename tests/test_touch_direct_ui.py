@@ -1097,6 +1097,30 @@ class TouchDirectUITests(unittest.TestCase):
         self.assertTrue(any(target.index == 2 and target.label == "Restart Jack" for target in row_targets))
         self.assertGreaterEqual(len(button_surfaces), 2)
 
+    def test_audio_restart_screen_confirms_selection_and_wait_state(self) -> None:
+        ui = ShadowboxUI()
+        ui.begin_audio_restart("hw:USB", "SYSTEM_AUDIO_DEVICE")
+
+        display = _ColorFiveInchDisplay()
+        renderer = create_renderer(display)
+        renderer.set_touch_mode(True)
+        renderer.draw(ui, touch_state=SimpleNamespace(pressed=False, normalized_x=0.0, normalized_y=0.0))
+
+        labels = [op[1] for op in display.ops if op[0] in {"text", "text_color"}]
+        self.assertIn("DEVICE SELECTED", labels)
+        self.assertIn("hw:USB", labels)
+        self.assertIn("RESTARTING JACK", labels)
+        self.assertIn("Audio is coming back online", labels)
+        self.assertFalse(any(target.kind == "back_button" for target in renderer.touch_layout.targets))
+
+        text_ops = [op for op in display.ops if op[0] == "text_color"]
+        selected = next(op for op in text_ops if op[1] == "DEVICE SELECTED")
+        device = next(op for op in text_ops if op[1] == "hw:USB")
+        restarting = next(op for op in text_ops if op[1] == "RESTARTING JACK")
+        self.assertGreater(device[5], selected[5])
+        self.assertGreaterEqual(restarting[5], 3)
+        self.assertTrue(any(op[0] == "rounded_rect_color" for op in display.ops))
+
     def test_five_inch_startup_hero_scales_typography_from_full_tft(self) -> None:
         display = _ColorFiveInchDisplay()
         renderer = create_renderer(display)

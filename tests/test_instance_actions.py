@@ -108,6 +108,37 @@ class _CaptureRenderer(ShadowboxRenderer):
 
 
 class InstanceActionTests(unittest.TestCase):
+    def test_audio_device_selection_immediately_shows_restart_feedback(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.system = {
+            "audio": {
+                "current_card": "hw:Dummy",
+                "card_options": ["hw:Dummy", "hw:USB"],
+            }
+        }
+        ui.state.ui_mode = "SYSTEM_AUDIO_DEVICE"
+        ui.state.audio_device_cursor = 2
+
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+
+        self.assertEqual(ui.state.ui_mode, "SYSTEM_AUDIO_RESTART")
+        self.assertTrue(ui.state.busy)
+        self.assertEqual(ui.state.audio_restart_device, "hw:USB")
+        actions = [action for action in ui.pop_actions() if action.kind != "save_state"]
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0].kind, "set_audio_device")
+        self.assertEqual(actions[0].device_name, "hw:USB")
+
+    def test_audio_restart_completion_returns_to_picker_with_ready_feedback(self) -> None:
+        ui = ShadowboxUI()
+        ui.begin_audio_restart("hw:USB", "SYSTEM_AUDIO_DEVICE")
+
+        ui.finish_audio_restart()
+
+        self.assertEqual(ui.state.ui_mode, "SYSTEM_AUDIO_DEVICE")
+        self.assertFalse(ui.state.busy)
+        self.assertEqual(ui.state.status_message, "hw:USB ready")
+
     def _snapshot_with_direct_network(self) -> RNBOSnapshot:
         return RNBOSnapshot(
             instances=[],
