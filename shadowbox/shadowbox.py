@@ -40,7 +40,11 @@ STARTUP_DISCOVERY_POLL_SECONDS = 0.4
 STARTUP_STABLE_PASSES = 2
 STARTUP_FOUND_HOLD_SECONDS = 1.0
 STARTUP_AUDIO_RECOVERY_HOLD_SECONDS = 3.0
-STARTUP_AUDIO_RECOVERY_DEVICE = "hw:Dummy"
+STARTUP_AUDIO_DEVICE_PRIORITY_DEFAULT = (
+    "hw:ES8",
+    "hw:sndrpihifiberry",
+    "hw:Dummy",
+)
 JACK_CARD_PATH_DEFAULT = "/rnbo/jack/config/card"
 JACK_RESTART_PATH_DEFAULT = "/rnbo/jack/restart"
 JACK_RESTART_TIMEOUT_SECONDS = 30.0
@@ -92,6 +96,24 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return str(value).strip().lower() not in {"0", "false", "no", "off"}
 
 
+def _parse_audio_device_priority(value: str | None) -> tuple[str, ...]:
+    if value is None:
+        return STARTUP_AUDIO_DEVICE_PRIORITY_DEFAULT
+    devices = []
+    for item in str(value).split(","):
+        device = item.strip()
+        if device and device not in devices:
+            devices.append(device)
+    return tuple(devices)
+
+
+def _audio_device_priority_from_env() -> tuple[str, ...]:
+    value = os.environ.get("SHADOWBOX_AUDIO_DEVICE_PRIORITY")
+    if value is None:
+        value = os.environ.get("SHADOWBOX_STARTUP_AUDIO_RECOVERY_DEVICE")
+    return _parse_audio_device_priority(value)
+
+
 DIM_TIMEOUT = max(0.0, _env_float("SHADOWBOX_DIM_TIMEOUT", DIM_TIMEOUT))
 SLEEP_TIMEOUT = max(DIM_TIMEOUT, _env_float("SHADOWBOX_SLEEP_TIMEOUT", SLEEP_TIMEOUT))
 BRIGHTNESS_NORMAL = max(0, min(255, _env_int("SHADOWBOX_BRIGHTNESS_NORMAL", BRIGHTNESS_NORMAL)))
@@ -101,10 +123,7 @@ STARTUP_AUDIO_RECOVERY_HOLD_SECONDS = max(
     0.0,
     _env_float("SHADOWBOX_STARTUP_AUDIO_RECOVERY_HOLD_SECONDS", STARTUP_AUDIO_RECOVERY_HOLD_SECONDS),
 )
-STARTUP_AUDIO_RECOVERY_DEVICE = _env_text(
-    "SHADOWBOX_STARTUP_AUDIO_RECOVERY_DEVICE",
-    STARTUP_AUDIO_RECOVERY_DEVICE,
-)
+STARTUP_AUDIO_DEVICE_PRIORITY = _audio_device_priority_from_env()
 JACK_RESTART_TIMEOUT_SECONDS = max(
     1.0,
     _env_float("SHADOWBOX_JACK_RESTART_TIMEOUT", JACK_RESTART_TIMEOUT_SECONDS),
@@ -356,15 +375,7 @@ def _apply_post_load_view(ui) -> None:
     ui.state.instance_menu_cursor = 1
 
 
-def _find_dummy_audio_device(ui) -> str:
-    for option in ui.state.system.get("audio", {}).get("card_options", []):
-        name = str(option).strip()
-        if name and "dummy" in name.lower():
-            return name
-    return ""
-
-
-def _audio_needs_dummy_fallback(audio: dict) -> bool:
+def _audio_needs_recovery(audio: dict) -> bool:
     if not audio.get("input_targets") and not audio.get("output_targets"):
         return True
 
@@ -373,28 +384,34 @@ def _audio_needs_dummy_fallback(audio: dict) -> bool:
     return bool(current_card and card_options and current_card not in card_options)
 
 
-def _try_dummy_audio_fallback(ui, rnbo) -> bool:
-    audio = ui.state.system.get("audio", {})
-    if not _audio_needs_dummy_fallback(audio):
+def _preferred_audio_device(
+    audio: dict,
+    priority: tuple[str, ...] = STARTUP_AUDIO_DEVICE_PRIORITY,
+    excluded: set[str] | None = None,
+) -> str:
+    card_options = {str(option).strip() for option in audio.get("card_options", []) if str(option).strip()}
+    excluded = excluded or set()
+    for device in priority:
+        if device in card_options and device not in excluded:
+            return device
+    return ""
+
+
+def _try_startup_audio_device(ui, rnbo, device_name: str) -> bool:
+    device_name = str(device_name or "").strip()
+    if not device_name:
+        return False
+    try:
+        rnbo.set_audio_device(device_name)
+        restart_path = ui.state.system.get("maint", {}).get("jack_restart_path", "") or JACK_RESTART_PATH_DEFAULT
+        rnbo.restart_jack(restart_path)
+        return True
+    except Exception as exc:
+        print(f"Startup audio selection failed for {device_name!r}:", exc)
         return False
 
-    dummy_device = _find_dummy_audio_device(ui)
-    if not dummy_device:
-        return False
 
-    current_card = str(audio.get("current_card", "")).strip()
-    if current_card == dummy_device:
-        return False
-
-    rnbo.set_audio_device(dummy_device)
-    restart_path = ui.state.system.get("maint", {}).get("jack_restart_path", "") or JACK_RESTART_PATH_DEFAULT
-    rnbo.restart_jack(restart_path)
-    sleep(0.6)
-    ui.apply_runner_snapshot(rnbo.discover())
-    return True
-
-
-def _try_startup_audio_recovery(rnbo, device_name: str = STARTUP_AUDIO_RECOVERY_DEVICE) -> bool:
+def _try_startup_audio_recovery(rnbo, device_name: str) -> bool:
     device_name = str(device_name or "").strip()
     if not device_name:
         return False
@@ -592,8 +609,9 @@ def main():
     startup_stable_passes = 0
     startup_signature = None
     startup_found_at = None
-    startup_dummy_fallback_attempted = False
-    startup_recovery_attempted = False
+    startup_audio_failed_devices: set[str] = set()
+    startup_audio_attempted_device = ""
+    startup_audio_attempt_started = None
     startup_recovery_started = None
 
     current_snapshot = None
@@ -616,14 +634,38 @@ def main():
                 ui.apply_runner_snapshot(current_snapshot)
                 ui.set_busy(False)
 
-                if not startup_dummy_fallback_attempted and _try_dummy_audio_fallback(ui, rnbo):
-                    startup_dummy_fallback_attempted = True
+                audio = ui.state.system.get("audio", {})
+                if startup_audio_attempted_device:
+                    if _jack_restart_ready(current_snapshot, startup_audio_attempted_device) and not _audio_needs_recovery(audio):
+                        startup_audio_attempted_device = ""
+                        startup_audio_attempt_started = None
+                    elif (
+                        startup_audio_attempt_started is not None
+                        and (now - startup_audio_attempt_started) >= STARTUP_AUDIO_RECOVERY_HOLD_SECONDS
+                    ):
+                        startup_audio_failed_devices.add(startup_audio_attempted_device)
+                        startup_audio_attempted_device = ""
+                        startup_audio_attempt_started = None
+
+                preferred_device = _preferred_audio_device(audio, excluded=startup_audio_failed_devices)
+                current_card = str(audio.get("current_card", "")).strip()
+                if (
+                    not startup_audio_attempted_device
+                    and preferred_device
+                    and (current_card != preferred_device or _audio_needs_recovery(audio))
+                ):
+                    print(f"Selecting startup audio device {preferred_device!r}")
+                    if _try_startup_audio_device(ui, rnbo, preferred_device):
+                        startup_audio_attempted_device = preferred_device
+                        startup_audio_attempt_started = now
+                    else:
+                        startup_audio_failed_devices.add(preferred_device)
                     startup_signature = None
                     startup_stable_passes = 0
                     startup_found_at = None
                     continue
 
-                if _snapshot_ready(current_snapshot):
+                if not startup_audio_attempted_device and _snapshot_ready(current_snapshot):
                     signature = _snapshot_signature(current_snapshot)
                     if signature == startup_signature:
                         startup_stable_passes += 1
@@ -648,17 +690,23 @@ def main():
             if (
                 STARTUP_DISCOVERY_TIMEOUT > 0.0
                 and (now - startup_started) >= STARTUP_DISCOVERY_TIMEOUT
+                and not startup_audio_attempted_device
                 and not _snapshot_ready(current_snapshot)
                 and not _snapshot_waiting_for_instances(current_snapshot)
             ):
-                if not startup_recovery_attempted:
-                    startup_recovery_attempted = True
+                if startup_recovery_started is None:
                     startup_recovery_started = now
-                    _try_startup_audio_recovery(rnbo)
-                elif (
-                    startup_recovery_started is not None
-                    and (now - startup_recovery_started) >= STARTUP_AUDIO_RECOVERY_HOLD_SECONDS
-                ):
+                    fallback_device = next(
+                        (
+                            device
+                            for device in reversed(STARTUP_AUDIO_DEVICE_PRIORITY)
+                            if device not in startup_audio_failed_devices
+                        ),
+                        "",
+                    )
+                    if fallback_device:
+                        _try_startup_audio_recovery(rnbo, fallback_device)
+                elif (now - startup_recovery_started) >= STARTUP_AUDIO_RECOVERY_HOLD_SECONDS:
                     print("Startup discovery timed out; continuing without a ready RNBO snapshot")
                     break
 

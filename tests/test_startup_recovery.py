@@ -65,12 +65,16 @@ sys.modules.setdefault("shadowbox.ui", ui_module)
 from shadowbox.shadowbox import (
     JACK_CARD_PATH_DEFAULT,
     JACK_RESTART_PATH_DEFAULT,
-    _audio_needs_dummy_fallback,
+    STARTUP_AUDIO_DEVICE_PRIORITY_DEFAULT,
+    _audio_device_priority_from_env,
+    _audio_needs_recovery,
     _jack_restart_ready,
+    _parse_audio_device_priority,
+    _preferred_audio_device,
     _snapshot_ready,
     _snapshot_waiting_for_instances,
     _startup_status_lines,
-    _try_dummy_audio_fallback,
+    _try_startup_audio_device,
     _try_startup_audio_recovery,
 )
 
@@ -147,16 +151,16 @@ def test_startup_audio_recovery_ignores_blank_device_name():
     assert rnbo.restarted == []
 
 
-def test_dummy_audio_fallback_uses_default_restart_path_when_snapshot_lacks_one():
+def test_startup_audio_device_uses_default_restart_path_when_snapshot_lacks_one():
     ui = _FakeUI()
     rnbo = _FakeRNBO()
 
-    assert _try_dummy_audio_fallback(ui, rnbo)
+    assert _try_startup_audio_device(ui, rnbo, "hw:ES8")
 
-    assert rnbo.sent == [(JACK_CARD_PATH_DEFAULT, "Dummy")]
+    assert rnbo.sent == [(JACK_CARD_PATH_DEFAULT, "hw:ES8")]
     assert rnbo.restarted == [JACK_RESTART_PATH_DEFAULT]
-    assert rnbo.discoveries == 1
-    assert len(ui.snapshots) == 1
+    assert rnbo.discoveries == 0
+    assert len(ui.snapshots) == 0
 
 
 def test_audio_fallback_is_needed_when_current_card_is_not_available():
@@ -167,7 +171,34 @@ def test_audio_fallback_is_needed_when_current_card_is_not_available():
         "output_targets": ["system:playback_1"],
     }
 
-    assert _audio_needs_dummy_fallback(audio)
+    assert _audio_needs_recovery(audio)
+
+
+def test_audio_device_priority_parser_uses_defaults_and_removes_duplicates():
+    assert _parse_audio_device_priority(None) == STARTUP_AUDIO_DEVICE_PRIORITY_DEFAULT
+    assert _parse_audio_device_priority(" hw:ES8, hw:Dummy,hw:ES8, ") == ("hw:ES8", "hw:Dummy")
+
+
+def test_legacy_recovery_device_is_used_when_priority_is_unset(monkeypatch):
+    monkeypatch.delenv("SHADOWBOX_AUDIO_DEVICE_PRIORITY", raising=False)
+    monkeypatch.setenv("SHADOWBOX_STARTUP_AUDIO_RECOVERY_DEVICE", "hw:USB")
+
+    assert _audio_device_priority_from_env() == ("hw:USB",)
+
+
+def test_preferred_audio_device_uses_order_and_available_cards():
+    audio = {"card_options": ["hw:Dummy", "hw:sndrpihifiberry", "hw:ES8"]}
+
+    assert _preferred_audio_device(audio) == "hw:ES8"
+    assert _preferred_audio_device(audio, excluded={"hw:ES8"}) == "hw:sndrpihifiberry"
+
+
+def test_preferred_audio_device_falls_back_to_hifiberry_then_dummy():
+    hifiberry = {"card_options": ["hw:Dummy", "hw:sndrpihifiberry"]}
+    dummy = {"card_options": ["hw:Dummy"]}
+
+    assert _preferred_audio_device(hifiberry) == "hw:sndrpihifiberry"
+    assert _preferred_audio_device(dummy) == "hw:Dummy"
 
 
 def test_startup_waits_when_set_is_published_before_instances():
