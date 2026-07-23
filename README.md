@@ -569,6 +569,7 @@ Notes:
 - `SHADOWBOX_BRICK_PANEL_FPS` is a legacy fallback for `SHADOWBOX_TURBO_FPS`.
 - `SHADOWBOX_AUDIO_DEVICE_PRIORITY` is a comma-separated startup/recovery preference list. It defaults to `hw:ES8,hw:sndrpihifiberry,hw:Dummy`; Shadowbox selects the first available device and tries the next device if JACK does not recover.
 - The older `SHADOWBOX_STARTUP_AUDIO_RECOVERY_DEVICE` setting is still accepted as a single-device fallback when `SHADOWBOX_AUDIO_DEVICE_PRIORITY` is unset.
+- Shadowbox remains systemd-independent from `rnbooscquery.service` because the vendor RNBO unit starts after `multi-user.target`. At application startup, Shadowbox waits up to 60 seconds for a published card list, allows up to 30 seconds for each JACK device restart, and leaves RNBO's configured audio device unchanged if discovery never succeeds.
 - `SHADOWBOX_ST7789_RST`, `SHADOWBOX_ST7789_BACKLIGHT`, and `SHADOWBOX_WAVESHARE_BACKLIGHT` accept `none` to disable that pin.
 - `SHADOWBOX_ST7735_RST` and `SHADOWBOX_ST7735_BACKLIGHT` accept `none` to disable that pin.
 - `SHADOWBOX_ST7789_INVERT` accepts boolean-style values such as `1`, `true`, `yes`, or `on`.

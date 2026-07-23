@@ -64,7 +64,9 @@ sys.modules.setdefault("shadowbox.ui", ui_module)
 
 from shadowbox.shadowbox import (
     JACK_CARD_PATH_DEFAULT,
+    JACK_RESTART_TIMEOUT_SECONDS,
     JACK_RESTART_PATH_DEFAULT,
+    STARTUP_DISCOVERY_TIMEOUT,
     STARTUP_AUDIO_DEVICE_PRIORITY_DEFAULT,
     _audio_device_priority_from_env,
     _audio_needs_recovery,
@@ -74,8 +76,8 @@ from shadowbox.shadowbox import (
     _snapshot_ready,
     _snapshot_waiting_for_instances,
     _startup_status_lines,
+    _startup_audio_attempt_timed_out,
     _try_startup_audio_device,
-    _try_startup_audio_recovery,
 )
 
 for _name, _module in _SAVED_MODULES.items():
@@ -133,22 +135,10 @@ def test_jack_restart_ready_requires_selected_card_and_live_jack_info():
     assert _jack_restart_ready(snapshot("hw:USB", 0.0), "hw:USB")
 
 
-def test_startup_audio_recovery_sends_default_runner_paths():
-    rnbo = _FakeRNBO()
-
-    assert _try_startup_audio_recovery(rnbo, "Dummy")
-
-    assert rnbo.sent == [(JACK_CARD_PATH_DEFAULT, "Dummy")]
-    assert rnbo.restarted == [JACK_RESTART_PATH_DEFAULT]
-
-
-def test_startup_audio_recovery_ignores_blank_device_name():
-    rnbo = _FakeRNBO()
-
-    assert not _try_startup_audio_recovery(rnbo, "")
-
-    assert rnbo.sent == []
-    assert rnbo.restarted == []
+def test_startup_audio_restart_uses_full_jack_timeout_window():
+    assert STARTUP_DISCOVERY_TIMEOUT == 60.0
+    assert not _startup_audio_attempt_timed_out(10.0, 13.0)
+    assert _startup_audio_attempt_timed_out(10.0, 10.0 + JACK_RESTART_TIMEOUT_SECONDS)
 
 
 def test_startup_audio_device_uses_default_restart_path_when_snapshot_lacks_one():
@@ -196,9 +186,11 @@ def test_preferred_audio_device_uses_order_and_available_cards():
 def test_preferred_audio_device_falls_back_to_hifiberry_then_dummy():
     hifiberry = {"card_options": ["hw:Dummy", "hw:sndrpihifiberry"]}
     dummy = {"card_options": ["hw:Dummy"]}
+    unavailable = {"card_options": []}
 
     assert _preferred_audio_device(hifiberry) == "hw:sndrpihifiberry"
     assert _preferred_audio_device(dummy) == "hw:Dummy"
+    assert _preferred_audio_device(unavailable) == ""
 
 
 def test_startup_waits_when_set_is_published_before_instances():

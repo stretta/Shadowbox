@@ -35,11 +35,10 @@ TURBO_FPS = 40
 TURBO_FRAME_DT = 1.0 / TURBO_FPS
 REFRESH_SECONDS = 3.0
 STARTUP_MIN_SECONDS = 1.2
-STARTUP_DISCOVERY_TIMEOUT = 15.0
+STARTUP_DISCOVERY_TIMEOUT = 60.0
 STARTUP_DISCOVERY_POLL_SECONDS = 0.4
 STARTUP_STABLE_PASSES = 2
 STARTUP_FOUND_HOLD_SECONDS = 1.0
-STARTUP_AUDIO_RECOVERY_HOLD_SECONDS = 3.0
 STARTUP_AUDIO_DEVICE_PRIORITY_DEFAULT = (
     "hw:ES8",
     "hw:sndrpihifiberry",
@@ -119,10 +118,6 @@ SLEEP_TIMEOUT = max(DIM_TIMEOUT, _env_float("SHADOWBOX_SLEEP_TIMEOUT", SLEEP_TIM
 BRIGHTNESS_NORMAL = max(0, min(255, _env_int("SHADOWBOX_BRIGHTNESS_NORMAL", BRIGHTNESS_NORMAL)))
 BRIGHTNESS_DIM = max(0, min(BRIGHTNESS_NORMAL, _env_int("SHADOWBOX_BRIGHTNESS_DIM", BRIGHTNESS_DIM)))
 STARTUP_DISCOVERY_TIMEOUT = max(0.0, _env_float("SHADOWBOX_STARTUP_DISCOVERY_TIMEOUT", STARTUP_DISCOVERY_TIMEOUT))
-STARTUP_AUDIO_RECOVERY_HOLD_SECONDS = max(
-    0.0,
-    _env_float("SHADOWBOX_STARTUP_AUDIO_RECOVERY_HOLD_SECONDS", STARTUP_AUDIO_RECOVERY_HOLD_SECONDS),
-)
 STARTUP_AUDIO_DEVICE_PRIORITY = _audio_device_priority_from_env()
 JACK_RESTART_TIMEOUT_SECONDS = max(
     1.0,
@@ -411,19 +406,8 @@ def _try_startup_audio_device(ui, rnbo, device_name: str) -> bool:
         return False
 
 
-def _try_startup_audio_recovery(rnbo, device_name: str) -> bool:
-    device_name = str(device_name or "").strip()
-    if not device_name:
-        return False
-
-    try:
-        print(f"Startup discovery timed out; trying audio recovery with {device_name!r}")
-        rnbo.send_value(JACK_CARD_PATH_DEFAULT, device_name)
-        rnbo.restart_jack(JACK_RESTART_PATH_DEFAULT)
-        return True
-    except Exception as exc:
-        print("Startup audio recovery failed:", exc)
-        return False
+def _startup_audio_attempt_timed_out(started_at: float | None, now: float) -> bool:
+    return started_at is not None and (now - started_at) >= JACK_RESTART_TIMEOUT_SECONDS
 
 
 def _jack_restart_ready(snapshot, expected_card: str = "") -> bool:
@@ -475,9 +459,7 @@ def _apply_saved_midi_profile(ui, rnbo, instance_id: str) -> int:
     return applied
 
 
-def _startup_status_lines(snapshot, stable_passes: int = 0, recovery_active: bool = False) -> tuple[str, str]:
-    if recovery_active:
-        return "recovering audio", "waiting for OSCQuery"
+def _startup_status_lines(snapshot, stable_passes: int = 0) -> tuple[str, str]:
     if _snapshot_waiting_for_instances(snapshot):
         label = _snapshot_loading_set_label(snapshot)
         if label:
@@ -612,7 +594,6 @@ def main():
     startup_audio_failed_devices: set[str] = set()
     startup_audio_attempted_device = ""
     startup_audio_attempt_started = None
-    startup_recovery_started = None
 
     current_snapshot = None
     proceed_from_startup = False
@@ -639,10 +620,7 @@ def main():
                     if _jack_restart_ready(current_snapshot, startup_audio_attempted_device) and not _audio_needs_recovery(audio):
                         startup_audio_attempted_device = ""
                         startup_audio_attempt_started = None
-                    elif (
-                        startup_audio_attempt_started is not None
-                        and (now - startup_audio_attempt_started) >= STARTUP_AUDIO_RECOVERY_HOLD_SECONDS
-                    ):
+                    elif _startup_audio_attempt_timed_out(startup_audio_attempt_started, now):
                         startup_audio_failed_devices.add(startup_audio_attempted_device)
                         startup_audio_attempted_device = ""
                         startup_audio_attempt_started = None
@@ -694,30 +672,12 @@ def main():
                 and not _snapshot_ready(current_snapshot)
                 and not _snapshot_waiting_for_instances(current_snapshot)
             ):
-                if startup_recovery_started is None:
-                    startup_recovery_started = now
-                    fallback_device = next(
-                        (
-                            device
-                            for device in reversed(STARTUP_AUDIO_DEVICE_PRIORITY)
-                            if device not in startup_audio_failed_devices
-                        ),
-                        "",
-                    )
-                    if fallback_device:
-                        _try_startup_audio_recovery(rnbo, fallback_device)
-                elif (now - startup_recovery_started) >= STARTUP_AUDIO_RECOVERY_HOLD_SECONDS:
-                    print("Startup discovery timed out; continuing without a ready RNBO snapshot")
-                    break
+                print("Startup discovery timed out; leaving the configured audio device unchanged")
+                break
 
-            recovery_active = (
-                startup_recovery_started is not None
-                and (now - startup_recovery_started) < STARTUP_AUDIO_RECOVERY_HOLD_SECONDS
-            )
             status_line, hint_line = _startup_status_lines(
                 current_snapshot,
                 startup_stable_passes,
-                recovery_active,
             )
             renderer.draw_startup_status(
                 "SHADOWBOX",
