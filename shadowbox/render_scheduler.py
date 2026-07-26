@@ -35,12 +35,8 @@ class RenderScheduler:
         if state.ui_mode == "INSTANCE_SURFACE":
             return ui.active_surface_frame_rate
         if state.ui_mode == "EDIT" and ui.selected_param:
-            from shadowbox.editors.pitch_display import is_pitch_display_param
-            from shadowbox.editors.scope import is_scope_param
             from shadowbox.editors.step16 import is_step16_param
-            if is_scope_param(ui.selected_param):
-                return 15.0
-            if is_pitch_display_param(ui.selected_param) or is_step16_param(ui.selected_param):
+            if is_step16_param(ui.selected_param):
                 return 20.0
         return None
 

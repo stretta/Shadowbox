@@ -109,6 +109,7 @@ class ScopeEditorTests(unittest.TestCase):
         ui.state.instances = [
             {
                 "id": "1",
+                "name": "TimeDomainScope",
                 "params": [
                     {
                         "name": "SamplingRate",
@@ -123,18 +124,18 @@ class ScopeEditorTests(unittest.TestCase):
             }
         ]
         ui.state.active_instance_id = "1"
-        ui.state.param_cursor = 1
-        ui.state.ui_mode = "EDIT"
+        self.assertTrue(ui._begin_instance_surface())
 
         self.assertTrue(ui.apply_instance_state_update("1", "/rnbo/inst/1/messages/out/scope", [0.1, -0.2]))
 
-        self.assertEqual(ui.state.edit_scope_samples, [0.1, -0.2])
+        self.assertEqual(ui.state.edit_scope_samples, [0.0, 0.1, -0.2])
 
-    def test_scope_editor_pauses_periodic_discovery_refresh(self) -> None:
+    def test_scope_surface_allows_periodic_discovery_refresh(self) -> None:
         ui = ShadowboxUI()
         ui.state.instances = [
             {
                 "id": "1",
+                "name": "TimeDomainScope",
                 "params": [
                     {
                         "name": "SamplingRate",
@@ -147,10 +148,9 @@ class ScopeEditorTests(unittest.TestCase):
             }
         ]
         ui.state.active_instance_id = "1"
-        ui.state.param_cursor = 1
-        ui.state.ui_mode = "EDIT"
+        self.assertTrue(ui._begin_instance_surface())
 
-        self.assertTrue(ui.should_pause_refresh())
+        self.assertFalse(ui.should_pause_refresh())
 
     def test_scope_editor_turn_updates_sampling_rate_param(self) -> None:
         ui = ShadowboxUI()
@@ -162,11 +162,9 @@ class ScopeEditorTests(unittest.TestCase):
             "max": 1000.0,
             "metadata": {"editor": "scope"},
         }
-        ui.state.instances = [{"id": "1", "params": [param], "state": []}]
+        ui.state.instances = [{"id": "1", "name": "TimeDomainScope", "params": [param], "state": [{"name": "scope", "path": "/rnbo/inst/1/messages/out/scope", "value": 0.0, "metadata": {}}]}]
         ui.state.active_instance_id = "1"
-        ui.state.param_cursor = 1
-        ui.state.ui_mode = "EDIT"
-        ui.state.edit_value = 100.0
+        self.assertTrue(ui._begin_instance_surface())
 
         ui.handle_event(UIEvent("step", 1))
 
@@ -280,11 +278,9 @@ class ScopeEditorTests(unittest.TestCase):
             "max": 1000.0,
             "metadata": {"editor": "scope"},
         }
-        ui.state.instances = [{"id": "1", "params": [param], "state": []}]
+        ui.state.instances = [{"id": "1", "name": "TimeDomainScope", "params": [param], "state": [{"name": "scope", "path": "/rnbo/inst/1/messages/out/scope", "value": 0.0, "metadata": {}}]}]
         ui.state.active_instance_id = "1"
-        ui.state.param_cursor = 1
-        ui.state.ui_mode = "EDIT"
-        ui.state.edit_value = 100.0
+        self.assertTrue(ui._begin_instance_surface())
 
         ui.handle_event(UIEvent(kind="set_edit_value", value=0.75))
 
@@ -306,11 +302,9 @@ class ScopeEditorTests(unittest.TestCase):
             "max": 500.0,
             "metadata": {"editor": "scope"},
         }
-        ui.state.instances = [{"id": "1", "params": [param], "state": []}]
+        ui.state.instances = [{"id": "1", "name": "TimeDomainScope", "params": [param], "state": [{"name": "scope", "path": "/rnbo/inst/1/messages/out/scope", "value": 0.0, "metadata": {}}]}]
         ui.state.active_instance_id = "1"
-        ui.state.param_cursor = 1
-        ui.state.ui_mode = "EDIT"
-        ui.state.edit_value = 100.0
+        self.assertTrue(ui._begin_instance_surface())
 
         ui.handle_event(UIEvent(kind="set_edit_value", value=0.75))
 

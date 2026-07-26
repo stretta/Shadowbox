@@ -236,7 +236,6 @@ Supported parameter presentations:
 - enum
 - ttid
 - step16
-- pitch_display
 
 Parameter rules:
 - Only editable published parameters are shown
@@ -252,7 +251,7 @@ Recognized metadata categories:
 - Routing display: `label` for friendly input/output names
 
 Metadata behavior rules:
-- `editor` selects a specialized editor only for supported custom screens such as `ttid`, `step16`, and `pitch_display`
+- `editor` selects a specialized parameter editor only for supported custom screens such as `ttid` and `step16`; surface resolvers may also use metadata such as `pitch_display` or `scope` as a binding hint
 - `unit` and `units` provide a display suffix only
 - `display_precision` controls decimal formatting only and does not imply input step size
 - `edit_step` controls step increment only and does not imply display formatting
@@ -273,7 +272,6 @@ Editor behavior:
 - Enum parameters use a list selector when RNBO publishes an explicit enum value list
 - TTID uses a specialized editor only when the parameter metadata explicitly includes `editor: "ttid"`
 - `step16` uses a specialized live editor when the parameter metadata explicitly includes `editor: "step16"`; its default runtime state key is `step16_playhead` and may be overridden with `playhead_state`
-- `pitch_display` uses a specialized live viewer when the parameter metadata explicitly includes `editor: "pitch_display"`; its default runtime state keys are `pitch_name` and `pitch_cents` and may be overridden with `pitch_state` and `cents_state`
 - Numeric parameters may be presented as integer-style controls only when metadata such as `display_as: "int"` or `edit_as: "int"` is present, even if RNBO Runner publishes the raw value as float-like
 
 8. Instance Presets

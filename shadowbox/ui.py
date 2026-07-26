@@ -25,14 +25,11 @@ from shadowbox.editors.ttid import (
 )
 from shadowbox.editors.pitch_display import (
     cents_state_key,
-    is_pitch_display_param,
     pitch_state_key,
 )
 from shadowbox.editors.scope import (
     append_scope_samples,
-    is_scope_param,
     normalize_scope_samples,
-    scope_state_key,
 )
 from shadowbox.editors.step16 import (
     clamp_playhead,
@@ -447,7 +444,6 @@ class ShadowboxUI:
             param
             and not is_ttid_param(param)
             and not is_step16_param(param)
-            and not is_pitch_display_param(param)
             and not is_discrete_param(param)
             and not edit_as_int(param)
         )
@@ -691,8 +687,6 @@ class ShadowboxUI:
                 self.state.edit_value = normalize_ttid(self.state.edit_value)
             elif is_step16_param(self.selected_param):
                 self.state.edit_value = normalize_step16_mask(self.state.edit_value)
-            elif is_scope_param(self.selected_param):
-                self.state.edit_value = normalize_current_value_for_edit(self.selected_param)
             else:
                 self.state.edit_value = normalize_current_value_for_edit(self.selected_param)
         self.request_render("runner_snapshot")
@@ -725,11 +719,6 @@ class ShadowboxUI:
                     item["value"] = value
                     if (
                         (
-                            self.state.ui_mode == "EDIT"
-                            and is_scope_param(self.selected_param)
-                            and self.active_scope_state_value is item
-                        )
-                        or (
                             self.state.ui_mode == "INSTANCE_SURFACE"
                             and self.state.active_surface_key == "time_domain_scope"
                             and self.surface_state_binding("samples") is item
@@ -2432,11 +2421,6 @@ class ShadowboxUI:
         self.state.edit_ttid_scale_names = scale_names
         self.state.edit_ttid_scale_index = 0
 
-    def _begin_scope_edit(self, param: dict) -> None:
-        self.state.edit_value = normalize_current_value_for_edit(param)
-        item = self.active_scope_state_value
-        self.state.edit_scope_samples = normalize_scope_samples(item.get("value") if item else None)
-
     def _current_ttid_scale_name(self) -> str:
         names = self.state.edit_ttid_scale_names or ["major"]
         idx = max(0, min(self.state.edit_ttid_scale_index, len(names) - 1))
@@ -2460,10 +2444,6 @@ class ShadowboxUI:
         if not key:
             return None
         return self._find_active_state_value(key)
-
-    @property
-    def active_scope_state_value(self) -> Optional[dict]:
-        return self._find_active_state_value(scope_state_key(self.selected_param))
 
     def remember_loaded_preset(self, preset_name: Any) -> None:
         instance_id = str(self.state.active_instance_id)
@@ -2610,7 +2590,8 @@ class ShadowboxUI:
             self._handle_name_keyboard_mode()
 
     def _handle_touch_edit_value(self, normalized_value: float | None, *, pressed: bool = False) -> None:
-        if self.state.ui_mode == "INSTANCE_SURFACE" and self.state.active_surface_key == "time_domain_scope":
+        surface_scope = self.state.ui_mode == "INSTANCE_SURFACE" and self.state.active_surface_key == "time_domain_scope"
+        if surface_scope:
             param = self.surface_param_binding("sample_rate")
         elif self.state.ui_mode == "EDIT":
             param = self.selected_param
@@ -2618,7 +2599,7 @@ class ShadowboxUI:
             return
         if normalized_value is None:
             return
-        if param is None or is_ttid_param(param) or is_step16_param(param) or is_pitch_display_param(param) or is_enum_param(param):
+        if param is None or is_ttid_param(param) or is_step16_param(param) or is_enum_param(param):
             return
         pmin = param.get("min")
         pmax = param.get("max")
@@ -2641,7 +2622,7 @@ class ShadowboxUI:
         param["value"] = value
         self.state.activity_ticks += 1
         normalized_path = str(param.get("normalized_path", "") or "")
-        if is_scope_param(param) and normalized_path:
+        if surface_scope and normalized_path:
             self.queue_action(UIAction(kind="set_param", path=normalized_path, value=fraction))
         elif not is_discrete_param(param):
             self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
@@ -3384,14 +3365,6 @@ class ShadowboxUI:
                 direction = 1 if step > 0 else -1
                 for _ in range(steps):
                     self.state.edit_step16_focus = move_step16_focus(self.state.edit_step16_focus, direction)
-            elif is_pitch_display_param(param):
-                return
-            elif is_scope_param(param):
-                step = self._accelerate_float_edit_delta(param, step)
-                self.state.edit_value = apply_edit_delta(param, self.state.edit_value, step)
-                param["value"] = self.state.edit_value
-                if not is_discrete_param(param):
-                    self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=self.state.edit_value))
             else:
                 step = self._accelerate_float_edit_delta(param, step)
                 self.state.edit_value = apply_edit_delta(param, self.state.edit_value, step)
@@ -3723,14 +3696,6 @@ class ShadowboxUI:
                         self.state.edit_value = normalize_step16_mask(param.get("value", 0))
                         self.state.edit_step16_focus = 0
                         self.state.ui_mode = "EDIT"
-                    elif is_pitch_display_param(param):
-                        self._edit_original_value = param.get("value")
-                        self.state.edit_value = None
-                        self.state.ui_mode = "EDIT"
-                    elif is_scope_param(param):
-                        self._edit_original_value = param.get("value")
-                        self._begin_scope_edit(param)
-                        self.state.ui_mode = "EDIT"
                     elif is_enum_param(param):
                         self._edit_original_value = param.get("value")
                         self.state.edit_value = normalize_current_value_for_edit(param)
@@ -3991,17 +3956,6 @@ class ShadowboxUI:
                 self.state.edit_value = toggle_step16(self.state.edit_value, self.state.edit_step16_focus)
                 param["value"] = self.state.edit_value
                 self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=self.state.edit_value))
-            elif param is not None and is_pitch_display_param(param):
-                self.state.edit_value = None
-                self._edit_original_value = None
-                self._reset_float_edit_acceleration()
-                self.state.ui_mode = "PARAM_LIST"
-            elif param is not None and is_scope_param(param):
-                if is_discrete_param(param):
-                    self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=self.state.edit_value))
-                self._reset_float_edit_acceleration()
-                self.state.ui_mode = "PARAM_LIST"
-                self._edit_original_value = None
             else:
                 if param is not None and is_discrete_param(param):
                     self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=self.state.edit_value))
@@ -4030,21 +3984,6 @@ class ShadowboxUI:
             elif param is not None and is_step16_param(param):
                 self.state.edit_value = None
                 self.state.edit_step16_focus = 0
-                self._edit_original_value = None
-                self._reset_float_edit_acceleration()
-                self.state.ui_mode = "PARAM_LIST"
-            elif param is not None and is_pitch_display_param(param):
-                self.state.edit_value = None
-                self._edit_original_value = None
-                self._reset_float_edit_acceleration()
-                self.state.ui_mode = "PARAM_LIST"
-            elif param is not None and is_scope_param(param):
-                if self._edit_original_value is not None:
-                    param["value"] = self._edit_original_value
-                    if not is_discrete_param(param):
-                        self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=self._edit_original_value))
-                self.state.edit_value = None
-                self.state.edit_scope_samples = []
                 self._edit_original_value = None
                 self._reset_float_edit_acceleration()
                 self.state.ui_mode = "PARAM_LIST"

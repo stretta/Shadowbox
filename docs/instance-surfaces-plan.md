@@ -2,15 +2,15 @@
 
 ## Implementation status
 
-The first deployable checkpoint is implemented:
+The instance-surfaces plan is implemented:
 
 - Static canonical-name registry and compatibility resolvers
 - Independent `INSTANCE_SURFACE` UI state and navigation
 - Snapshot re-resolution and safe fallback when a contract disappears
 - Surface-specific render cadence
-- Time Domain Scope and Tuner instance-surface migrations with their existing
-  parameter-editor routes retained for compatibility
+- Time Domain Scope and Tuner instance-surface migrations
 - Contract-driven 16-stage Analog Sequencer surface
+- Removal of the obsolete Scope and Tuner parameter-editor dispatch routes
 - Automated registry, lifecycle, navigation, touch, rendering, and cadence
   coverage
 
@@ -320,8 +320,8 @@ Reuse the current sample buffer, time-window calculation, rendering, and OSC
 update behavior. The migration primarily relocates ownership from
 `selected_param` and generic `EDIT` state into a surface session.
 
-Keep the current parameter-triggered route temporarily as a compatibility path
-until the instance surface is verified.
+The former parameter-triggered route was removed after live instance-surface
+verification.
 
 ## Phase 4: Tuner migration
 
@@ -335,8 +335,8 @@ The Tuner surface will bind:
 This phase proves that an instance surface can primarily be a viewer rather
 than a bank of controls.
 
-Keep the existing `pitch_display` parameter editor temporarily as a
-compatibility path.
+The former `pitch_display` parameter-editor route was removed after live
+instance-surface verification.
 
 ## Phase 5: Analog Sequencer surface
 
@@ -432,7 +432,7 @@ Remove obsolete Scope, Tuner, and Analog Sequencer branches from generic
 - Tuner retains pitch and cents updates
 - Analog Sequencer uses its own export contract
 - Trigger Sequencer retains its single-parameter `step16` behavior
-- Parameter-editor compatibility paths work until intentionally removed
+- Scope and Tuner metadata no longer dispatches their obsolete parameter editors
 
 ## Live validation on `wren`
 

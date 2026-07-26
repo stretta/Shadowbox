@@ -9,8 +9,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from shadowbox.editors.pitch_display import is_pitch_display_param, normalize_pitch_to_midi_note
-from shadowbox.editors.scope import is_scope_param, scope_time_seconds
+from shadowbox.editors.pitch_display import normalize_pitch_to_midi_note
+from shadowbox.editors.scope import scope_time_seconds
 from shadowbox.editors.step16 import build_cells, is_step16_param
 from shadowbox.editors.ttid import get_root_names, is_pc_on, is_ttid_param, note_name
 from shadowbox.rnbo import RNBO_HOST
@@ -3448,12 +3448,11 @@ class ShadowboxRenderer:
             panel_w, panel_h = self.display.width - 64, 346
             gap = 4
             col_w = max(24, (panel_w - 32 - (gap * 15)) // 16)
-            track_top = panel_y + 42
-            track_h = 218
+            track_top = panel_y + 14
+            track_h = 250
             if self.has_color:
                 self._rounded_theme(panel_x, panel_y, panel_w, panel_h, 14, "panel", True)
                 self._rect_theme(panel_x, panel_y, panel_w, panel_h, "line", False)
-                self._text_theme("STAGES", panel_x + 18, panel_y + 12, "muted", 2, "medium")
             else:
                 self.display.rect(panel_x, panel_y, panel_w, panel_h, True, False)
 
@@ -3492,20 +3491,25 @@ class ShadowboxRenderer:
                     track_h,
                     action_kind="set_surface_value",
                     index=index,
-                    label=str(index + 1),
                 )
                 toggle_y = track_top + track_h + 8
+                toggle_size = max(14, min(22, col_w - 8))
+                toggle_x = x + max(0, (col_w - toggle_size) // 2)
+                if self.has_color:
+                    self._rect_theme(toggle_x, toggle_y, toggle_size, toggle_size, "accent" if enabled else "line", False)
+                    if enabled:
+                        self._fill_theme(toggle_x + 4, toggle_y + 4, max(1, toggle_size - 8), max(1, toggle_size - 8), "accent")
+                else:
+                    self.display.rect(toggle_x, toggle_y, toggle_size, toggle_size, True, enabled)
                 self._record_touch_target(
                     "analog_stage_toggle",
                     x,
-                    toggle_y,
+                    toggle_y - 6,
                     col_w,
-                    52,
+                    toggle_size + 12,
                     action_kind="toggle_surface_value",
                     index=index,
-                    label=str(index + 1),
                 )
-                self._text_theme(str(index + 1), x + max(0, (col_w - self._measure_text(str(index + 1))[0]) // 2), toggle_y + 18, "text" if enabled else "muted")
 
             focused_param = ui.surface_param_binding(f"stage_{focus + 1:02d}_value")
             focused_value = focused_param.get("value") if focused_param else "-"
@@ -3551,13 +3555,6 @@ class ShadowboxRenderer:
         if is_step16_param(selected_param):
             self.draw_edit_step16(ui, selected_param, state)
             return
-        if is_pitch_display_param(selected_param):
-            self.draw_edit_pitch_display(ui, selected_param)
-            return
-        if is_scope_param(selected_param):
-            self.draw_edit_scope(ui, selected_param, state)
-            return
-
         if self.is_full_tft:
             block_h = 96
             top = self.edit_content_top(block_h)

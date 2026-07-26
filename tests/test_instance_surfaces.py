@@ -75,6 +75,20 @@ def _organ_instance():
     }
 
 
+def _tuner_instance():
+    return {
+        "id": "7",
+        "name": "Tuner",
+        "label": "Tuner",
+        "params": [
+            _param("Tuner", value=0.0, minimum=0.0, maximum=1.0, metadata={"editor": "pitch_display"}),
+            _param("Smooth", value=0.0, minimum=0.0, maximum=100.0),
+            _param("NoiseThreshold", value=0.0, minimum=0.0, maximum=100.0),
+        ],
+        "state": [_state("pitch_name", []), _state("pitch_cents", [])],
+    }
+
+
 def _live_organ_instance():
     instance = _organ_instance()
     for param in instance["params"]:
@@ -155,6 +169,14 @@ class InstanceSurfaceTests(unittest.TestCase):
         instance = _scope_instance()
         instance["state"] = []
         self.assertIsNone(resolve_instance_surface(instance))
+
+    def test_live_tuner_contract_resolves_pitch_and_cents(self):
+        resolved = resolve_instance_surface(_tuner_instance())
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved[0].key, "tuner")
+        self.assertEqual(resolved[1].params["anchor"]["name"], "Tuner")
+        self.assertEqual(resolved[1].state["pitch"]["name"], "pitch_name")
+        self.assertEqual(resolved[1].state["cents"]["name"], "pitch_cents")
 
     def test_current_wren_organ_db_contract_resolves_canonically(self):
         resolved = resolve_instance_surface(_live_organ_instance())
@@ -266,6 +288,11 @@ class InstanceSurfaceTests(unittest.TestCase):
         toggles = [target for target in renderer.touch_layout.targets if target.kind == "analog_stage_toggle"]
         self.assertEqual(len(targets), 16)
         self.assertEqual(len(toggles), 16)
+        self.assertTrue(all(not target.label for target in targets + toggles))
+        rendered_text = [op[1] for op in renderer.display.ops if op[0] in {"text", "text_color"}]
+        self.assertNotIn("STAGES", rendered_text)
+        self.assertFalse(any(text in {str(index) for index in range(1, 17)} for text in rendered_text))
+        self.assertTrue(all(toggle.h <= 34 for toggle in toggles))
 
     def test_organ_touch_maps_top_to_minus_96_and_bottom_to_zero(self):
         ui = ShadowboxUI()
@@ -349,6 +376,31 @@ class InstanceSurfaceTests(unittest.TestCase):
             "state": [],
         }
         self.assertIsNone(resolve_instance_surface(instance))
+
+    def test_scope_metadata_no_longer_dispatches_from_parameter_list(self):
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(_snapshot([_scope_instance()]))
+        ui.state.ui_mode = "PARAM_LIST"
+        ui.state.param_cursor = 1
+
+        ui.handle_event(UIEvent("short_press"))
+
+        self.assertEqual(ui.state.ui_mode, "EDIT")
+        self.assertEqual(ui.state.edit_value, 48.0)
+        self.assertEqual(ui.state.edit_scope_samples, [])
+        self.assertIsNone(RenderScheduler.frame_rate(ui))
+
+    def test_tuner_metadata_no_longer_dispatches_from_parameter_list(self):
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(_snapshot([_tuner_instance()]))
+        ui.state.ui_mode = "PARAM_LIST"
+        ui.state.param_cursor = 1
+
+        ui.handle_event(UIEvent("short_press"))
+
+        self.assertEqual(ui.state.ui_mode, "EDIT")
+        self.assertEqual(ui.state.edit_value, 0.0)
+        self.assertIsNone(RenderScheduler.frame_rate(ui))
 
 
 if __name__ == "__main__":

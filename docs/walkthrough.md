@@ -65,7 +65,9 @@ Custom editors are selected through the `editor` metadata key.
 Current specialized editors:
 - `ttid` via `{"editor":"ttid"}`
 - `step16` via `{"editor":"step16"}`
-- `pitch_display` via `{"editor":"pitch_display"}`
+
+Instance-surface resolvers may use editor metadata such as `pitch_display` or
+`scope` as a binding hint without dispatching a parameter editor.
 
 Interfaces that represent a complete export use the static instance-surface
 registry under `shadowbox/surfaces/`. A surface is offered only when both the
@@ -134,7 +136,7 @@ are routed into the UI's cached instance state through:
 
 This allows editors such as `step16` to update their runtime display without waiting for the normal refresh cycle.
 
-5a. Pitch display editor contract
+5a. Tuner instance-surface contract
 
 The `pitch_display` editor is a live viewer for two runtime state values, typically note name/number and pitch deviation in cents.
 
@@ -150,11 +152,11 @@ Optional metadata overrides:
 
 Shadowbox behavior:
 - the `Tuner` instance surface opens the live display-only screen when its pitch and cents state contract resolves
-- opening the tagged parameter remains available as a compatibility path
 - incoming OSC state updates keep the screen current in real time
-- instance-surface navigation exits to the instance menu; compatibility-editor navigation exits to the parameter list
+- instance-surface navigation exits to the instance menu
+- the tagged anchor remains an ordinary parameter under `PARAMETERS`; it no longer dispatches the tuner viewer
 
-5b. Time domain scope editor contract
+5b. Time Domain Scope instance-surface contract
 
 The `scope` editor is a live oscilloscope-style viewer for scalar amplitude samples. It is intended for a parameter such as `SamplingRate` tagged with scope metadata, so turning the encoder adjusts that parameter while the waveform remains visible.
 
@@ -168,13 +170,12 @@ Optional metadata overrides:
 
 Shadowbox behavior:
 - the `TimeDomainScope` instance surface opens the live waveform editor when its sample-rate and scope state contract resolves
-- opening the tagged parameter remains available as a compatibility path
 - `/scope` values are treated as amplitudes in the `-1.0..1.0` range and clipped to that range
 - incoming samples are drawn left-to-right with the newest sample at the right edge, like a scrolling oscilloscope trace
 - the displayed time window is derived from the number of visible samples and the current parameter value
 - encoder turns continue to update the tagged parameter while the waveform is visible
 - instance-surface navigation exits to the instance menu
-- compatibility-editor short press exits to the parameter list; long press exits and restores the original parameter value
+- the tagged sample-rate parameter remains an ordinary numeric editor under `PARAMETERS`
 
 6. RNBO authoring guidelines
 
