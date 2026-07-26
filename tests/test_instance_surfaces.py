@@ -14,6 +14,7 @@ sys.modules.setdefault("pythonosc.udp_client", udp_client_module)
 from shadowbox.render_scheduler import RenderScheduler
 from shadowbox.renderer import ShadowboxRenderer
 from shadowbox.surfaces import resolve_instance_surface
+from shadowbox.surfaces.list_sequencer import FIELD_KEYS
 from shadowbox.surfaces.organ import FOOTAGES
 from shadowbox.touch import TouchLayout
 from shadowbox.ui import ShadowboxUI, UIEvent
@@ -95,6 +96,26 @@ def _live_organ_instance():
         param["name"] = f"Tonewheel/{param['name']}"
         param["path"] = f"/rnbo/inst/7/params/{param['name']}"
     return instance
+
+
+def _list_input(name):
+    return {
+        "name": name,
+        "path": f"/rnbo/inst/7/messages/in/{name}",
+        "metadata": {},
+    }
+
+
+def _list_sequencer_instance():
+    names = ["Steps", "StepsSecondary", "PrimaryRotation", "SecondaryRotation", "Oct", "Velocity", "Duration"]
+    return {
+        "id": "7",
+        "name": "ListSequencer",
+        "label": "LISTS",
+        "params": [],
+        "inputs": [_list_input(name) for name in names],
+        "state": [_state(f"{name}Ack", [0.0, 1.0] if name == "Steps" else [1.0, 2.0]) for name in names],
+    }
 
 
 def _snapshot(instances):
@@ -257,6 +278,136 @@ class InstanceSurfaceTests(unittest.TestCase):
             ui.handle_event(UIEvent("short_press"))
             self.assertEqual(RenderScheduler.frame_rate(ui), expected)
             ui._exit_instance_surface()
+
+    def test_list_sequencer_resolves_ordered_osc_inports(self):
+        resolved = resolve_instance_surface(_list_sequencer_instance())
+
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved[0].key, "list_sequencer")
+        self.assertEqual(tuple(resolved[1].inputs), FIELD_KEYS)
+        self.assertEqual(resolved[1].inputs["steps_secondary"]["name"], "StepsSecondary")
+        self.assertEqual(resolved[1].state["duration_ack"]["name"], "DurationAck")
+
+    def test_list_sequencer_rejects_missing_required_inport(self):
+        instance = _list_sequencer_instance()
+        instance["inputs"] = [item for item in instance["inputs"] if item["name"] != "Duration"]
+
+        self.assertIsNone(resolve_instance_surface(instance))
+
+    def test_list_sequencer_open_reads_ack_fields_and_hydrates_drafts(self):
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(_snapshot([_list_sequencer_instance()]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+
+        ui.handle_event(UIEvent("short_press"))
+
+        self.assertEqual(ui.state.active_surface_key, "list_sequencer")
+        self.assertEqual(ui.state.surface_state["drafts"]["steps"], "0 1")
+        reads = [action for action in ui.pop_actions() if action.kind == "send_osc"]
+        self.assertEqual(len(reads), len(FIELD_KEYS))
+        self.assertTrue(all(action.value == [-999] for action in reads))
+
+    def test_list_sequencer_keypad_sends_complete_numeric_list(self):
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(_snapshot([_list_sequencer_instance()]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        ui.pop_actions()
+        ui.state.surface_state["drafts"]["steps"] = ""
+
+        for key in ("1", "space", "0", "space", "1"):
+            ui.handle_event(UIEvent("edit_list_key", button_id=key))
+        ui.handle_event(UIEvent("send_list_field"))
+
+        writes = [action for action in ui.pop_actions() if action.kind == "send_osc"]
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(writes[0].path, "/rnbo/inst/7/messages/in/Steps")
+        self.assertEqual(writes[0].value, [1, 0, 1])
+
+    def test_list_sequencer_signed_field_uses_contextual_sign(self):
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(_snapshot([_list_sequencer_instance()]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        ui.pop_actions()
+        ui.handle_event(UIEvent("select_list_field", index=2))
+        ui.state.surface_state["drafts"]["primary_rotation"] = ""
+
+        ui.handle_event(UIEvent("toggle_list_sign"))
+        ui.handle_event(UIEvent("edit_list_key", button_id="6"))
+        ui.handle_event(UIEvent("edit_list_key", button_id="0"))
+        ui.handle_event(UIEvent("send_list_field"))
+
+        write = next(action for action in ui.pop_actions() if action.kind == "send_osc")
+        self.assertEqual(write.value, [-60])
+
+    def test_list_sequencer_steps_reject_non_binary_values(self):
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(_snapshot([_list_sequencer_instance()]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        ui.pop_actions()
+        ui.state.surface_state["drafts"]["steps"] = "0 2"
+
+        ui.handle_event(UIEvent("send_list_field"))
+
+        self.assertEqual([action for action in ui.pop_actions() if action.kind == "send_osc"], [])
+        self.assertEqual(ui.state.status_message, "INVALID LIST")
+
+    def test_list_sequencer_ack_updates_clean_but_not_dirty_draft(self):
+        ui = ShadowboxUI()
+        instance = _list_sequencer_instance()
+        ui.apply_runner_snapshot(_snapshot([instance]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        ui.pop_actions()
+        steps_ack = next(item for item in instance["state"] if item["name"] == "StepsAck")
+
+        self.assertTrue(ui.apply_instance_state_update("7", steps_ack["path"], [1, 1, 0]))
+        self.assertEqual(ui.state.surface_state["drafts"]["steps"], "1 1 0")
+        ui.handle_event(UIEvent("edit_list_key", button_id="1"))
+        self.assertTrue(ui.apply_instance_state_update("7", steps_ack["path"], [0]))
+        self.assertEqual(ui.state.surface_state["drafts"]["steps"], "1 1 01")
+
+    def test_list_sequencer_surface_renders_seven_fields_and_twelve_keys(self):
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(_snapshot([_list_sequencer_instance()]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        renderer = ShadowboxRenderer(_SurfaceDisplay())
+        renderer.set_touch_mode(True)
+
+        renderer.draw(ui)
+
+        fields = [target for target in renderer.touch_layout.targets if target.kind == "list_field"]
+        keys = [target for target in renderer.touch_layout.targets if target.kind == "list_key"]
+        sends = [target for target in renderer.touch_layout.targets if target.kind == "list_send"]
+        self.assertEqual(len(fields), 7)
+        self.assertEqual(len(keys), 12)
+        self.assertEqual(len(sends), 1)
+        self.assertEqual([target.label for target in fields], [
+            "Stp",
+            "Stp2",
+            "Rot",
+            "Rot2",
+            "Oct",
+            "Vel",
+            "Dur",
+        ])
+        self.assertFalse(any(target.kind == "list_sign" for target in renderer.touch_layout.targets))
+
+        ui.handle_event(UIEvent("select_list_field", index=2))
+        renderer.draw(ui)
+
+        signs = [target for target in renderer.touch_layout.targets if target.kind == "list_sign"]
+        self.assertEqual(len(signs), 1)
+        self.assertEqual(signs[0].action_kind, "toggle_list_sign")
 
     def test_analog_touch_updates_stage_and_toggle(self):
         ui = ShadowboxUI()

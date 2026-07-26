@@ -14,6 +14,7 @@ from shadowbox.editors.scope import scope_time_seconds
 from shadowbox.editors.step16 import build_cells, is_step16_param
 from shadowbox.editors.ttid import get_root_names, is_pc_on, is_ttid_param, note_name
 from shadowbox.rnbo import RNBO_HOST
+from shadowbox.surfaces.list_sequencer import FIELD_KEYS, FIELD_LABELS, FIELD_SHORT_LABELS, SIGNED_FIELD_KEYS
 from shadowbox.surfaces.organ import FOOTAGE_COLORS, FOOTAGES
 from shadowbox.touch import TouchLayout, TouchSample
 from shadowbox.ui import (
@@ -3304,7 +3305,141 @@ class ShadowboxRenderer:
         if key == "analog_sequencer":
             self.draw_analog_sequencer_surface(ui, state)
             return
+        if key == "list_sequencer":
+            self.draw_list_sequencer_surface(ui, state)
+            return
         self.text_center("surface unavailable", self.edit_content_top(8))
+
+    def draw_list_sequencer_surface(self, ui, state) -> None:
+        focus = max(0, min(len(FIELD_KEYS) - 1, int(state.surface_focus)))
+        drafts = state.surface_state.get("drafts", {})
+        if not isinstance(drafts, dict):
+            drafts = {}
+
+        if not self.touch_layout_enabled:
+            key = FIELD_KEYS[focus]
+            label = FIELD_LABELS[key]
+            draft = str(drafts.get(key, "")) or "-"
+            self.text_center(shorten(label, 20), self.edit_content_top(32))
+            self.text_center(shorten(draft, 20), self.edit_content_top(32) + 18)
+            return
+
+        content_y = self.content_top + 12
+        content_h = max(1, self.display.height - content_y - 18)
+        fields_x = 24
+        fields_w = 420
+        fields_gap = 4
+        field_h = max(38, (content_h - fields_gap * (len(FIELD_KEYS) - 1)) // len(FIELD_KEYS))
+        label_col_w = 72
+        keypad_x = fields_x + fields_w + 24
+        keypad_w = self.display.width - keypad_x - 24
+
+        for index, key in enumerate(FIELD_KEYS):
+            y = content_y + index * (field_h + fields_gap)
+            selected = index == focus
+            if self.has_color:
+                self._rounded_theme(fields_x, y, fields_w, field_h, 8, "panel_alt" if selected else "panel", True)
+                self._rect_theme(fields_x, y, fields_w, field_h, "accent" if selected else "line", False)
+            else:
+                self.display.rect(fields_x, y, fields_w, field_h, True, selected)
+            self._record_touch_target(
+                "list_field",
+                fields_x,
+                y,
+                fields_w,
+                field_h,
+                action_kind="select_list_field",
+                index=index,
+                label=FIELD_SHORT_LABELS[key],
+            )
+            label = FIELD_SHORT_LABELS[key]
+            label_h = self._measure_text(label, 2, "medium")[1]
+            label_y = y + max(0, (field_h - label_h) // 2)
+            value_y = label_y
+            self._text_theme(label, fields_x + 12, label_y, "accent" if selected else "text", 2, "medium")
+            self._vline_theme(fields_x + label_col_w, y + 8, max(1, field_h - 16), "accent" if selected else "line")
+            preview = str(drafts.get(key, "")) or "-"
+            preview_x = fields_x + label_col_w + 14
+            preview = self._truncate_to_width(preview, fields_x + fields_w - preview_x - 12, 2, "regular")
+            self._text_theme(preview, preview_x, value_y, "text" if selected else "muted", 2, "regular")
+
+        key_rows = (
+            (("1", "1"), ("2", "2"), ("3", "3")),
+            (("4", "4"), ("5", "5"), ("6", "6")),
+            (("7", "7"), ("8", "8"), ("9", "9")),
+            (("SPC", "space"), ("0", "0"), ("DEL", "backspace")),
+        )
+        gap = 8
+        action_h = 52
+        key_h = max(46, (content_h - action_h - gap * 4) // 4)
+        key_w = max(48, (keypad_w - gap * 2) // 3)
+
+        for row_index, row in enumerate(key_rows):
+            y = content_y + row_index * (key_h + gap)
+            for col_index, (label, value) in enumerate(row):
+                x = keypad_x + col_index * (key_w + gap)
+                if self.has_color:
+                    self._rounded_theme(x, y, key_w, key_h, 10, "panel", True)
+                    self._rect_theme(x, y, key_w, key_h, "line", False)
+                else:
+                    self.display.rect(x, y, key_w, key_h, True, False)
+                self._record_touch_target(
+                    "list_key",
+                    x,
+                    y,
+                    key_w,
+                    key_h,
+                    action_kind="edit_list_key",
+                    button_id=value,
+                    label=label,
+                )
+                text_w, text_h = self._measure_text(label, 2, "medium")
+                self._text_theme(label, x + max(0, (key_w - text_w) // 2), y + max(0, (key_h - text_h) // 2), "text", 2, "medium")
+
+        action_y = content_y + 4 * (key_h + gap)
+        selected_key = FIELD_KEYS[focus]
+        if selected_key in SIGNED_FIELD_KEYS:
+            sign_w = key_w
+            if self.has_color:
+                self._rounded_theme(keypad_x, action_y, sign_w, action_h, 10, "panel", True)
+                self._rect_theme(keypad_x, action_y, sign_w, action_h, "line", False)
+            else:
+                self.display.rect(keypad_x, action_y, sign_w, action_h, True, False)
+            self._record_touch_target(
+                "list_sign",
+                keypad_x,
+                action_y,
+                sign_w,
+                action_h,
+                action_kind="toggle_list_sign",
+                button_id="sign",
+                label="+/-",
+            )
+            sign_w_text, sign_h_text = self._measure_text("+/-", 2, "medium")
+            self._text_theme("+/-", keypad_x + max(0, (sign_w - sign_w_text) // 2), action_y + max(0, (action_h - sign_h_text) // 2), "text", 2, "medium")
+            send_x = keypad_x + key_w + gap
+            send_w = keypad_w - key_w - gap
+        else:
+            send_x = keypad_x
+            send_w = keypad_w
+
+        if self.has_color:
+            self._rounded_theme(send_x, action_y, send_w, action_h, 10, "accent_soft", True)
+            self._rect_theme(send_x, action_y, send_w, action_h, "accent", False)
+        else:
+            self.display.rect(send_x, action_y, send_w, action_h, True, False)
+        self._record_touch_target(
+            "list_send",
+            send_x,
+            action_y,
+            send_w,
+            action_h,
+            action_kind="send_list_field",
+            button_id="send",
+            label="SEND",
+        )
+        send_text_w, send_text_h = self._measure_text("SEND", 2, "medium")
+        self._text_theme("SEND", send_x + max(0, (send_w - send_text_w) // 2), action_y + max(0, (action_h - send_text_h) // 2), "text", 2, "medium")
 
     def draw_organ_surface(self, ui, state) -> None:
         labels = {

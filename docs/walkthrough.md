@@ -80,6 +80,7 @@ Current registered instance exports:
 - `AnalogSequencer`
 - `TimeDomainScope`
 - `Tuner`
+- `ListSequencer`
 
 The current Organ export on `wren` publishes continuous `-96..0 dB` tonewheel
 controls. The Organ surface maps `-96 dB` to the top/off position and `0 dB`
@@ -176,6 +177,32 @@ Shadowbox behavior:
 - encoder turns continue to update the tagged parameter while the waveform is visible
 - instance-surface navigation exits to the instance menu
 - the tagged sample-rate parameter remains an ordinary numeric editor under `PARAMETERS`
+
+5c. ListSequencer instance-surface contract
+
+`ListSequencer` stores sequence fields behind OSC message inports because RNBO
+parameters do not support lists. Shadowbox therefore discovers these controls
+from `/rnbo/inst/<id>/messages/in` and never places them in the parameter model.
+
+Expected ordered inports:
+- `Steps`
+- `StepsSecondary`
+- `PrimaryRotation`
+- `SecondaryRotation`
+- `Oct`
+- `Velocity`
+- `Duration`
+
+Expected readback outports are the matching names with an `Ack` suffix, such as
+`StepsAck`. On surface entry, Shadowbox sends `[-999]` to each list inport and
+uses the corresponding ACK value to populate a space-separated draft.
+
+Touch behavior:
+- selecting a field assigns it to the compact `1..9 / SPC 0 DEL` keypad
+- Steps and Secondary Steps accept only binary tokens
+- Primary Rotation, Secondary Rotation, and Octave expose a contextual sign control
+- `SEND` parses the complete draft and transmits one atomic OSC list
+- long press or back returns to the instance menu
 
 6. RNBO authoring guidelines
 

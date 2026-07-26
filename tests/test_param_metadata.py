@@ -694,6 +694,54 @@ class ParamMetadataTests(unittest.TestCase):
         self.assertEqual(instances[0]["preset_destroy_path"], "/rnbo/inst/1/presets/destroy")
         self.assertEqual(instances[0]["current_preset_name"], "Bass")
 
+    def test_discover_instances_includes_message_inports(self) -> None:
+        tree = {
+            "CONTENTS": {
+                "rnbo": {
+                    "CONTENTS": {
+                        "inst": {
+                            "CONTENTS": {
+                                "7": {
+                                    "CONTENTS": {
+                                        "name": {"VALUE": "ListSequencer"},
+                                        "messages": {
+                                            "CONTENTS": {
+                                                "in": {
+                                                    "CONTENTS": {
+                                                        "Steps": {
+                                                            "FULL_PATH": "/rnbo/inst/7/messages/in/Steps",
+                                                            "TYPE": "N",
+                                                        },
+                                                        "Velocity": {
+                                                            "FULL_PATH": "/rnbo/inst/7/messages/in/Velocity",
+                                                            "CONTENTS": {
+                                                                "meta": {"VALUE": '["label:Velocity"]'},
+                                                            },
+                                                        },
+                                                    }
+                                                }
+                                            }
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        instances = discover_instances(tree)
+
+        self.assertEqual(
+            [(item["name"], item["path"]) for item in instances[0]["inputs"]],
+            [
+                ("Steps", "/rnbo/inst/7/messages/in/Steps"),
+                ("Velocity", "/rnbo/inst/7/messages/in/Velocity"),
+            ],
+        )
+        self.assertEqual(instances[0]["inputs"][1]["metadata"]["label"], "Velocity")
+
     def test_discover_params_include_normalized_child_path(self) -> None:
         tree = {
             "CONTENTS": {

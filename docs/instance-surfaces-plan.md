@@ -10,6 +10,7 @@ The instance-surfaces plan is implemented:
 - Surface-specific render cadence
 - Time Domain Scope and Tuner instance-surface migrations
 - Contract-driven 16-stage Analog Sequencer surface
+- OSC-inport-driven ListSequencer surface with ACK readback
 - Removal of the obsolete Scope and Tuner parameter-editor dispatch routes
 - Automated registry, lifecycle, navigation, touch, rendering, and cadence
   coverage
@@ -38,6 +39,7 @@ Initial instance surfaces:
 - Analog Sequencer
 - Time Domain Scope
 - Tuner
+- ListSequencer
 
 Existing parameter editors that remain parameter-scoped:
 
@@ -464,7 +466,7 @@ Instance-surface support is complete when:
   runtime bindings.
 - Organ provides a responsive nine-drawbar touchscreen interface with correct
   direction, order, color, continuous dB mapping, and readback.
-- Analog Sequencer, Time Domain Scope, and Tuner operate as instance surfaces.
+- Analog Sequencer, Time Domain Scope, Tuner, and ListSequencer operate as instance surfaces.
 - Trigger Sequencer and TTID remain cleanly parameter-scoped.
 - The ordinary parameter list remains a reliable fallback for every instance.
 - Automated tests and live `wren` validation cover navigation, editing,

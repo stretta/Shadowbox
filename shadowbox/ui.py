@@ -41,6 +41,7 @@ from shadowbox.editors.step16 import (
 )
 from shadowbox.rnbo import RNBO_HOST, RNBO_PORT
 from shadowbox.surfaces import resolve_instance_surface, surface_spec_for_key
+from shadowbox.surfaces.list_sequencer import FIELD_KEYS, SIGNED_FIELD_KEYS, format_list_value
 from shadowbox.surfaces.organ import FOOTAGES
 
 
@@ -679,6 +680,13 @@ class ShadowboxUI:
                 anchor = active[1].params.get("sample_rate")
                 if anchor is not None:
                     self.state.edit_value = normalize_current_value_for_edit(anchor)
+            elif self.state.active_surface_key == "list_sequencer":
+                drafts = self._list_surface_drafts()
+                dirty = self.state.surface_state.get("dirty", {})
+                for key in FIELD_KEYS:
+                    ack = active[1].state.get(f"{key}_ack")
+                    if ack is not None and not (isinstance(dirty, dict) and dirty.get(key)):
+                        drafts[key] = format_list_value(ack.get("value"))
         elif self.state.ui_mode == "EDIT" and self.selected_param:
             if current_param_path and self.selected_param.get("path") != current_param_path:
                 self.state.ui_mode = "PARAM_LIST"
@@ -725,6 +733,15 @@ class ShadowboxUI:
                         )
                     ):
                         self.state.edit_scope_samples = append_scope_samples(self.state.edit_scope_samples, value)
+                    elif self._list_surface_ready() and self.state.active_instance_id == instance_id:
+                        active = self.active_instance_surface
+                        dirty = self.state.surface_state.get("dirty", {})
+                        if active is not None:
+                            for key in FIELD_KEYS:
+                                if active[1].state.get(f"{key}_ack") is item:
+                                    if not (isinstance(dirty, dict) and dirty.get(key)):
+                                        self._list_surface_drafts()[key] = format_list_value(value)
+                                    break
                     if self.state.ui_mode in {"EDIT", "INSTANCE_SURFACE"} and self.state.active_instance_id == instance_id:
                         self.request_render("osc_state")
                     return True
@@ -1711,6 +1728,10 @@ class ShadowboxUI:
         active = self.active_instance_surface
         return active[1].state.get(str(key)) if active else None
 
+    def surface_input_binding(self, key: str) -> dict | None:
+        active = self.active_instance_surface
+        return active[1].inputs.get(str(key)) if active else None
+
     def surface_param_binding_for_path(self, path: str) -> dict | None:
         active = self.active_instance_surface
         if active is None:
@@ -1743,6 +1764,14 @@ class ShadowboxUI:
             samples = resolved.state.get("samples")
             self.state.edit_value = normalize_current_value_for_edit(anchor) if anchor else None
             self.state.edit_scope_samples = normalize_scope_samples(samples.get("value") if samples else None)
+        elif spec.key == "list_sequencer":
+            drafts = {}
+            for key in FIELD_KEYS:
+                ack = resolved.state.get(f"{key}_ack")
+                drafts[key] = format_list_value(ack.get("value")) if ack else ""
+            self.state.surface_state.update({"drafts": drafts, "dirty": {}})
+            for input_item in resolved.inputs.values():
+                self.queue_action(UIAction(kind="send_osc", path=input_item.get("path"), value=[-999]))
         else:
             self.state.edit_value = None
         self.state.ui_mode = "INSTANCE_SURFACE"
@@ -2566,6 +2595,14 @@ class ShadowboxUI:
             self._handle_surface_value(event.index, event.value, pressed=bool(getattr(event, "pressed", False)))
         elif event.kind == "toggle_surface_value":
             self._handle_surface_toggle(event.index)
+        elif event.kind == "select_list_field":
+            self._handle_list_field_select(event.index)
+        elif event.kind == "edit_list_key":
+            self._handle_list_key(event.button_id)
+        elif event.kind == "toggle_list_sign":
+            self._handle_list_sign()
+        elif event.kind == "send_list_field":
+            self._send_list_field()
         elif event.kind == "set_ttid_pc":
             self._handle_touch_ttid_pc(event.index)
         elif event.kind == "set_ttid_root":
@@ -2686,6 +2723,91 @@ class ShadowboxUI:
         self.state.surface_focus = stage - 1
         self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
         self.request_render("surface_toggle")
+
+    def _list_surface_ready(self) -> bool:
+        return self.state.ui_mode == "INSTANCE_SURFACE" and self.state.active_surface_key == "list_sequencer"
+
+    def _list_surface_key(self) -> str | None:
+        if not self._list_surface_ready():
+            return None
+        focus = max(0, min(len(FIELD_KEYS) - 1, int(self.state.surface_focus)))
+        return FIELD_KEYS[focus]
+
+    def _list_surface_drafts(self) -> dict[str, str]:
+        drafts = self.state.surface_state.setdefault("drafts", {})
+        return drafts if isinstance(drafts, dict) else {}
+
+    def _mark_list_field_dirty(self, key: str) -> None:
+        dirty = self.state.surface_state.setdefault("dirty", {})
+        if isinstance(dirty, dict):
+            dirty[key] = True
+
+    def _handle_list_field_select(self, index: int | None) -> None:
+        if not self._list_surface_ready() or index is None:
+            return
+        self.state.surface_focus = max(0, min(len(FIELD_KEYS) - 1, int(index)))
+        self.request_render("list_field")
+
+    def _handle_list_key(self, key_value: str) -> None:
+        field_key = self._list_surface_key()
+        if field_key is None:
+            return
+        drafts = self._list_surface_drafts()
+        draft = str(drafts.get(field_key, ""))
+        if key_value.isdigit() and len(key_value) == 1:
+            draft += key_value
+        elif key_value == "space":
+            if draft and not draft.endswith(" "):
+                draft += " "
+        elif key_value == "backspace":
+            draft = draft[:-1]
+        else:
+            return
+        drafts[field_key] = draft
+        self._mark_list_field_dirty(field_key)
+        self.request_render("list_key")
+
+    def _handle_list_sign(self) -> None:
+        field_key = self._list_surface_key()
+        if field_key not in SIGNED_FIELD_KEYS:
+            return
+        drafts = self._list_surface_drafts()
+        draft = str(drafts.get(field_key, ""))
+        token_start = draft.rfind(" ") + 1
+        token = draft[token_start:]
+        if token.startswith("-"):
+            draft = draft[:token_start] + token[1:]
+        else:
+            draft = draft[:token_start] + "-" + token
+        drafts[field_key] = draft
+        self._mark_list_field_dirty(field_key)
+        self.request_render("list_sign")
+
+    def _parse_list_draft(self, field_key: str, draft: str) -> list[int] | None:
+        tokens = str(draft).split()
+        if not tokens:
+            return []
+        if any(re.fullmatch(r"-?\d+", token) is None for token in tokens):
+            return None
+        values = [int(token) for token in tokens]
+        if field_key in {"steps", "steps_secondary"} and any(value not in {0, 1} for value in values):
+            return None
+        return values
+
+    def _send_list_field(self) -> bool:
+        field_key = self._list_surface_key()
+        if field_key is None:
+            return False
+        input_item = self.surface_input_binding(field_key)
+        if input_item is None:
+            return False
+        values = self._parse_list_draft(field_key, self._list_surface_drafts().get(field_key, ""))
+        if values is None:
+            self.set_status_message("INVALID LIST", frames=48)
+            return False
+        self.queue_action(UIAction(kind="send_osc", path=input_item.get("path"), value=values))
+        self.set_status_message("LIST SENT", frames=24)
+        return True
 
     def _handle_touch_ttid_pc(self, pc_index: int | None) -> None:
         param = self.selected_param
@@ -3298,6 +3420,8 @@ class ShadowboxUI:
                         self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
                 else:
                     self.state.surface_focus = self._cycle(self.state.surface_focus, 16, step)
+            elif self.state.active_surface_key == "list_sequencer":
+                self.state.surface_focus = self._cycle(self.state.surface_focus, len(FIELD_KEYS), step)
         elif self.state.ui_mode == "REMOVE_INSTANCE_CONFIRM":
             self.state.remove_instance_confirm_cursor = self._cycle(self.state.remove_instance_confirm_cursor, len(REMOVE_INSTANCE_CONFIRM_ITEMS), step)
         elif self.state.ui_mode == "PRESET_LIST":
@@ -3930,6 +4054,8 @@ class ShadowboxUI:
         elif self.state.ui_mode == "INSTANCE_SURFACE":
             if self.state.active_surface_key in {"organ", "analog_sequencer"}:
                 self.state.surface_state["adjusting"] = not bool(self.state.surface_state.get("adjusting"))
+            elif self.state.active_surface_key == "list_sequencer":
+                self._send_list_field()
             else:
                 self._exit_instance_surface()
 

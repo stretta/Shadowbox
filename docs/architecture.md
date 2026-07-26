@@ -51,6 +51,7 @@ Module responsibilities:
   - set presets for the currently loaded set when published
   - instance presets
   - parameters
+  - OSC message inports and outport state
   - JACK audio and MIDI routing
   - instance lifecycle command paths
   - system audio/status information
@@ -84,6 +85,7 @@ Design rules:
 - `SYSTEM` may include a narrow, explicitly documented set of host-level status or maintenance features outside OSCQuery when they are not owned by an instance
 - Modal selection and edit screens should pause background refresh so discovery does not fight the user
 - Parameter editors remain selected from explicit parameter metadata; instance surfaces are selected only from the canonical export name plus successful runtime binding resolution
+- Instance surfaces may bind parameters, OSC message inports, and outport state as distinct roles; list-valued controls must remain OSC inports rather than being represented as parameters
 - Active surface bindings are re-resolved after discovery snapshots and store stable names/paths rather than depending on old parameter dictionaries
 - Terminology should stay consistent:
   - use `Instance` for live runtime objects

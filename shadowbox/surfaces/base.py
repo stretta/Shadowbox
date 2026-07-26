@@ -11,6 +11,7 @@ class ResolvedSurface:
     instance_id: str
     params: dict[str, dict] = field(default_factory=dict)
     state: dict[str, dict] = field(default_factory=dict)
+    inputs: dict[str, dict] = field(default_factory=dict)
 
 
 SurfaceResolver = Callable[[dict], ResolvedSurface | None]

@@ -657,6 +657,38 @@ def _discover_instance_state(instance_root: dict) -> list[dict]:
     return results
 
 
+def _discover_instance_inputs(instance_root: dict) -> list[dict]:
+    inputs_root = safe_get(instance_root, ["messages", "CONTENTS", "in", "CONTENTS"], {})
+    results: list[dict] = []
+    seen_paths: set[str] = set()
+
+    def walk(nodes: dict, prefix: str = "") -> None:
+        if not isinstance(nodes, dict):
+            return
+        for name, node in nodes.items():
+            if not isinstance(node, dict):
+                continue
+            full_name = f"{prefix}/{name}" if prefix else str(name)
+            full_path = node.get("FULL_PATH")
+            if isinstance(full_path, str) and full_path and full_path not in seen_paths:
+                results.append(
+                    {
+                        "name": full_name,
+                        "path": full_path,
+                        "type": node.get("TYPE", ""),
+                        "metadata": extract_meta_info(node),
+                    }
+                )
+                seen_paths.add(full_path)
+            child_nodes = node.get("CONTENTS")
+            if isinstance(child_nodes, dict):
+                walk(child_nodes, full_name)
+
+    walk(inputs_root)
+    results.sort(key=lambda item: str(item.get("name", "")).lower())
+    return results
+
+
 def _routing_port(name: str, node: dict, targets: list[str]) -> dict:
     value = node.get("VALUE", [])
     if not isinstance(value, list):
@@ -860,6 +892,7 @@ def discover_instances(tree: dict) -> list[dict]:
                 "name": safe_get(contents, ["name", "VALUE"], ""),
                 "params": _discover_instance_params(contents),
                 "state": _discover_instance_state(contents),
+                "inputs": _discover_instance_inputs(contents),
                 "presets": _discover_instance_presets(contents),
                 "preset_save_path": preset_capabilities["save_path"],
                 "preset_rename_path": preset_capabilities["rename_path"],

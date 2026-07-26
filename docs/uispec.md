@@ -117,6 +117,10 @@ Rules:
 - Instance surfaces use their own navigation and focus state; opening one must not alter parameter-list selection
 - Back, short press where not otherwise assigned, and long press return from an instance surface to that instance's menu
 - The Organ surface maps the canonical nine footages to the export's continuous `-96..0 dB` tonewheel parameters; top is `-96 dB`/off and bottom is `0 dB`/full-on
+- The ListSequencer surface binds its seven ordered list fields directly to OSC message inports: Steps, Secondary Steps, Primary Rotation, Secondary Rotation, Octave, Velocity, and Duration
+- ListSequencer renders those fields as single-line, full-height values prefixed by `Stp`, `Stp2`, `Rot`, `Rot2`, `Oct`, `Vel`, and `Dur`
+- ListSequencer uses a compact `1..9 / SPC 0 DEL` keypad, a contextual sign control for signed fields, and an explicit `SEND` action so incomplete multi-digit entries are never transmitted
+- ListSequencer hydrates fields through matching `<InportName>Ack` outports after sending the export's `-999` read request; ACK state is not represented as a parameter
 - `ADD INSTANCE` should appear in the `INSTANCES` menu only if the backend exposes a supported command path for creating an instance from a patcher
 - `SYSTEM` is always present
 - Outside `SYSTEM`, only published branches appear; empty branches may render as empty lists, but no synthetic content should be added

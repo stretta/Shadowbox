@@ -9,6 +9,7 @@ It provides:
 - Instance browsing
 - Instance lifecycle control
 - Parameter editing
+- Export-specific instance surfaces, including OSC-list editing for ListSequencer
 - Preset loading
 - Audio and MIDI routing
 - Basic system management

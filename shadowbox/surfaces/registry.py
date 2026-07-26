@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from shadowbox.surfaces.analog_sequencer import resolve_analog_sequencer_bindings
 from shadowbox.surfaces.base import InstanceSurfaceSpec, ResolvedSurface
+from shadowbox.surfaces.list_sequencer import resolve_list_sequencer_bindings
 from shadowbox.surfaces.organ import resolve_organ_bindings
 from shadowbox.surfaces.time_domain_scope import resolve_time_domain_scope_bindings
 from shadowbox.surfaces.tuner import resolve_tuner_bindings
@@ -26,6 +27,13 @@ SURFACE_SPECS = (
         15.0,
     ),
     InstanceSurfaceSpec("tuner", "TUNER", frozenset({"Tuner"}), resolve_tuner_bindings, 20.0),
+    InstanceSurfaceSpec(
+        "list_sequencer",
+        "LIST SEQUENCER",
+        frozenset({"ListSequencer"}),
+        resolve_list_sequencer_bindings,
+        None,
+    ),
 )
 
 _BY_KEY = {spec.key: spec for spec in SURFACE_SPECS}
