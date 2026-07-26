@@ -14,6 +14,7 @@ from shadowbox.editors.scope import is_scope_param, scope_time_seconds
 from shadowbox.editors.step16 import build_cells, is_step16_param
 from shadowbox.editors.ttid import get_root_names, is_pc_on, is_ttid_param, note_name
 from shadowbox.rnbo import RNBO_HOST
+from shadowbox.surfaces.organ import FOOTAGE_COLORS, FOOTAGES
 from shadowbox.touch import TouchLayout, TouchSample
 from shadowbox.ui import (
     MenuRow,
@@ -3287,6 +3288,259 @@ class ShadowboxRenderer:
         footer = f"{value_text}  {time_label}"
         self.text_center_scaled(shorten(footer, 28 if self.is_full_tft else 20), value_y, label_scale)
 
+    def draw_instance_surface(self, ui, state) -> None:
+        key = str(state.active_surface_key or "")
+        if key == "organ":
+            self.draw_organ_surface(ui, state)
+            return
+        if key == "time_domain_scope":
+            param = ui.surface_param_binding("sample_rate")
+            if param is not None:
+                self.draw_edit_scope(ui, param, state)
+            return
+        if key == "tuner":
+            self.draw_edit_pitch_display(ui, ui.surface_param_binding("anchor") or {"name": "pitch"})
+            return
+        if key == "analog_sequencer":
+            self.draw_analog_sequencer_surface(ui, state)
+            return
+        self.text_center("surface unavailable", self.edit_content_top(8))
+
+    def draw_organ_surface(self, ui, state) -> None:
+        labels = {
+            "16": "16",
+            "5_1_3": "5 1/3",
+            "8": "8",
+            "4": "4",
+            "2_2_3": "2 2/3",
+            "2": "2",
+            "1_3_5": "1 3/5",
+            "1_1_3": "1 1/3",
+            "1": "1",
+        }
+        colors = {
+            "brown": (128, 76, 42),
+            "white": (224, 220, 204),
+            "black": (128, 128, 128),
+        }
+        focus = max(0, min(len(FOOTAGES) - 1, int(state.surface_focus)))
+        adjusting = bool(state.surface_state.get("adjusting"))
+
+        if self.touch_layout_enabled:
+            panel_x = 28
+            panel_w = self.display.width - 56
+            panel_h = 360
+            panel_y = self.edit_content_top(panel_h)
+            bank_x = panel_x + 18
+            bank_w = panel_w - 36
+            gap = 8
+            col_w = max(38, (bank_w - gap * 8) // 9)
+            track_top = panel_y + 34
+            track_h = 258
+
+            if self.has_color:
+                self._rounded_theme(panel_x, panel_y, panel_w, panel_h, 14, "panel", True)
+                self._rect_theme(panel_x, panel_y, panel_w, panel_h, "line", False)
+            else:
+                self.display.rect(panel_x, panel_y, panel_w, panel_h, True, False)
+
+            for index, (footage, color_name) in enumerate(zip(FOOTAGES, FOOTAGE_COLORS)):
+                param = ui.surface_param_binding(footage)
+                value = param.get("value") if param else None
+                pmin = param.get("min") if param else -96.0
+                pmax = param.get("max") if param else 0.0
+                try:
+                    fraction = (float(value) - float(pmin)) / max(1e-9, float(pmax) - float(pmin))
+                except (TypeError, ValueError):
+                    fraction = 0.0
+                fraction = max(0.0, min(1.0, fraction))
+                x = bank_x + index * (col_w + gap)
+                fill_h = max(0, min(track_h, int(round(track_h * fraction))))
+                color = colors[color_name]
+
+                if self.has_color:
+                    self.display.fill_rect_color(x, track_top, col_w, track_h, (9, 13, 20))
+                    if fill_h > 0:
+                        self.display.fill_rect_color(x + 3, track_top + 3, max(1, col_w - 6), max(1, fill_h - 5), color)
+                    outline = (21, 193, 129) if index == focus else ((172, 180, 194) if color_name in {"black", "brown"} else (95, 104, 120))
+                    self.display.rect_color(x, track_top, col_w, track_h, outline, False)
+                    if adjusting and index == focus:
+                        self.display.rect_color(x + 2, track_top + 2, max(1, col_w - 4), max(1, track_h - 4), (21, 193, 129), False)
+                else:
+                    self.display.rect(x, track_top, col_w, track_h, True, False)
+                    if fill_h > 0:
+                        self.display.rect(x + 2, track_top + 2, max(1, col_w - 4), max(1, fill_h - 4), True, True)
+
+                self._record_touch_target(
+                    "organ_drawbar",
+                    x,
+                    track_top,
+                    col_w,
+                    track_h,
+                    action_kind="set_surface_value",
+                    index=index,
+                    button_id="organ_drawbar",
+                    label=labels[footage],
+                )
+                label = labels[footage]
+                label_w = self._measure_text(label, 1, "medium")[0]
+                self._text_theme(label, x + max(0, (col_w - label_w) // 2), track_top + track_h + 12, "accent" if index == focus else "text", 1, "medium")
+
+            focused_param = ui.surface_param_binding(FOOTAGES[focus])
+            focused_value = focused_param.get("value") if focused_param else None
+            try:
+                value_text = f"{float(focused_value):.1f} dB"
+            except (TypeError, ValueError):
+                value_text = "- dB"
+            self._text_theme(
+                f"{labels[FOOTAGES[focus]]}'  {value_text}",
+                panel_x + 18,
+                panel_y + panel_h - 24,
+                "accent" if adjusting else "text",
+                2,
+                "medium",
+            )
+            return
+
+        width = max(18, self.display.width - 8)
+        x0 = 4
+        top = self.edit_content_top(28 if not self.is_tall else 70)
+        height = 18 if not self.is_tall else 54
+        col_w = max(2, width // 9)
+        for index, footage in enumerate(FOOTAGES):
+            param = ui.surface_param_binding(footage)
+            value = param.get("value") if param else -96.0
+            pmin = param.get("min") if param else -96.0
+            pmax = param.get("max") if param else 0.0
+            try:
+                fraction = (float(value) - float(pmin)) / max(1e-9, float(pmax) - float(pmin))
+            except (TypeError, ValueError):
+                fraction = 0.0
+            fill_h = max(0, min(height, int(round(height * max(0.0, min(1.0, fraction))))))
+            x = x0 + index * col_w
+            self.display.rect(x, top, max(1, col_w - 1), height, True, False)
+            if fill_h > 0:
+                self.display.rect(x + 1, top + 1, max(1, col_w - 3), max(1, fill_h - 2), True, True)
+            if index == focus:
+                self.display.pixel(x, top - 2, True)
+        focused = ui.surface_param_binding(FOOTAGES[focus])
+        try:
+            value_text = f"{float(focused.get('value')):.0f}dB"
+        except (TypeError, ValueError, AttributeError):
+            value_text = "-"
+        self.text_center(shorten(f"{labels[FOOTAGES[focus]]}' {value_text} {'EDIT' if adjusting else 'SELECT'}", 20), top + height + 3)
+
+    def draw_analog_sequencer_surface(self, ui, state) -> None:
+        playhead_item = ui.surface_state_binding("playhead")
+        playhead_value = playhead_item.get("value") if playhead_item else None
+        if isinstance(playhead_value, list):
+            playhead_value = playhead_value[0] if playhead_value else None
+        try:
+            playhead = max(0, min(15, int(float(playhead_value))))
+        except (TypeError, ValueError):
+            playhead = None
+
+        focus = max(0, min(15, int(state.surface_focus)))
+        adjusting = bool(state.surface_state.get("adjusting"))
+
+        if self.touch_layout_enabled:
+            panel_x, panel_y = 32, self.edit_content_top(346)
+            panel_w, panel_h = self.display.width - 64, 346
+            gap = 4
+            col_w = max(24, (panel_w - 32 - (gap * 15)) // 16)
+            track_top = panel_y + 42
+            track_h = 218
+            if self.has_color:
+                self._rounded_theme(panel_x, panel_y, panel_w, panel_h, 14, "panel", True)
+                self._rect_theme(panel_x, panel_y, panel_w, panel_h, "line", False)
+                self._text_theme("STAGES", panel_x + 18, panel_y + 12, "muted", 2, "medium")
+            else:
+                self.display.rect(panel_x, panel_y, panel_w, panel_h, True, False)
+
+            for index in range(16):
+                x = panel_x + 16 + index * (col_w + gap)
+                value_param = ui.surface_param_binding(f"stage_{index + 1:02d}_value")
+                enabled_param = ui.surface_param_binding(f"stage_{index + 1:02d}_enabled")
+                value = value_param.get("value") if value_param else 0
+                pmin = value_param.get("min") if value_param else 0
+                pmax = value_param.get("max") if value_param else 127
+                try:
+                    fraction = (float(value) - float(pmin)) / max(1e-9, float(pmax) - float(pmin))
+                except (TypeError, ValueError):
+                    fraction = 0.0
+                fraction = max(0.0, min(1.0, fraction))
+                enabled = bool(enabled_param.get("value")) if enabled_param else False
+                bar_h = max(2, int(round((track_h - 4) * fraction)))
+
+                if self.has_color:
+                    self._rect_theme(x, track_top, col_w, track_h, "accent" if index == focus else "line", False)
+                    theme = "accent" if enabled else "muted"
+                    self._fill_theme(x + 3, track_top + track_h - 2 - bar_h, max(1, col_w - 6), bar_h, theme)
+                    if playhead == index:
+                        self._fill_theme(x, track_top - 10, col_w, 5, "accent")
+                else:
+                    self.display.rect(x, track_top, col_w, track_h, True, False)
+                    self.display.rect(x + 3, track_top + track_h - 2 - bar_h, max(1, col_w - 6), bar_h, enabled, True)
+                    if playhead == index:
+                        self.display.hline(x, track_top - 5, col_w, True)
+
+                self._record_touch_target(
+                    "analog_stage_value",
+                    x,
+                    track_top,
+                    col_w,
+                    track_h,
+                    action_kind="set_surface_value",
+                    index=index,
+                    label=str(index + 1),
+                )
+                toggle_y = track_top + track_h + 8
+                self._record_touch_target(
+                    "analog_stage_toggle",
+                    x,
+                    toggle_y,
+                    col_w,
+                    52,
+                    action_kind="toggle_surface_value",
+                    index=index,
+                    label=str(index + 1),
+                )
+                self._text_theme(str(index + 1), x + max(0, (col_w - self._measure_text(str(index + 1))[0]) // 2), toggle_y + 18, "text" if enabled else "muted")
+
+            focused_param = ui.surface_param_binding(f"stage_{focus + 1:02d}_value")
+            focused_value = focused_param.get("value") if focused_param else "-"
+            self._text_theme(
+                f"STAGE {focus + 1:02d}  {format_display_value(focused_value)}",
+                panel_x + 18,
+                panel_y + panel_h - 26,
+                "accent" if adjusting else "text",
+                2,
+                "medium",
+            )
+            return
+
+        width = max(16, self.display.width - 8)
+        x0 = 4
+        top = self.edit_content_top(28 if not self.is_tall else 70)
+        height = 18 if not self.is_tall else 54
+        col_w = max(1, width // 16)
+        for index in range(16):
+            value_param = ui.surface_param_binding(f"stage_{index + 1:02d}_value")
+            enabled_param = ui.surface_param_binding(f"stage_{index + 1:02d}_enabled")
+            value = value_param.get("value") if value_param else 0
+            try:
+                fraction = max(0.0, min(1.0, float(value) / 127.0))
+            except (TypeError, ValueError):
+                fraction = 0.0
+            bar_h = max(1, int(round(height * fraction)))
+            x = x0 + index * col_w
+            self.display.vline(x, top + height - bar_h, bar_h, bool(enabled_param and enabled_param.get("value")))
+            if playhead == index:
+                self.display.pixel(x, top - 2, True)
+        focused_param = ui.surface_param_binding(f"stage_{focus + 1:02d}_value")
+        value = focused_param.get("value") if focused_param else "-"
+        self.text_center(shorten(f"{focus + 1:02d} {format_display_value(value)} {'EDIT' if adjusting else 'SELECT'}", 20), top + height + 3)
+
     def draw_edit(self, ui, selected_param: dict, state) -> None:
         if selected_param is None:
             self.text_center("no param", 16)
@@ -4080,6 +4334,7 @@ class ShadowboxRenderer:
             "INSTANCE_LIST": "INSTANCES",
             "PATCHER_PICKER": "ADD INSTANCE" if state.patcher_picker_context == "add" else "REPLACE",
             "INSTANCE_MENU": ui.active_instance.get("label", "INSTANCE") if ui.active_instance else "INSTANCE",
+            "INSTANCE_SURFACE": ui.active_surface_title,
             "REMOVE_INSTANCE_PICKER": "REMOVE",
             "REMOVE_INSTANCE_CONFIRM": "REMOVE",
             "PRESET_LIST": "PRESETS",
@@ -4119,7 +4374,9 @@ class ShadowboxRenderer:
                 ticks=state.activity_ticks,
             )
 
-        if state.ui_mode == "EDIT":
+        if state.ui_mode == "INSTANCE_SURFACE":
+            self.draw_instance_surface(ui, state)
+        elif state.ui_mode == "EDIT":
             self.draw_edit(ui, ui.selected_param, state)
         elif state.ui_mode == "TOP":
             if self.is_tft and not self.is_tiny_text_tft:

@@ -32,6 +32,8 @@ class RenderScheduler:
             return 10.0
         if state.ui_mode == "BRICK_PANEL":
             return 30.0
+        if state.ui_mode == "INSTANCE_SURFACE":
+            return ui.active_surface_frame_rate
         if state.ui_mode == "EDIT" and ui.selected_param:
             from shadowbox.editors.pitch_display import is_pitch_display_param
             from shadowbox.editors.scope import is_scope_param

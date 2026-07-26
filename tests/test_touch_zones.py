@@ -224,6 +224,50 @@ class EncoderTouchZoneTests(unittest.TestCase):
             ],
         )
 
+    def test_touch_direct_surface_drag_stays_captured_by_initial_drawbar(self) -> None:
+        sample_type = types.SimpleNamespace
+        with (
+            mock.patch.dict(os.environ, {"SHADOWBOX_INPUT_KIND": "touch_direct"}, clear=False),
+            mock.patch.object(self.encoder_module, "TouchZoneReader", _FakeTouchReader),
+        ):
+            encoder = self.encoder_module.EncoderInput()
+
+        layout = TouchLayout(800, 480)
+        layout.add_target(
+            "organ_drawbar",
+            100,
+            100,
+            60,
+            280,
+            action_kind="set_surface_value",
+            index=0,
+            button_id="organ_drawbar",
+        )
+        layout.add_target(
+            "organ_drawbar",
+            180,
+            100,
+            60,
+            280,
+            action_kind="set_surface_value",
+            index=1,
+            button_id="organ_drawbar",
+        )
+        encoder.set_touch_layout(layout)
+        encoder._touch_reader.samples.extend(
+            [
+                sample_type(normalized_x=130 / 799, normalized_y=120 / 479, pressed=True),
+                sample_type(normalized_x=220 / 799, normalized_y=300 / 479, pressed=True),
+                sample_type(normalized_x=220 / 799, normalized_y=360 / 479, pressed=False),
+            ]
+        )
+
+        events = encoder.get_events()
+
+        self.assertEqual([event.kind for event in events], ["set_surface_value", "set_surface_value"])
+        self.assertEqual([event.index for event in events], [0, 0])
+        self.assertIsNone(encoder._touch_capture)
+
 
 if __name__ == "__main__":
     unittest.main()

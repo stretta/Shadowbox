@@ -1,5 +1,25 @@
 # Instance Surfaces Development Plan
 
+## Implementation status
+
+The first deployable checkpoint is implemented:
+
+- Static canonical-name registry and compatibility resolvers
+- Independent `INSTANCE_SURFACE` UI state and navigation
+- Snapshot re-resolution and safe fallback when a contract disappears
+- Surface-specific render cadence
+- Time Domain Scope and Tuner instance-surface migrations with their existing
+  parameter-editor routes retained for compatibility
+- Contract-driven 16-stage Analog Sequencer surface
+- Automated registry, lifecycle, navigation, touch, rendering, and cadence
+  coverage
+
+The Organ surface uses the live `wren` export contract: `Bass`, `Quint`,
+`Neutral`, `Octave`, `Nazard`, `Block-flute`, `Tierce`, `Larigot`, and
+`Sifflute` are continuous `-96..0 dB` parameters mapped to the canonical
+footages. `-96 dB` is the top/off position and `0 dB` is the bottom/full-on
+position.
+
 ## Purpose
 
 Shadowbox currently selects custom editors through individual RNBO parameters.
@@ -200,16 +220,22 @@ Hammond order:
 | 8 | 1 1/3' | black |
 | 9 | 1' | white |
 
-The parser will tolerate the RNBO-safe spelling conventions used by the actual
-export, such as:
+The parser recognizes the semantic names used by the current export:
 
 ```text
-Drawbar16
-Drawbar5_1_3
-Drawbar2_2_3
-Drawbar1_3_5
-Drawbar1_1_3
+Bass
+Quint
+Neutral
+Octave
+Nazard
+Block-flute
+Tierce
+Larigot
+Sifflute
 ```
+
+The RNBO-safe `Drawbar16`, `Drawbar5_1_3`, and related spellings remain
+accepted when they publish one complete, unambiguous drawbar bank.
 
 Before implementation, the live Organ export on `wren` will be inspected to
 confirm its exact parameter names, ranges, and step behavior.
@@ -224,11 +250,11 @@ normal parameter list.
 The control geometry is reversed relative to a conventional vertical slider:
 
 ```text
-top    = 0, fully pushed in
-bottom = 8, fully pulled out
+top    = -96 dB, fully pushed in/off
+bottom = 0 dB, fully pulled out/full-on
 ```
 
-The value mapping is therefore:
+The current dB value mapping is therefore:
 
 ```python
 fraction = (touch_y - track_top) / track_height
@@ -239,8 +265,9 @@ The fraction must not be inverted.
 
 The initial drawbar contract is:
 
-- Parameter range is `0..8`
-- Values snap to the nine physical registrations
+- Parameter range is continuous `-96..0 dB`
+- `-96 dB` is fully pushed in/off at the top
+- `0 dB` is fully pulled out/full-on at the bottom
 - Touch immediately moves the selected drawbar
 - Vertical dragging updates it live
 - Visual movement happens immediately without waiting for OSCQuery readback
@@ -263,7 +290,6 @@ The 800x480 touchscreen layout will:
 - Display nine full-height drawbars in one horizontal bank
 - Preserve the canonical Hammond order and colors
 - Show the footage for each drawbar
-- Show registration markings `0..8`
 - Give black and brown drawbars visible outlines against the dark background
 - Make the complete shaft a generous touch target
 - Show the pulled portion extending downward from the zero position
@@ -272,7 +298,7 @@ Encoder fallback will provide:
 
 - Turning in selection mode changes the focused drawbar
 - Short press enters value adjustment
-- Turning adjusts the focused drawbar from `0..8`
+- Turning adjusts the focused drawbar in `1 dB` steps
 - Short press returns to drawbar selection
 - Long press or back exits the surface
 
@@ -394,9 +420,7 @@ Remove obsolete Scope, Tuner, and Analog Sequencer branches from generic
 - Parameters are ordered canonically regardless of discovery order
 - Every footage receives the correct color
 - Missing or duplicate footage rejects the Organ surface
-- Top of the track maps to `0`
-- Bottom of the track maps to `8`
-- Values snap to the expected registrations
+- Top maps to `-96 dB` and bottom maps to `0 dB`
 - Drag capture remains on the initial drawbar
 - Touch motion produces immediate local feedback
 - OSC updates are coalesced
@@ -417,7 +441,7 @@ Live validation will occur after implementation and deployment authorization:
 1. Confirm the exact Organ parameter names, ranges, and steps.
 2. Load or select the Organ instance.
 3. Confirm standard order and colors visually.
-4. Test `0` at the top and `8` at the bottom for every drawbar.
+4. Test `-96 dB` at the top and `0 dB` at the bottom for every drawbar.
 5. Confirm continuous drag and RNBO readback.
 6. Confirm MIDI notes continue sounding while drawbars are manipulated.
 7. Verify Scope, Tuner, Analog Sequencer, and Trigger Sequencer separately.
@@ -439,7 +463,7 @@ Instance-surface support is complete when:
 - Surface availability is derived from canonical export identity plus validated
   runtime bindings.
 - Organ provides a responsive nine-drawbar touchscreen interface with correct
-  direction, order, color, snapping, and readback.
+  direction, order, color, continuous dB mapping, and readback.
 - Analog Sequencer, Time Domain Scope, and Tuner operate as instance surfaces.
 - Trigger Sequencer and TTID remain cleanly parameter-scoped.
 - The ordinary parameter list remains a reliable fallback for every instance.

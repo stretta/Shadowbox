@@ -67,6 +67,22 @@ Current specialized editors:
 - `step16` via `{"editor":"step16"}`
 - `pitch_display` via `{"editor":"pitch_display"}`
 
+Interfaces that represent a complete export use the static instance-surface
+registry under `shadowbox/surfaces/`. A surface is offered only when both the
+canonical exported patcher `name` and its full live parameter/state contract
+match. Mutable instance labels do not select a surface, and the normal
+`PARAMETERS` entry remains available.
+
+Current registered instance exports:
+- `Organ`
+- `AnalogSequencer`
+- `TimeDomainScope`
+- `Tuner`
+
+The current Organ export on `wren` publishes continuous `-96..0 dB` tonewheel
+controls. The Organ surface maps `-96 dB` to the top/off position and `0 dB`
+to the bottom/full-on position in canonical Hammond footage order.
+
 If metadata is missing or malformed, Shadowbox falls back to numeric behavior. The only non-metadata exception is enums published explicitly by RNBO as a value list.
 
 In practice, the metadata must appear in the published OSCQuery tree so that `rnbo.py` can parse it from the parameter's `meta` node. Shadowbox also accepts direct scalar child nodes for some hints, such as `editor`, `display_name`, and `ui_role`, when RNBO exports them separately instead of bundling them into `meta`.
@@ -133,9 +149,10 @@ Optional metadata overrides:
 - `cents_state`: alternate state key for cents
 
 Shadowbox behavior:
-- opening the parameter enters a live display-only screen
+- the `Tuner` instance surface opens the live display-only screen when its pitch and cents state contract resolves
+- opening the tagged parameter remains available as a compatibility path
 - incoming OSC state updates keep the screen current in real time
-- short press or long press exits back to the parameter list
+- instance-surface navigation exits to the instance menu; compatibility-editor navigation exits to the parameter list
 
 5b. Time domain scope editor contract
 
@@ -150,12 +167,14 @@ Optional metadata overrides:
 - `scope_state`: alternate state key for the incoming sample stream
 
 Shadowbox behavior:
-- opening the tagged parameter enters a live waveform editor
+- the `TimeDomainScope` instance surface opens the live waveform editor when its sample-rate and scope state contract resolves
+- opening the tagged parameter remains available as a compatibility path
 - `/scope` values are treated as amplitudes in the `-1.0..1.0` range and clipped to that range
 - incoming samples are drawn left-to-right with the newest sample at the right edge, like a scrolling oscilloscope trace
 - the displayed time window is derived from the number of visible samples and the current parameter value
 - encoder turns continue to update the tagged parameter while the waveform is visible
-- short press exits back to the parameter list; long press exits and restores the original parameter value
+- instance-surface navigation exits to the instance menu
+- compatibility-editor short press exits to the parameter list; long press exits and restores the original parameter value
 
 6. RNBO authoring guidelines
 

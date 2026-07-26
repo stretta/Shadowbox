@@ -121,11 +121,23 @@ class TouchLayout:
 
     def action_for_point(self, normalized_x: float, normalized_y: float) -> TouchAction | None:
         target = self.hit_test(normalized_x, normalized_y)
+        return self.action_for_target(target, normalized_x, normalized_y)
+
+    def action_for_target(
+        self,
+        target: TouchHitTarget | None,
+        normalized_x: float,
+        normalized_y: float,
+    ) -> TouchAction | None:
         if target is None or not target.action_kind:
             return None
-        if target.action_kind == "set_edit_value":
-            x, _y = self._point_to_pixels(normalized_x, normalized_y)
-            value = (x - target.x) / max(1, target.w - 1)
+        if target.action_kind in {"set_edit_value", "set_surface_value"}:
+            x, y = self._point_to_pixels(normalized_x, normalized_y)
+            if target.action_kind == "set_surface_value":
+                vertical = (y - target.y) / max(1, target.h - 1)
+                value = vertical if target.button_id == "organ_drawbar" else 1.0 - vertical
+            else:
+                value = (x - target.x) / max(1, target.w - 1)
             return TouchAction(kind=target.action_kind, index=target.index, button_id=target.button_id, value=max(0.0, min(1.0, value)))
         return TouchAction(kind=target.action_kind, index=target.index, button_id=target.button_id)
 

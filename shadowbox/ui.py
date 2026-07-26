@@ -43,6 +43,8 @@ from shadowbox.editors.step16 import (
     toggle_step as toggle_step16,
 )
 from shadowbox.rnbo import RNBO_HOST, RNBO_PORT
+from shadowbox.surfaces import resolve_instance_surface, surface_spec_for_key
+from shadowbox.surfaces.organ import FOOTAGES
 
 
 STATE_PATH = Path.home() / "rnbo-ui" / "shadowbox_state.json"
@@ -162,6 +164,10 @@ class UIState:
     edit_ttid_scale_index: int = 0
     edit_step16_focus: int = 0
     edit_scope_samples: list[float] = field(default_factory=list)
+    active_surface_key: str = ""
+    surface_focus: int = 0
+    surface_state: dict[str, Any] = field(default_factory=dict)
+    surface_touch_capture: int | None = None
     name_editor_context: str = ""
     name_editor_return_mode: str = ""
     name_editor_path: str = ""
@@ -666,7 +672,18 @@ class ShadowboxUI:
         self.state.graph_startup_cursor = clamp_index(self.state.graph_startup_cursor, len(self.graph_startup_menu_items) + 1)
         self.state.graph_startup_set_cursor = clamp_index(self.state.graph_startup_set_cursor, len(self.available_set_names) + 1)
 
-        if self.state.ui_mode == "EDIT" and self.selected_param:
+        if self.state.ui_mode == "INSTANCE_SURFACE":
+            active = self.active_instance_surface
+            if active is None:
+                self._exit_instance_surface()
+            elif self.state.active_surface_key == "time_domain_scope":
+                samples = active[1].state.get("samples")
+                if samples is not None and not self.state.edit_scope_samples:
+                    self.state.edit_scope_samples = normalize_scope_samples(samples.get("value"))
+                anchor = active[1].params.get("sample_rate")
+                if anchor is not None:
+                    self.state.edit_value = normalize_current_value_for_edit(anchor)
+        elif self.state.ui_mode == "EDIT" and self.selected_param:
             if current_param_path and self.selected_param.get("path") != current_param_path:
                 self.state.ui_mode = "PARAM_LIST"
                 self.state.edit_value = None
@@ -707,12 +724,19 @@ class ShadowboxUI:
                 if str(item.get("path", "")) == path:
                     item["value"] = value
                     if (
-                        self.state.ui_mode == "EDIT"
-                        and is_scope_param(self.selected_param)
-                        and self.active_scope_state_value is item
+                        (
+                            self.state.ui_mode == "EDIT"
+                            and is_scope_param(self.selected_param)
+                            and self.active_scope_state_value is item
+                        )
+                        or (
+                            self.state.ui_mode == "INSTANCE_SURFACE"
+                            and self.state.active_surface_key == "time_domain_scope"
+                            and self.surface_state_binding("samples") is item
+                        )
                     ):
                         self.state.edit_scope_samples = append_scope_samples(self.state.edit_scope_samples, value)
-                    if self.state.ui_mode == "EDIT" and self.state.active_instance_id == instance_id:
+                    if self.state.ui_mode in {"EDIT", "INSTANCE_SURFACE"} and self.state.active_instance_id == instance_id:
                         self.request_render("osc_state")
                     return True
         return False
@@ -739,7 +763,15 @@ class ShadowboxUI:
                 param["value"] = value
                 if self.state.ui_mode == "EDIT" and self.selected_param is param:
                     self.state.edit_value = normalize_current_value_for_edit(param)
-                if self.state.active_instance_id == instance_id and self.state.ui_mode in {"PARAM_LIST", "EDIT"}:
+                if (
+                    self.state.ui_mode == "INSTANCE_SURFACE"
+                    and self.state.active_instance_id == instance_id
+                    and self.surface_param_binding_for_path(path) is not None
+                ):
+                    if self.state.active_surface_key == "time_domain_scope":
+                        self.state.edit_value = normalize_current_value_for_edit(param)
+                    self.request_render("osc_surface_param")
+                elif self.state.active_instance_id == instance_id and self.state.ui_mode in {"PARAM_LIST", "EDIT"}:
                     self.request_render("osc_param")
                 return True
         return False
@@ -825,7 +857,10 @@ class ShadowboxUI:
 
     @property
     def instance_menu_items(self) -> list[str]:
-        items = ["PARAMETERS", "PRESETS", "AUDIO", "MIDI"]
+        items = []
+        if self.available_instance_surface is not None:
+            items.append(self.available_instance_surface[0].title)
+        items.extend(["PARAMETERS", "PRESETS", "AUDIO", "MIDI"])
         if self.can_replace_instance:
             items.append("REPLACE INSTANCE")
         if self.can_remove_instance:
@@ -1659,6 +1694,81 @@ class ShadowboxUI:
         return None
 
     @property
+    def available_instance_surface(self):
+        return resolve_instance_surface(self.active_instance)
+
+    @property
+    def active_instance_surface(self):
+        resolved = self.available_instance_surface
+        if resolved is None or resolved[0].key != self.state.active_surface_key:
+            return None
+        return resolved
+
+    @property
+    def active_surface_title(self) -> str:
+        active = self.active_instance_surface
+        return active[0].title if active else "SURFACE"
+
+    @property
+    def active_surface_frame_rate(self) -> float | None:
+        spec = surface_spec_for_key(self.state.active_surface_key)
+        return spec.frame_rate if spec else None
+
+    def surface_param_binding(self, key: str) -> dict | None:
+        active = self.active_instance_surface
+        return active[1].params.get(str(key)) if active else None
+
+    def surface_state_binding(self, key: str) -> dict | None:
+        active = self.active_instance_surface
+        return active[1].state.get(str(key)) if active else None
+
+    def surface_param_binding_for_path(self, path: str) -> dict | None:
+        active = self.active_instance_surface
+        if active is None:
+            return None
+        return next(
+            (param for param in active[1].params.values() if str(param.get("path", "")) == str(path)),
+            None,
+        )
+
+    @property
+    def active_surface_pitch(self) -> dict | None:
+        return self.surface_state_binding("pitch")
+
+    @property
+    def active_surface_cents(self) -> dict | None:
+        return self.surface_state_binding("cents")
+
+    def _begin_instance_surface(self) -> bool:
+        available = self.available_instance_surface
+        if available is None:
+            return False
+        spec, resolved = available
+        self.state.active_surface_key = spec.key
+        self.state.surface_focus = 0
+        self.state.surface_state = {"adjusting": False}
+        self.state.surface_touch_capture = None
+        self.state.edit_scope_samples = []
+        if spec.key == "time_domain_scope":
+            anchor = resolved.params.get("sample_rate")
+            samples = resolved.state.get("samples")
+            self.state.edit_value = normalize_current_value_for_edit(anchor) if anchor else None
+            self.state.edit_scope_samples = normalize_scope_samples(samples.get("value") if samples else None)
+        else:
+            self.state.edit_value = None
+        self.state.ui_mode = "INSTANCE_SURFACE"
+        return True
+
+    def _exit_instance_surface(self) -> None:
+        self.state.ui_mode = "INSTANCE_MENU"
+        self.state.active_surface_key = ""
+        self.state.surface_focus = 0
+        self.state.surface_state = {}
+        self.state.surface_touch_capture = None
+        self.state.edit_scope_samples = []
+        self.state.edit_value = None
+
+    @property
     def active_presets(self) -> list[dict]:
         instance = self.active_instance
         if not instance:
@@ -2364,10 +2474,14 @@ class ShadowboxUI:
 
     @property
     def active_pitch_display_pitch(self) -> Optional[dict]:
+        if self.state.ui_mode == "INSTANCE_SURFACE" and self.state.active_surface_key == "tuner":
+            return self.active_surface_pitch
         return self.active_pitch_display_state_value(self.selected_param, pitch_state_key(self.selected_param))
 
     @property
     def active_pitch_display_cents(self) -> Optional[dict]:
+        if self.state.ui_mode == "INSTANCE_SURFACE" and self.state.active_surface_key == "tuner":
+            return self.active_surface_cents
         return self.active_pitch_display_state_value(self.selected_param, cents_state_key(self.selected_param))
 
     @property
@@ -2468,6 +2582,10 @@ class ShadowboxUI:
             self._handle_touch_page(1)
         elif event.kind == "set_edit_value":
             self._handle_touch_edit_value(event.value, pressed=bool(getattr(event, "pressed", False)))
+        elif event.kind == "set_surface_value":
+            self._handle_surface_value(event.index, event.value, pressed=bool(getattr(event, "pressed", False)))
+        elif event.kind == "toggle_surface_value":
+            self._handle_surface_toggle(event.index)
         elif event.kind == "set_ttid_pc":
             self._handle_touch_ttid_pc(event.index)
         elif event.kind == "set_ttid_root":
@@ -2492,9 +2610,14 @@ class ShadowboxUI:
             self._handle_name_keyboard_mode()
 
     def _handle_touch_edit_value(self, normalized_value: float | None, *, pressed: bool = False) -> None:
-        if self.state.ui_mode != "EDIT" or normalized_value is None:
+        if self.state.ui_mode == "INSTANCE_SURFACE" and self.state.active_surface_key == "time_domain_scope":
+            param = self.surface_param_binding("sample_rate")
+        elif self.state.ui_mode == "EDIT":
+            param = self.selected_param
+        else:
             return
-        param = self.selected_param
+        if normalized_value is None:
+            return
         if param is None or is_ttid_param(param) or is_step16_param(param) or is_pitch_display_param(param) or is_enum_param(param):
             return
         pmin = param.get("min")
@@ -2524,6 +2647,64 @@ class ShadowboxUI:
             self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
         if not pressed:
             self.queue_action(UIAction(kind="save_state"))
+
+    def _handle_surface_value(self, index: int | None, normalized_value: float | None, *, pressed: bool = False) -> None:
+        if self.state.ui_mode != "INSTANCE_SURFACE" or normalized_value is None or index is None:
+            return
+        if self.state.active_surface_key == "organ":
+            focus = max(0, min(len(FOOTAGES) - 1, int(index)))
+            param = self.surface_param_binding(FOOTAGES[focus])
+            if param is None:
+                return
+            pmin, pmax = param.get("min"), param.get("max")
+            if not isinstance(pmin, (int, float)) or not isinstance(pmax, (int, float)) or pmax <= pmin:
+                return
+            fraction = max(0.0, min(1.0, float(normalized_value)))
+            value = pmin + ((pmax - pmin) * fraction)
+            previous = param.get("value")
+            if isinstance(previous, (int, float)) and abs(float(previous) - float(value)) < 1e-9:
+                return
+            param["value"] = value
+            self.state.surface_focus = focus
+            self.state.surface_touch_capture = focus if pressed else None
+            self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
+            self.request_render("organ_touch")
+            return
+        if self.state.active_surface_key != "analog_sequencer":
+            return
+        stage = max(1, min(16, int(index) + 1))
+        param = self.surface_param_binding(f"stage_{stage:02d}_value")
+        if param is None:
+            return
+        pmin, pmax = param.get("min"), param.get("max")
+        if not isinstance(pmin, (int, float)) or not isinstance(pmax, (int, float)) or pmax <= pmin:
+            return
+        fraction = max(0.0, min(1.0, float(normalized_value)))
+        value = pmin + ((pmax - pmin) * fraction)
+        if edit_as_int(param):
+            value = int(round(value))
+        previous = param.get("value")
+        if isinstance(previous, (int, float)) and abs(float(previous) - float(value)) < 1e-9:
+            return
+        param["value"] = value
+        self.state.surface_focus = stage - 1
+        self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
+        self.request_render("surface_touch")
+
+    def _handle_surface_toggle(self, index: int | None) -> None:
+        if self.state.ui_mode != "INSTANCE_SURFACE" or index is None:
+            return
+        if self.state.active_surface_key != "analog_sequencer":
+            return
+        stage = max(1, min(16, int(index) + 1))
+        param = self.surface_param_binding(f"stage_{stage:02d}_enabled")
+        if param is None:
+            return
+        value = 0 if bool(param.get("value")) else 1
+        param["value"] = value
+        self.state.surface_focus = stage - 1
+        self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
+        self.request_render("surface_toggle")
 
     def _handle_touch_ttid_pc(self, pc_index: int | None) -> None:
         param = self.selected_param
@@ -2603,6 +2784,10 @@ class ShadowboxUI:
         self.queue_action(UIAction(kind="save_state"))
 
     def _handle_tap_back(self) -> None:
+        if self.state.ui_mode == "INSTANCE_SURFACE":
+            self._exit_instance_surface()
+            self.queue_action(UIAction(kind="save_state"))
+            return
         if self.state.ui_mode == "EDIT":
             self.state.edit_value = None
             self.state.edit_ttid_mode = "keyboard"
@@ -3102,6 +3287,36 @@ class ShadowboxUI:
             self.state.patcher_cursor = self._cycle(self.state.patcher_cursor, len(self.state.patchers) + 1, step)
         elif self.state.ui_mode == "INSTANCE_MENU":
             self.state.instance_menu_cursor = self._cycle(self.state.instance_menu_cursor, len(self.instance_menu_items) + 1, step)
+        elif self.state.ui_mode == "INSTANCE_SURFACE":
+            if self.state.active_surface_key == "organ":
+                if self.state.surface_state.get("adjusting"):
+                    focus = max(0, min(len(FOOTAGES) - 1, self.state.surface_focus))
+                    param = self.surface_param_binding(FOOTAGES[focus])
+                    if param is not None:
+                        current = param.get("value")
+                        if isinstance(current, (int, float)):
+                            value = clamp(float(current) + float(step), param.get("min"), param.get("max"))
+                            param["value"] = value
+                            self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
+                else:
+                    self.state.surface_focus = self._cycle(self.state.surface_focus, len(FOOTAGES), step)
+            elif self.state.active_surface_key == "time_domain_scope":
+                param = self.surface_param_binding("sample_rate")
+                if param is not None:
+                    step = self._accelerate_float_edit_delta(param, step)
+                    self.state.edit_value = apply_edit_delta(param, self.state.edit_value, step)
+                    param["value"] = self.state.edit_value
+                    self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=self.state.edit_value))
+            elif self.state.active_surface_key == "analog_sequencer":
+                if self.state.surface_state.get("adjusting"):
+                    stage = self.state.surface_focus + 1
+                    param = self.surface_param_binding(f"stage_{stage:02d}_value")
+                    if param is not None:
+                        value = apply_edit_delta(param, param.get("value"), step)
+                        param["value"] = value
+                        self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
+                else:
+                    self.state.surface_focus = self._cycle(self.state.surface_focus, 16, step)
         elif self.state.ui_mode == "REMOVE_INSTANCE_CONFIRM":
             self.state.remove_instance_confirm_cursor = self._cycle(self.state.remove_instance_confirm_cursor, len(REMOVE_INSTANCE_CONFIRM_ITEMS), step)
         elif self.state.ui_mode == "PRESET_LIST":
@@ -3429,7 +3644,10 @@ class ShadowboxUI:
                 self.state.ui_mode = "INSTANCE_LIST"
             else:
                 choice = self.instance_menu_items[self.state.instance_menu_cursor - 1]
-                if choice == "PARAMETERS":
+                available = self.available_instance_surface
+                if available is not None and choice == available[0].title:
+                    self._begin_instance_surface()
+                elif choice == "PARAMETERS":
                     self.state.ui_mode = "PARAM_LIST"
                     self.state.param_cursor = 1 if self.active_params else 0
                 elif choice == "PRESETS":
@@ -3744,6 +3962,12 @@ class ShadowboxUI:
                 elif choice == MAINT_ITEMS_RESTART_JACK:
                     self.queue_action(UIAction(kind="restart_jack"))
 
+        elif self.state.ui_mode == "INSTANCE_SURFACE":
+            if self.state.active_surface_key in {"organ", "analog_sequencer"}:
+                self.state.surface_state["adjusting"] = not bool(self.state.surface_state.get("adjusting"))
+            else:
+                self._exit_instance_surface()
+
         elif self.state.ui_mode == "EDIT":
             param = self.selected_param
             if param is not None and is_ttid_param(param):
@@ -3791,6 +4015,8 @@ class ShadowboxUI:
         if self.state.ui_mode == "BRICK_PANEL":
             self._about_press_count = 0
             self.state.ui_mode = "ABOUT"
+        elif self.state.ui_mode == "INSTANCE_SURFACE":
+            self._exit_instance_surface()
         elif self.state.ui_mode == "EDIT":
             param = self.selected_param
             if param is not None and is_ttid_param(param):

@@ -78,6 +78,7 @@ ADD INSTANCE
 REMOVE INSTANCE
 
 <INSTANCE>
+<INSTANCE SURFACE, WHEN COMPATIBLE>
 PARAMETERS
 PRESETS
 AUDIO
@@ -110,6 +111,12 @@ Rules:
 - `SAVE` and `SAVE AS...` in `CURRENT SET` save the current published live set through the published backend set save path
 - `STARTUP` edits published Runner startup configuration only; it does not implement local boot restore logic
 - Instance labels should use published alias/name when available
+- Registered instance surfaces are selected by the canonical exported patcher `name`, never by the mutable instance label
+- A registered surface appears as the first instance-menu item only when the live instance satisfies that surface's required parameter and state contract
+- `PARAMETERS` remains available for every instance even when an instance surface is present
+- Instance surfaces use their own navigation and focus state; opening one must not alter parameter-list selection
+- Back, short press where not otherwise assigned, and long press return from an instance surface to that instance's menu
+- The Organ surface maps the canonical nine footages to the export's continuous `-96..0 dB` tonewheel parameters; top is `-96 dB`/off and bottom is `0 dB`/full-on
 - `ADD INSTANCE` should appear in the `INSTANCES` menu only if the backend exposes a supported command path for creating an instance from a patcher
 - `SYSTEM` is always present
 - Outside `SYSTEM`, only published branches appear; empty branches may render as empty lists, but no synthetic content should be added

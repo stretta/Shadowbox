@@ -81,6 +81,7 @@ class EncoderInput:
         self._events: list[EncoderEvent] = []
         self._touch_reader: TouchZoneReader | None = None
         self._touch_layout: TouchLayout | None = None
+        self._touch_capture: tuple[str, int | None, str] | None = None
 
         if self.input_kind in {"touch_zones", "touch_direct"}:
             self._init_touch_reader()
@@ -353,13 +354,34 @@ class EncoderInput:
             if self._touch_reader is not None:
                 latest_slider_event: EncoderEvent | None = None
                 for sample in self._touch_reader.read_samples():
-                    action = direct_action_for_point(
-                        sample.normalized_x,
-                        sample.normalized_y,
-                        layout=self._touch_layout,
-                    )
                     sample_pressed = bool(getattr(sample, "pressed", False))
-                    if sample_pressed and action.kind != "set_edit_value":
+                    action = None
+                    if self._touch_capture is not None and self._touch_layout is not None:
+                        capture_kind, capture_index, capture_button = self._touch_capture
+                        target = next(
+                            (
+                                item
+                                for item in self._touch_layout.targets
+                                if item.action_kind == capture_kind
+                                and item.index == capture_index
+                                and item.button_id == capture_button
+                            ),
+                            None,
+                        )
+                        action = self._touch_layout.action_for_target(
+                            target,
+                            sample.normalized_x,
+                            sample.normalized_y,
+                        )
+                    if action is None:
+                        action = direct_action_for_point(
+                            sample.normalized_x,
+                            sample.normalized_y,
+                            layout=self._touch_layout,
+                        )
+                    if sample_pressed and self._touch_capture is None and action.kind == "set_surface_value":
+                        self._touch_capture = (action.kind, action.index, action.button_id)
+                    if sample_pressed and action.kind not in {"set_edit_value", "set_surface_value"}:
                         continue
                     event = EncoderEvent(
                         kind=action.kind,
@@ -368,13 +390,15 @@ class EncoderInput:
                         value=action.value,
                         pressed=sample_pressed,
                     )
-                    if action.kind in {"set_edit_value"} and sample_pressed:
+                    if action.kind in {"set_edit_value", "set_surface_value"} and sample_pressed:
                         latest_slider_event = event
                         continue
                     if latest_slider_event is not None:
                         self._events.append(latest_slider_event)
                         latest_slider_event = None
                     self._events.append(event)
+                    if not sample_pressed:
+                        self._touch_capture = None
                 if latest_slider_event is not None:
                     self._events.append(latest_slider_event)
             events = self._events[:]

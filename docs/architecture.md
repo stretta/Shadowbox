@@ -24,6 +24,11 @@ Module responsibilities:
 - Renders the current UI state to the display
 - Should not fetch runner data, mutate backend state, or implement navigation rules
 
+`surfaces/`
+- Internal static registry for interfaces representing a complete RNBO instance
+- Resolves semantic parameter/state bindings from canonical export identity plus the current live contract
+- Rejects missing, duplicate, or incompatible bindings so the ordinary parameter interface remains the safe fallback
+
 `ui.py`
 - Primary state machine
 - Owns navigation, selection state, editor modes, and action emission
@@ -32,6 +37,7 @@ Module responsibilities:
 - Distinguishes:
   - list navigation
   - modal editors
+  - instance surfaces
   - instance lifecycle flows
 
 `rnbo.py`
@@ -77,6 +83,8 @@ Design rules:
 - System controls must remain separate from per-instance controls
 - `SYSTEM` may include a narrow, explicitly documented set of host-level status or maintenance features outside OSCQuery when they are not owned by an instance
 - Modal selection and edit screens should pause background refresh so discovery does not fight the user
+- Parameter editors remain selected from explicit parameter metadata; instance surfaces are selected only from the canonical export name plus successful runtime binding resolution
+- Active surface bindings are re-resolved after discovery snapshots and store stable names/paths rather than depending on old parameter dictionaries
 - Terminology should stay consistent:
   - use `Instance` for live runtime objects
   - use `Patcher` for loadable assets
