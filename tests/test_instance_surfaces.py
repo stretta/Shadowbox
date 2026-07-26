@@ -55,7 +55,15 @@ def _analog_instance():
     for stage in range(1, 17):
         params.append(_param(f"{stage:02d}StageValue", value=60.0, minimum=0.0, maximum=127.0))
         params.append(_param(f"{stage:02d}StageStep", value=1.0, minimum=0.0, maximum=1.0))
-    params.extend([_param("MaxCnt", value="16"), _param("Clock", value=1.0)])
+    params.extend(
+        [
+            _param("MaxCnt", value="16"),
+            _param("Clock/Clock", value="On"),
+            _param("Clock/Swing", value="Off"),
+            _param("Clock/ClockInterval", value=240.0, minimum=30.0, maximum=3840.0),
+            _param("Clock/SwingAmt", value=0.5, minimum=0.5, maximum=1.0),
+        ]
+    )
     return {
         "id": "7",
         "name": "AnalogSequencer",
@@ -356,6 +364,18 @@ class InstanceSurfaceTests(unittest.TestCase):
         ui.handle_event(UIEvent("step_list_field", delta=1))
         self.assertEqual(ui.state.surface_focus, 1)
         ui.handle_event(UIEvent("step_list_field", delta=-1))
+        self.assertEqual(ui.state.surface_focus, 0)
+
+    def test_list_sequencer_keypad_next_field_wraps_to_first_field(self):
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(_snapshot([_list_sequencer_instance()]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        ui.state.surface_focus = len(FIELD_KEYS) - 1
+
+        ui.handle_event(UIEvent("keypad_step", delta=1))
+
         self.assertEqual(ui.state.surface_focus, 0)
 
     def test_context_neutral_keypad_events_retain_list_sequencer_behavior(self):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from shadowbox.surfaces.base import ResolvedSurface
+from shadowbox.surfaces.clock import clock_param_leaf, resolve_clock_bindings
 
 
 _STAGE_RE = re.compile(r"^0?([1-9]|1[0-6])Stage(Value|Step)$", re.IGNORECASE)
@@ -12,7 +13,12 @@ _STAGE_RE = re.compile(r"^0?([1-9]|1[0-6])Stage(Value|Step)$", re.IGNORECASE)
 
 def resolve_analog_sequencer_bindings(instance: dict) -> ResolvedSurface | None:
     params: dict[str, dict] = {}
-    for param in instance.get("params", []):
+    instance_params = instance.get("params", [])
+    clock_params = resolve_clock_bindings(instance_params)
+    if clock_params is None:
+        return None
+
+    for param in instance_params:
         name = str(param.get("name", ""))
         match = _STAGE_RE.fullmatch(name)
         if match:
@@ -22,26 +28,25 @@ def resolve_analog_sequencer_bindings(instance: dict) -> ResolvedSurface | None:
             if key in params:
                 return None
             params[key] = param
+        elif clock_param_leaf(name) is not None:
+            continue
         elif name in {
             "Scale",
             "ZeroVolts",
-            "Swing",
             "Portamento",
             "Mode",
-            "ClockInterval",
             "GateTime",
             "MaxCnt",
-            "SwingAmt",
             "ClockRate",
-            "Clock",
         }:
             params[name.lower()] = param
 
+    params.update(clock_params)
     required = {
         *(f"stage_{stage:02d}_value" for stage in range(1, 17)),
         *(f"stage_{stage:02d}_enabled" for stage in range(1, 17)),
         "maxcnt",
-        "clock",
+        *clock_params,
     }
     if not required.issubset(params):
         return None

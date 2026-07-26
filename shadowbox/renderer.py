@@ -38,6 +38,7 @@ from shadowbox.ui import (
 from shadowbox.version import SHADOWBOX_BUILD_INFO, SHADOWBOX_VERSION
 
 STEP16_ENABLED_FILL_LEVEL = int(round(255 * 0.7))
+TOUCH_VALUE_BAR_HORIZONTAL_INSET = 10
 
 FIVE_INCH_THEME = {
     "bg": (15, 18, 18),
@@ -68,6 +69,8 @@ def shorten_param_name(name: str) -> str:
     parts = [p for p in str(name).split("/") if p]
     if len(parts) < 2:
         return str(name)
+    if len(parts) == 2 and parts[0] == "Clock":
+        return parts[1]
     parents = "/".join(p[0] for p in parts[:-1] if p)
     return f"{parents}/{parts[-1]}" if parents else parts[-1]
 
@@ -1696,11 +1699,120 @@ class ShadowboxRenderer:
                 self._text(f"{prefix} {shorten(label, 50)}"[: self.text_cols], 6, y, weight=text_weight or "regular")
 
     def draw_enum_list(self, ui, selected_idx: int) -> None:
-        labels = [str(item) for item in ui.active_enum_options]
-        current_indices = {
-            idx for idx, item in enumerate(ui.active_enum_options) if item == ui.current_enum_value
-        }
-        self.draw_string_list(labels, selected_idx, current_indices=current_indices)
+        options = list(ui.active_enum_options)
+        if not options:
+            return
+
+        selected_idx = max(0, min(int(selected_idx), len(options) - 1))
+        panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
+        if self.is_tft:
+            self._draw_panel(panel_x, panel_y, panel_w, panel_h, None)
+
+        rows = self._panel_list_rows(panel_y, panel_h) if self.is_tft else list(self.content_rows)
+        visible = max(1, len(rows))
+        if len(options) <= visible:
+            indices = list(range(len(options)))
+            selected_row = selected_idx
+        else:
+            half = visible // 2
+            start = max(0, min(selected_idx - half, len(options) - visible))
+            indices = list(range(start, start + visible))
+            selected_row = selected_idx - start
+
+        touch_layout = self._touch_list_geometry(visible_rows=4) if self.touch_layout_enabled else None
+        if touch_layout is not None:
+            content_left, content_right, content_top, content_bottom, row_h, _gap, rows = touch_layout
+            visible = max(1, len(rows))
+            if len(options) <= visible:
+                indices = list(range(len(options)))
+            else:
+                half = visible // 2
+                start = max(0, min(selected_idx - half, len(options) - visible))
+                indices = list(range(start, start + visible))
+            page_count = max(1, (len(options) + visible - 1) // visible)
+            current_page = (selected_idx // visible) + 1
+            self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count)
+
+        for row_idx, item_idx in enumerate(indices):
+            option = options[item_idx]
+            label = self._menu_label(str(option))
+            current = option == ui.current_enum_value
+            marker = "(*)" if current else "( )"
+            y = rows[row_idx]
+            selected = row_idx == selected_row and not self.touch_layout_enabled
+
+            if touch_layout is not None:
+                row_top = max(content_top, y - (row_h // 2))
+                row_w = max(1, content_right - content_left)
+                self._record_touch_target(
+                    "row",
+                    content_left,
+                    row_top,
+                    row_w,
+                    row_h,
+                    action_kind="tap_row",
+                    index=item_idx,
+                    label=label,
+                )
+                pressed = self._touch_pressed(kind="row", index=item_idx)
+                if self.has_color and current and not pressed:
+                    self._rounded_theme(content_left + 8, row_top + 7, max(1, row_w - 16), max(1, row_h - 14), 8, "panel_alt", True)
+                    self._rect_theme(content_left + 8, row_top + 7, max(1, row_w - 16), max(1, row_h - 14), "accent", False)
+                else:
+                    self._draw_touch_list_item_background(
+                        content_left,
+                        row_top,
+                        row_w,
+                        row_h,
+                        current=current,
+                        pressed=pressed,
+                    )
+
+                scale = self._touch_menu_scale()
+                marker_weight = "bold" if current else "regular"
+                marker_color = "accent" if current else "muted"
+                marker_x = content_left + 30
+                marker_y = y - (self._line_height(scale, marker_weight) // 2)
+                if self.has_color:
+                    self._text_theme(marker, marker_x, marker_y, marker_color, scale, marker_weight)
+                    marker_w = self._measure_text(marker, scale, marker_weight)[0]
+                    label_weight = "semibold" if current else "regular"
+                    fitted_label = self._truncate_to_width(label, max(1, row_w - marker_w - 190), scale, label_weight)
+                    self._text_theme(
+                        fitted_label,
+                        marker_x + marker_w + 18,
+                        y - (self._line_height(scale, label_weight) // 2),
+                        "text",
+                        scale,
+                        label_weight,
+                    )
+                    if current:
+                        self._draw_right_aligned("CURRENT", content_right - 30, marker_y, scale, "semibold")
+                else:
+                    self._text(f"{marker} {label}", marker_x, marker_y, scale, marker_weight)
+                continue
+
+            prefix = ">" if selected else " "
+            choice = f"{marker} {label}"
+            weight = "semibold" if current else "regular"
+            if self.is_full_tft:
+                self._draw_full_tft_row(
+                    y,
+                    prefix,
+                    choice,
+                    "CURRENT" if current else "",
+                    selected=selected,
+                    text_weight=weight,
+                )
+            elif self.is_tiny_text_tft:
+                self._text(f"{prefix} {shorten(choice, self.text_cols - 2)}"[: self.text_cols], 8, y, weight=weight)
+            else:
+                self._text(
+                    f"{prefix} {shorten(choice, self.text_cols - 2)}"[: self.text_cols],
+                    0 if not self.is_tft else 6,
+                    y,
+                    weight=weight,
+                )
 
     def draw_routing_list(self, ports: list[dict], selected_idx: int) -> None:
         if self.is_tft:
@@ -3694,6 +3806,9 @@ class ShadowboxRenderer:
             block_h = 96
             top = self.edit_content_top(block_h)
             gfx_x, gfx_y, gfx_w, gfx_h, value_y = (16, top, self.display.width - 32, 40, top + 64)
+            if self.touch_layout_enabled:
+                gfx_x += TOUCH_VALUE_BAR_HORIZONTAL_INSET
+                gfx_w = max(1, gfx_w - (TOUCH_VALUE_BAR_HORIZONTAL_INSET * 2))
         else:
             if self.is_tall:
                 block_h = 56
@@ -4475,7 +4590,11 @@ class ShadowboxRenderer:
             "PARAM_LIST": "PARAMETERS",
             "AUDIO_ROUTING_OVERVIEW": "AUDIO I/O",
             "MIDI_ROUTING_OVERVIEW": "MIDI I/O",
-            "ENUM_LIST": shorten(shorten_param_name(ui.selected_param.get("name", "")), 19) if ui.selected_param else "ENUM",
+            "ENUM_LIST": (
+                f"CHOOSE {shorten(shorten_param_name(ui.selected_param.get('name', '')), 12)}"
+                if ui.selected_param
+                else "CHOOSE VALUE"
+            ),
             "ROUTING_GROUP": state.active_transport.upper(),
             "ROUTING_PORTS": f"{state.active_transport[:1].upper()}{state.active_transport[1:]} {state.active_routing_direction[:1].upper()}{state.active_routing_direction[1:]}",
             "ROUTING_TARGETS": routing_port_display_name(ui.selected_routing_port) or "TARGET",

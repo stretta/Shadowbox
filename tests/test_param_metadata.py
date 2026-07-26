@@ -23,7 +23,16 @@ from shadowbox.rnbo import (
     discover_system,
     extract_meta_info,
 )
-from shadowbox.ui import UIEvent, ShadowboxUI, apply_edit_delta, edit_as_int, is_boolish, normalize_current_value_for_edit, numeric_step
+from shadowbox.ui import (
+    UIEvent,
+    ShadowboxUI,
+    apply_edit_delta,
+    edit_as_int,
+    is_boolish,
+    normalize_current_value_for_edit,
+    numeric_step,
+    quantize_edit_value,
+)
 
 
 class _DummyDisplay:
@@ -47,6 +56,14 @@ class _DummyDisplay:
 
     def vline(self, x: int, y: int, h: int, on: bool = True) -> None:
         return None
+
+
+class _RecordingDisplay(_DummyDisplay):
+    def __init__(self) -> None:
+        self.ops: list[tuple] = []
+
+    def text_with_style(self, text: str, x: int, y: int, scale: int, weight: str, on: bool = True) -> None:
+        self.ops.append(("text", str(text), x, y, scale, weight, on))
 
 
 class ParamMetadataTests(unittest.TestCase):
@@ -199,6 +216,64 @@ class ParamMetadataTests(unittest.TestCase):
         self.assertEqual(apply_edit_delta(param, 2.2, 1), 3)
         self.assertEqual(apply_edit_delta(param, 2.2, -1), 1)
 
+    def test_edit_step_quantizes_to_grid_anchored_at_minimum(self) -> None:
+        param = {
+            "type": "f",
+            "min": 30,
+            "max": 3840,
+            "metadata": {"edit_as": "int", "edit_step": "30"},
+        }
+
+        self.assertEqual(quantize_edit_value(param, 30), 30)
+        self.assertEqual(quantize_edit_value(param, 411), 420)
+        self.assertEqual(quantize_edit_value(param, 3840), 3840)
+        self.assertEqual(apply_edit_delta(param, 411, 1), 450)
+
+    def test_touch_edit_honors_explicit_step_grid(self) -> None:
+        param = {
+            "name": "Clock/ClockInterval",
+            "value": 30.0,
+            "path": "/rnbo/inst/1/params/Clock/ClockInterval",
+            "min": 30.0,
+            "max": 3840.0,
+            "metadata": {"edit_as": "int", "edit_step": "30"},
+        }
+        ui = ShadowboxUI()
+        ui.state.instances = [{"id": "1", "params": [param]}]
+        ui.state.active_instance_id = "1"
+        ui.state.param_cursor = 1
+        ui.state.ui_mode = "EDIT"
+        ui.state.edit_value = 30
+
+        ui.handle_event(UIEvent(kind="set_edit_value", value=0.1, pressed=True))
+
+        self.assertEqual(ui.state.edit_value, 420)
+        action = next(action for action in ui.pop_actions() if action.kind == "set_param")
+        self.assertEqual(action.value, 420)
+
+    def test_numeric_keypad_commit_honors_explicit_step_grid(self) -> None:
+        param = {
+            "name": "Clock/ClockInterval",
+            "value": 30.0,
+            "path": "/rnbo/inst/1/params/Clock/ClockInterval",
+            "min": 30.0,
+            "max": 3840.0,
+            "metadata": {"edit_as": "int", "edit_step": "30"},
+        }
+        ui = ShadowboxUI()
+        ui.state.instances = [{"id": "1", "params": [param]}]
+        ui.state.active_instance_id = "1"
+        ui.state.param_cursor = 1
+        ui.state.ui_mode = "EDIT"
+        ui.state.edit_value = 30
+        ui.state.edit_numeric_draft = "46"
+
+        ui.handle_event(UIEvent(kind="keypad_enter"))
+
+        self.assertEqual(ui.state.edit_value, 60)
+        action = next(action for action in ui.pop_actions() if action.kind == "set_param")
+        self.assertEqual(action.value, 60)
+
     def test_float_editor_acceleration_applies_only_to_float_style_numeric_editing(self) -> None:
         ui = ShadowboxUI()
         ui.float_edit_accel_fast_seconds = 0.05
@@ -275,6 +350,27 @@ class ParamMetadataTests(unittest.TestCase):
 
         self.assertEqual(ui.state.ui_mode, "ENUM_LIST")
         self.assertEqual(ui.state.edit_value, "A")
+
+    def test_enum_renderer_distinguishes_cursor_from_current_choice(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.instances = [
+            {
+                "id": "1",
+                "params": [
+                    {"name": "mode", "value": "A", "path": "/params/mode", "vals": ["A", "B", "C"]},
+                ],
+            }
+        ]
+        ui.state.active_instance_id = "1"
+        ui.state.param_cursor = 1
+
+        display = _RecordingDisplay()
+        renderer = ShadowboxRenderer(display)
+        renderer.draw_enum_list(ui, selected_idx=1)
+
+        rows = [op[1] for op in display.ops if op[0] == "text"]
+        self.assertIn("  (*) A", rows)
+        self.assertIn("> ( ) B", rows)
 
     def test_live_param_update_refreshes_matching_param(self) -> None:
         ui = ShadowboxUI()

@@ -338,6 +338,33 @@ def numeric_step(param: dict) -> float:
     return 0.01
 
 
+def quantize_edit_value(param: dict | None, value: Any) -> Any:
+    if not isinstance(param, dict) or not isinstance(value, (int, float)) or isinstance(value, bool):
+        return value
+
+    pmin = param.get("min")
+    pmax = param.get("max")
+    numeric = float(value)
+    if isinstance(pmin, (int, float)):
+        numeric = max(float(pmin), numeric)
+    if isinstance(pmax, (int, float)):
+        numeric = min(float(pmax), numeric)
+
+    step = edit_step(param)
+    if step is not None:
+        origin = float(pmin) if isinstance(pmin, (int, float)) else 0.0
+        grid_index = math.floor(((numeric - origin) / step) + 0.5)
+        if isinstance(pmin, (int, float)):
+            grid_index = max(math.ceil((float(pmin) - origin) / step), grid_index)
+        if isinstance(pmax, (int, float)):
+            grid_index = min(math.floor((float(pmax) - origin) / step), grid_index)
+        numeric = origin + (grid_index * step)
+
+    if edit_as_int(param):
+        return int(round(numeric))
+    return numeric
+
+
 def normalize_current_value_for_edit(param: dict) -> Any:
     value = param.get("value")
     vals = param.get("vals")
@@ -359,8 +386,8 @@ def normalize_current_value_for_edit(param: dict) -> Any:
 
     if value is None:
         return param["min"] if param.get("min") is not None else 0
-    if edit_as_int(param) and isinstance(value, (int, float)):
-        return int(round(value))
+    if isinstance(value, (int, float)):
+        return quantize_edit_value(param, value)
     return value
 
 
@@ -378,12 +405,9 @@ def apply_edit_delta(param: dict, current_value: Any, delta: int) -> Any:
 
     step = numeric_step(param)
     if isinstance(current_value, (int, float)):
-        if edit_as_int(param):
-            current_value = int(round(current_value))
+        current_value = quantize_edit_value(param, current_value)
         new_value = current_value + (step * delta)
-        if edit_as_int(param):
-            new_value = int(round(new_value))
-        return clamp(new_value, param.get("min"), param.get("max"))
+        return quantize_edit_value(param, new_value)
     return current_value
 
 
@@ -2664,9 +2688,7 @@ class ShadowboxUI:
 
         fraction = max(0.0, min(1.0, float(normalized_value)))
         value: Any = pmin + ((pmax - pmin) * fraction)
-        if edit_as_int(param):
-            value = int(round(value))
-        value = clamp(value, pmin, pmax)
+        value = quantize_edit_value(param, value)
 
         previous = self.state.edit_value
         if isinstance(previous, (int, float)) and abs(float(previous) - float(value)) < 1e-9:
@@ -2679,7 +2701,8 @@ class ShadowboxUI:
         self.state.activity_ticks += 1
         normalized_path = str(param.get("normalized_path", "") or "")
         if surface_scope and normalized_path:
-            self.queue_action(UIAction(kind="set_param", path=normalized_path, value=fraction))
+            quantized_fraction = (float(value) - float(pmin)) / (float(pmax) - float(pmin))
+            self.queue_action(UIAction(kind="set_param", path=normalized_path, value=quantized_fraction))
         elif not is_discrete_param(param):
             self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
         if not pressed:
@@ -2698,6 +2721,7 @@ class ShadowboxUI:
                 return
             fraction = max(0.0, min(1.0, float(normalized_value)))
             value = pmin + ((pmax - pmin) * fraction)
+            value = quantize_edit_value(param, value)
             previous = param.get("value")
             if isinstance(previous, (int, float)) and abs(float(previous) - float(value)) < 1e-9:
                 return
@@ -2718,8 +2742,7 @@ class ShadowboxUI:
             return
         fraction = max(0.0, min(1.0, float(normalized_value)))
         value = pmin + ((pmax - pmin) * fraction)
-        if edit_as_int(param):
-            value = int(round(value))
+        value = quantize_edit_value(param, value)
         previous = param.get("value")
         if isinstance(previous, (int, float)) and abs(float(previous) - float(value)) < 1e-9:
             return
@@ -2856,9 +2879,7 @@ class ShadowboxUI:
             return False
         if not math.isfinite(value):
             return False
-        if edit_as_int(param):
-            value = int(round(value))
-        value = clamp(value, param.get("min"), param.get("max"))
+        value = quantize_edit_value(param, value)
         param["value"] = value
         self.state.edit_value = value
         self.state.edit_numeric_draft = ""

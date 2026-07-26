@@ -580,9 +580,12 @@ class TouchDirectUITests(unittest.TestCase):
 
         renderer, _display = _render_touch_layout(ui)
 
+        slider = next(target for target in renderer.touch_layout.targets if target.kind == "edit_slider")
         action = _touch_action_for_target(renderer, kind="edit_slider", button_id="value_slider")
         self.assertEqual(action.kind, "set_edit_value")
         self.assertAlmostEqual(action.value, 0.5, places=2)
+        self.assertEqual(slider.x, 26)
+        self.assertEqual(slider.x + slider.w, 774)
 
     def test_value_editor_touch_readout_is_large_and_right_aligned_above_slider(self) -> None:
         ui = ShadowboxUI()
@@ -1585,6 +1588,42 @@ class TouchDirectUITests(unittest.TestCase):
         row_labels = [target.label for target in renderer.touch_layout.targets if target.kind == "row"]
         self.assertIn("enabled", row_labels)
         self.assertIn("mode", row_labels)
+
+    def test_enum_touch_screen_reads_as_single_choice_not_navigation(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.ui_mode = "ENUM_LIST"
+        ui.state.instances = [
+            {
+                "id": "1",
+                "params": [
+                    {
+                        "name": "Mode",
+                        "value": "Forward",
+                        "path": "/params/Mode",
+                        "vals": ["Forward", "Backward", "Palindrome"],
+                    },
+                ],
+            }
+        ]
+        ui.state.active_instance_id = "1"
+        ui.state.param_cursor = 1
+        ui.state.enum_cursor = 1
+
+        display = _ColorFiveInchDisplay()
+        renderer = create_renderer(display)
+        renderer.set_touch_mode(True)
+        renderer.draw(ui, touch_state=SimpleNamespace(pressed=False, normalized_x=0.0, normalized_y=0.0))
+
+        text = [str(op[1]) for op in display.ops if op[0] in {"text", "text_color"}]
+        self.assertIn("CHOOSE Mode", text)
+        self.assertIn("(*)", text)
+        self.assertIn("( )", text)
+        self.assertIn("CURRENT", text)
+        self.assertNotIn(">", text)
+        self.assertEqual(
+            [target.label for target in renderer.touch_layout.targets if target.kind == "row"],
+            ["Forward", "Backward", "Palindrome"],
+        )
 
     def test_pressed_touch_highlights_the_tapped_row_only_while_pressed(self) -> None:
         class _FiveInchDisplay:

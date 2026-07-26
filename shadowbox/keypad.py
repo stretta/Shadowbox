@@ -16,6 +16,7 @@ EVIOCGRAB = 0x40044590
 _EVENT_STRUCT = struct.Struct("@llHHi")
 
 KEY_BACKSPACE = 14
+KEY_TAB = 15
 KEY_ENTER = 28
 KEY_KPASTERISK = 55
 KEY_SPACE = 57
@@ -87,6 +88,8 @@ def keypad_event_for_key(code: int, value: int) -> KeypadEvent | None:
     if code == KEY_KPSLASH:
         return KeypadEvent("keypad_step", delta=-1)
     if code == KEY_KPASTERISK:
+        return KeypadEvent("keypad_step", delta=1)
+    if code == KEY_TAB:
         return KeypadEvent("keypad_step", delta=1)
     return None
 

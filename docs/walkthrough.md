@@ -218,6 +218,7 @@ Optional USB numeric-keypad behavior:
 - numpad `-` toggles the sign of the current token
 - numpad `Enter` sends the selected field
 - numpad `/` and `*` select the previous and next fields
+- `Tab` cycles to the next field
 
 The keypad is configured with `SHADOWBOX_KEYPAD_DEVICE`. Shadowbox exclusively
 grabs the configured evdev device while running so its keys do not appear on

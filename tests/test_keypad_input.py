@@ -11,6 +11,7 @@ from shadowbox.keypad import (
     KEY_KPMINUS,
     KEY_KPPLUS,
     KEY_KPSLASH,
+    KEY_TAB,
     KEY_BACKSPACE,
     NumericKeypadReader,
     keypad_event_for_key,
@@ -28,6 +29,7 @@ class NumericKeypadTests(unittest.TestCase):
         self.assertEqual(keypad_event_for_key(KEY_KPMINUS, 1).kind, "keypad_sign")
         self.assertEqual(keypad_event_for_key(KEY_KPSLASH, 1).delta, -1)
         self.assertEqual(keypad_event_for_key(KEY_KPASTERISK, 1).delta, 1)
+        self.assertEqual(keypad_event_for_key(KEY_TAB, 1).delta, 1)
         self.assertIsNone(keypad_event_for_key(79, 0))
         self.assertIsNone(keypad_event_for_key(69, 1))
 
