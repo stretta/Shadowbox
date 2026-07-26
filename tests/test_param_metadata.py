@@ -318,6 +318,79 @@ class ParamMetadataTests(unittest.TestCase):
         self.assertEqual(ui.selected_param.get("value"), 11.7)
         self.assertEqual(ui.state.edit_value, 12)
 
+    def test_numeric_keypad_commits_typed_float_from_general_editor(self) -> None:
+        ui = ShadowboxUI()
+        param = {"name": "offset", "value": 3.0, "path": "/params/offset", "min": -100.0, "max": 100.0}
+        ui.state.instances = [{"id": "1", "params": [param]}]
+        ui.state.active_instance_id = "1"
+        ui.state.param_cursor = 1
+        ui.state.ui_mode = "EDIT"
+        ui.state.edit_value = 3.0
+
+        for event in (
+            UIEvent(kind="keypad_sign"),
+            UIEvent(kind="keypad_digit", button_id="1"),
+            UIEvent(kind="keypad_digit", button_id="2"),
+            UIEvent(kind="keypad_decimal"),
+            UIEvent(kind="keypad_digit", button_id="5"),
+        ):
+            ui.handle_event(event)
+
+        self.assertEqual(ui.state.edit_numeric_draft, "-12.5")
+        self.assertEqual(param["value"], 3.0)
+        self.assertEqual(ui.pop_actions(), [])
+
+        ui.handle_event(UIEvent(kind="keypad_enter"))
+
+        self.assertEqual(ui.state.ui_mode, "PARAM_LIST")
+        self.assertEqual(param["value"], -12.5)
+        actions = ui.pop_actions()
+        self.assertTrue(any(action.kind == "set_param" and action.value == -12.5 for action in actions))
+        self.assertTrue(any(action.kind == "save_state" for action in actions))
+
+    def test_numeric_keypad_clamps_integer_style_value_and_ignores_decimal(self) -> None:
+        ui = ShadowboxUI()
+        param = {
+            "name": "count",
+            "value": 2,
+            "path": "/params/count",
+            "min": 0,
+            "max": 16,
+            "metadata": {"edit_as": "int"},
+        }
+        ui.state.instances = [{"id": "1", "params": [param]}]
+        ui.state.active_instance_id = "1"
+        ui.state.param_cursor = 1
+        ui.state.ui_mode = "EDIT"
+        ui.state.edit_value = 2
+
+        ui.handle_event(UIEvent(kind="keypad_sign"))
+        ui.handle_event(UIEvent(kind="keypad_digit", button_id="9"))
+        ui.handle_event(UIEvent(kind="keypad_decimal"))
+        ui.handle_event(UIEvent(kind="keypad_digit", button_id="9"))
+        ui.handle_event(UIEvent(kind="keypad_enter"))
+
+        self.assertEqual(param["value"], 16)
+
+    def test_numeric_keypad_backspace_and_encoder_cancel_typed_draft(self) -> None:
+        ui = ShadowboxUI()
+        param = {"name": "gain", "value": 1.0, "path": "/params/gain", "min": 0.0, "max": 10.0}
+        ui.state.instances = [{"id": "1", "params": [param]}]
+        ui.state.active_instance_id = "1"
+        ui.state.param_cursor = 1
+        ui.state.ui_mode = "EDIT"
+        ui.state.edit_value = 1.0
+
+        ui.handle_event(UIEvent(kind="keypad_digit", button_id="4"))
+        ui.handle_event(UIEvent(kind="keypad_digit", button_id="2"))
+        ui.handle_event(UIEvent(kind="keypad_space"))
+        self.assertEqual(ui.state.edit_numeric_draft, "4")
+
+        ui.handle_event(UIEvent(kind="step", delta=1))
+
+        self.assertEqual(ui.state.edit_numeric_draft, "")
+        self.assertEqual(param["value"], 1.05)
+
     def test_midi_learn_button_enables_last_message_reporting(self) -> None:
         ui = ShadowboxUI()
         param = {"name": "WaveBiasA", "value": 0, "path": "/rnbo/inst/5/params/WaveBiasA", "metadata": {}}

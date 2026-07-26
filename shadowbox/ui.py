@@ -155,6 +155,7 @@ class UIState:
     midi_learn_param_path: str = ""
 
     edit_value: Any = None
+    edit_numeric_draft: str = ""
     edit_ttid_mode: str = "keyboard"
     edit_ttid_selected_pc: int = 0
     edit_ttid_load_root: int = 0
@@ -526,6 +527,7 @@ class ShadowboxUI:
         self.state.midi_learn_instance_id = ""
         self.state.midi_learn_param_path = ""
         self.state.edit_value = None
+        self.state.edit_numeric_draft = ""
         self.state.edit_ttid_mode = "keyboard"
         self.state.edit_ttid_selected_pc = 0
         self.state.edit_ttid_load_root = 0
@@ -2605,6 +2607,20 @@ class ShadowboxUI:
             self._send_list_field()
         elif event.kind == "step_list_field":
             self._handle_list_field_step(event.delta)
+        elif event.kind == "keypad_digit":
+            self._handle_keypad_digit(event.button_id)
+        elif event.kind == "keypad_decimal":
+            self._handle_keypad_decimal()
+        elif event.kind == "keypad_backspace":
+            self._handle_keypad_backspace()
+        elif event.kind == "keypad_sign":
+            self._handle_keypad_sign()
+        elif event.kind == "keypad_space":
+            self._handle_keypad_space()
+        elif event.kind == "keypad_enter":
+            self._handle_keypad_enter()
+        elif event.kind == "keypad_step":
+            self._handle_keypad_step(event.delta)
         elif event.kind == "set_ttid_pc":
             self._handle_touch_ttid_pc(event.index)
         elif event.kind == "set_ttid_root":
@@ -2640,6 +2656,7 @@ class ShadowboxUI:
             return
         if param is None or is_ttid_param(param) or is_step16_param(param) or is_enum_param(param):
             return
+        self.state.edit_numeric_draft = ""
         pmin = param.get("min")
         pmax = param.get("max")
         if not isinstance(pmin, (int, float)) or not isinstance(pmax, (int, float)) or pmax <= pmin:
@@ -2755,6 +2772,111 @@ class ShadowboxUI:
             return
         self.state.surface_focus = self._cycle(self.state.surface_focus, len(FIELD_KEYS), int(delta))
         self.request_render("list_field")
+
+    def _numeric_keypad_param(self) -> dict | None:
+        param = self.selected_param
+        if (
+            self.state.ui_mode != "EDIT"
+            or param is None
+            or is_ttid_param(param)
+            or is_step16_param(param)
+            or is_discrete_param(param)
+            or not isinstance(self.state.edit_value, (int, float))
+        ):
+            return None
+        return param
+
+    def _handle_keypad_digit(self, digit: str) -> None:
+        if self._list_surface_ready():
+            self._handle_list_key(digit)
+            return
+        if self._numeric_keypad_param() is None or digit not in "0123456789":
+            return
+        draft = self.state.edit_numeric_draft
+        if len(draft) >= 24:
+            return
+        self.state.edit_numeric_draft = f"{draft}{digit}"
+        self.request_render("numeric_keypad")
+
+    def _handle_keypad_decimal(self) -> None:
+        if self._list_surface_ready():
+            self._handle_list_key("backspace")
+            return
+        param = self._numeric_keypad_param()
+        if param is None or edit_as_int(param):
+            return
+        draft = self.state.edit_numeric_draft
+        if "." in draft:
+            return
+        self.state.edit_numeric_draft = "-0." if draft == "-" else f"{draft or '0'}."
+        self.request_render("numeric_keypad")
+
+    def _handle_keypad_backspace(self) -> None:
+        if self._list_surface_ready():
+            self._handle_list_key("backspace")
+            return
+        if self._numeric_keypad_param() is None or not self.state.edit_numeric_draft:
+            return
+        self.state.edit_numeric_draft = self.state.edit_numeric_draft[:-1]
+        self.request_render("numeric_keypad")
+
+    def _handle_keypad_sign(self) -> None:
+        if self._list_surface_ready():
+            self._handle_list_sign()
+            return
+        param = self._numeric_keypad_param()
+        if param is None:
+            return
+        pmin = param.get("min")
+        if isinstance(pmin, (int, float)) and pmin >= 0:
+            return
+        draft = self.state.edit_numeric_draft
+        self.state.edit_numeric_draft = draft[1:] if draft.startswith("-") else f"-{draft}"
+        self.request_render("numeric_keypad")
+
+    def _handle_keypad_space(self) -> None:
+        if self._list_surface_ready():
+            self._handle_list_key("space")
+        elif self._numeric_keypad_param() is not None and self.state.edit_numeric_draft:
+            self.state.edit_numeric_draft = self.state.edit_numeric_draft[:-1]
+            self.request_render("numeric_keypad")
+
+    def _handle_keypad_step(self, delta: int) -> None:
+        if self._list_surface_ready():
+            self._handle_list_field_step(delta)
+
+    def _commit_numeric_keypad_draft(self) -> bool:
+        param = self._numeric_keypad_param()
+        draft = self.state.edit_numeric_draft
+        if param is None or not draft or draft in {"-", ".", "-."}:
+            return False
+        try:
+            value: Any = float(draft)
+        except ValueError:
+            return False
+        if not math.isfinite(value):
+            return False
+        if edit_as_int(param):
+            value = int(round(value))
+        value = clamp(value, param.get("min"), param.get("max"))
+        param["value"] = value
+        self.state.edit_value = value
+        self.state.edit_numeric_draft = ""
+        self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
+        return True
+
+    def _handle_keypad_enter(self) -> None:
+        if self._list_surface_ready():
+            self._send_list_field()
+            return
+        if self._numeric_keypad_param() is None:
+            return
+        if self.state.edit_numeric_draft and not self._commit_numeric_keypad_draft():
+            return
+        self._reset_float_edit_acceleration()
+        self.state.ui_mode = "PARAM_LIST"
+        self._edit_original_value = None
+        self.queue_action(UIAction(kind="save_state"))
 
     def _handle_list_key(self, key_value: str) -> None:
         field_key = self._list_surface_key()
@@ -2901,6 +3023,7 @@ class ShadowboxUI:
             return
         if self.state.ui_mode == "EDIT":
             self.state.edit_value = None
+            self.state.edit_numeric_draft = ""
             self.state.edit_ttid_mode = "keyboard"
             self.state.edit_ttid_selected_pc = 0
             self.state.edit_ttid_load_root = 0
@@ -3483,6 +3606,7 @@ class ShadowboxUI:
             param = self.selected_param
             if param is None:
                 return
+            self.state.edit_numeric_draft = ""
             if is_ttid_param(param):
                 if self.state.edit_ttid_mode == "keyboard":
                     self.state.edit_ttid_selected_pc = (self.state.edit_ttid_selected_pc + step) % 13
@@ -3837,6 +3961,7 @@ class ShadowboxUI:
                     else:
                         self._edit_original_value = param.get("value")
                         self.state.edit_value = normalize_current_value_for_edit(param)
+                        self.state.edit_numeric_draft = ""
                         self.state.ui_mode = "EDIT"
                     self._reset_float_edit_acceleration()
 
@@ -4091,8 +4216,11 @@ class ShadowboxUI:
                 param["value"] = self.state.edit_value
                 self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=self.state.edit_value))
             else:
+                if self.state.edit_numeric_draft and not self._commit_numeric_keypad_draft():
+                    return
                 if param is not None and is_discrete_param(param):
                     self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=self.state.edit_value))
+                self.state.edit_numeric_draft = ""
                 self._reset_float_edit_acceleration()
                 self.state.ui_mode = "PARAM_LIST"
                 self._edit_original_value = None
@@ -4107,6 +4235,7 @@ class ShadowboxUI:
             self._exit_instance_surface()
         elif self.state.ui_mode == "EDIT":
             param = self.selected_param
+            self.state.edit_numeric_draft = ""
             if param is not None and is_ttid_param(param):
                 self.state.edit_value = None
                 self.state.edit_ttid_mode = "keyboard"

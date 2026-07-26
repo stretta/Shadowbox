@@ -154,7 +154,7 @@ class EncoderInputTests(unittest.TestCase):
         encoder.close()
 
     def test_optional_keypad_events_are_merged_with_primary_input(self) -> None:
-        keypad_event = types.SimpleNamespace(kind="edit_list_key", delta=0, button_id="7")
+        keypad_event = types.SimpleNamespace(kind="keypad_digit", delta=0, button_id="7")
 
         class _FakeKeypadReader:
             def __init__(self, *args, **kwargs):
@@ -177,7 +177,7 @@ class EncoderInputTests(unittest.TestCase):
 
         events = encoder.get_events()
 
-        self.assertEqual([(event.kind, event.button_id) for event in events], [("edit_list_key", "7")])
+        self.assertEqual([(event.kind, event.button_id) for event in events], [("keypad_digit", "7")])
         encoder.close()
         self.assertTrue(encoder._keypad_reader.closed)
 

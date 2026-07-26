@@ -214,8 +214,14 @@ Optional USB numeric-keypad behavior:
 
 The keypad is configured with `SHADOWBOX_KEYPAD_DEVICE`. Shadowbox exclusively
 grabs the configured evdev device while running so its keys do not appear on
-the Linux console behind the framebuffer interface. These keypad events are
-ignored unless the ListSequencer surface is active.
+the Linux console behind the framebuffer interface. Outside ListSequencer,
+these keypad events are ignored except by the regular numeric parameter editor.
+
+In the regular numeric parameter editor, the same keypad provides direct value
+entry. Digits begin a fresh draft, numpad `.` enters a decimal point, Backspace
+or numpad `+` deletes, numpad `-` toggles the sign when negative values are
+valid, and numpad `Enter` commits the range-clamped value. Encoder or touch
+adjustment cancels an unfinished keypad draft.
 
 6. RNBO authoring guidelines
 

@@ -3704,7 +3704,9 @@ class ShadowboxRenderer:
                 top = self.edit_content_top(block_h)
                 gfx_x, gfx_y, gfx_w, gfx_h, value_y = (4, top, 120, 12, top + 14)
         name = shorten_param_name(selected_param.get("name", ""))
-        value = state.edit_value
+        numeric_draft = str(getattr(state, "edit_numeric_draft", "") or "")
+        graphic_value = state.edit_value
+        value = numeric_draft if numeric_draft else graphic_value
 
         vals = selected_param.get("vals")
         pmin = selected_param.get("min")
@@ -3715,7 +3717,7 @@ class ShadowboxRenderer:
         elif self._is_enum_param(selected_param):
             self.draw_enum_edit(name, vals, value)
         elif self._is_small_int_param(selected_param):
-            active_idx = int(round(value - pmin)) if isinstance(value, (int, float)) and pmin is not None else 0
+            active_idx = int(round(graphic_value - pmin)) if isinstance(graphic_value, (int, float)) and pmin is not None else 0
             self._draw_steps(active_idx, int(pmax - pmin) + 1, gfx_x, gfx_y, gfx_w, gfx_h)
             if self.touch_layout_enabled:
                 touch_pad_y = 28 if self.is_five_inch_touch else 8
@@ -3732,8 +3734,8 @@ class ShadowboxRenderer:
                 self.text_center(shorten(format_param_value(selected_param, value), 21), value_y)
         else:
             norm = 0.0
-            if isinstance(value, (int, float)) and pmin is not None and pmax is not None and (pmax - pmin) > 0:
-                norm = (value - pmin) / (pmax - pmin)
+            if isinstance(graphic_value, (int, float)) and pmin is not None and pmax is not None and (pmax - pmin) > 0:
+                norm = (graphic_value - pmin) / (pmax - pmin)
             self._draw_continuous_bar(norm, gfx_x, gfx_y, gfx_w, gfx_h)
             if self.touch_layout_enabled:
                 touch_pad_y = 28 if self.is_five_inch_touch else 8

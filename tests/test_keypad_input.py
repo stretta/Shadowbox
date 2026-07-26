@@ -11,6 +11,7 @@ from shadowbox.keypad import (
     KEY_KPMINUS,
     KEY_KPPLUS,
     KEY_KPSLASH,
+    KEY_BACKSPACE,
     NumericKeypadReader,
     keypad_event_for_key,
 )
@@ -18,12 +19,13 @@ from shadowbox.keypad import (
 
 class NumericKeypadTests(unittest.TestCase):
     def test_numeric_keypad_mapping(self):
-        self.assertEqual(keypad_event_for_key(79, 1).button_id, "1")
-        self.assertEqual(keypad_event_for_key(82, 1).button_id, "0")
-        self.assertEqual(keypad_event_for_key(KEY_KPPLUS, 1).button_id, "space")
-        self.assertEqual(keypad_event_for_key(KEY_KPDOT, 1).button_id, "backspace")
-        self.assertEqual(keypad_event_for_key(KEY_KPENTER, 1).kind, "send_list_field")
-        self.assertEqual(keypad_event_for_key(KEY_KPMINUS, 1).kind, "toggle_list_sign")
+        self.assertEqual((keypad_event_for_key(79, 1).kind, keypad_event_for_key(79, 1).button_id), ("keypad_digit", "1"))
+        self.assertEqual((keypad_event_for_key(82, 1).kind, keypad_event_for_key(82, 1).button_id), ("keypad_digit", "0"))
+        self.assertEqual(keypad_event_for_key(KEY_KPPLUS, 1).kind, "keypad_space")
+        self.assertEqual(keypad_event_for_key(KEY_KPDOT, 1).kind, "keypad_decimal")
+        self.assertEqual(keypad_event_for_key(KEY_BACKSPACE, 1).kind, "keypad_backspace")
+        self.assertEqual(keypad_event_for_key(KEY_KPENTER, 1).kind, "keypad_enter")
+        self.assertEqual(keypad_event_for_key(KEY_KPMINUS, 1).kind, "keypad_sign")
         self.assertEqual(keypad_event_for_key(KEY_KPSLASH, 1).delta, -1)
         self.assertEqual(keypad_event_for_key(KEY_KPASTERISK, 1).delta, 1)
         self.assertIsNone(keypad_event_for_key(79, 0))
@@ -44,7 +46,7 @@ class NumericKeypadTests(unittest.TestCase):
             events = reader.read_events()
             reader.close()
 
-        self.assertEqual([(event.kind, event.button_id) for event in events], [("edit_list_key", "1")])
+        self.assertEqual([(event.kind, event.button_id) for event in events], [("keypad_digit", "1")])
         ioctl.assert_any_call(12, EVIOCGRAB, 1)
         ioctl.assert_any_call(12, EVIOCGRAB, 0)
         close.assert_called_with(12)

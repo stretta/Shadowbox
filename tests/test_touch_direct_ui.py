@@ -612,6 +612,24 @@ class TouchDirectUITests(unittest.TestCase):
         self.assertGreaterEqual(x + text_w, display.width - 28)
         self.assertGreater(x, display.width // 2)
 
+    def test_value_editor_touch_readout_shows_numeric_keypad_draft(self) -> None:
+        ui = ShadowboxUI()
+        param = {"name": "gain", "value": 0.5, "path": "/params/gain", "min": -100.0, "max": 100.0}
+        ui.state.ui_mode = "EDIT"
+        ui.state.instances = [{"id": "1", "params": [param]}]
+        ui.state.active_instance_id = "1"
+        ui.state.param_cursor = 1
+        ui.state.edit_value = 0.5
+        ui.state.edit_numeric_draft = "-12."
+
+        display = _ColorFiveInchDisplay()
+        renderer = create_renderer(display)
+        renderer.set_touch_mode(True)
+        renderer.draw(ui, touch_state=SimpleNamespace(pressed=False, normalized_x=0.0, normalized_y=0.0))
+
+        labels = [op[1] for op in display.ops if op[0] == "text_color"]
+        self.assertIn("-12.", labels)
+
     def test_value_editor_exposes_midi_learn_and_clear_buttons(self) -> None:
         ui = ShadowboxUI()
         param = {

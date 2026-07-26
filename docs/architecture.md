@@ -67,7 +67,7 @@ Module responsibilities:
 `keypad.py`
 - Optionally opens a configured USB keyboard event device alongside the primary encoder/touch input
 - Uses an exclusive evdev grab so numeric-keypad input does not leak to the Linux console behind the framebuffer UI
-- Emits only ListSequencer-specific semantic events; `ui.py` ignores them outside that instance surface
+- Emits context-neutral numeric-keypad events; `ui.py` routes them to ListSequencer or the regular numeric parameter editor and ignores them elsewhere
 - Reconnects after keypad unplug/replug without restarting Shadowbox
 
 Data flow:

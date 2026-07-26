@@ -358,6 +358,25 @@ class InstanceSurfaceTests(unittest.TestCase):
         ui.handle_event(UIEvent("step_list_field", delta=-1))
         self.assertEqual(ui.state.surface_focus, 0)
 
+    def test_context_neutral_keypad_events_retain_list_sequencer_behavior(self):
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(_snapshot([_list_sequencer_instance()]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        ui.pop_actions()
+        ui._list_surface_drafts()["steps"] = ""
+
+        ui.handle_event(UIEvent("keypad_digit", button_id="1"))
+        ui.handle_event(UIEvent("keypad_space"))
+        ui.handle_event(UIEvent("keypad_digit", button_id="0"))
+        ui.handle_event(UIEvent("keypad_decimal"))
+        ui.handle_event(UIEvent("keypad_digit", button_id="1"))
+        ui.handle_event(UIEvent("keypad_enter"))
+
+        write = next(action for action in ui.pop_actions() if action.kind == "send_osc")
+        self.assertEqual(write.value, [1, 1])
+
     def test_list_sequencer_steps_reject_non_binary_values(self):
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(_snapshot([_list_sequencer_instance()]))

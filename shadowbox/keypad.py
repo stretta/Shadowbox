@@ -73,19 +73,21 @@ def keypad_event_for_key(code: int, value: int) -> KeypadEvent | None:
         return None
     code = int(code)
     if code in _DIGIT_CODES:
-        return KeypadEvent("edit_list_key", button_id=_DIGIT_CODES[code])
+        return KeypadEvent("keypad_digit", button_id=_DIGIT_CODES[code])
     if code in {KEY_KPENTER, KEY_ENTER}:
-        return KeypadEvent("send_list_field")
+        return KeypadEvent("keypad_enter")
     if code == KEY_KPMINUS:
-        return KeypadEvent("toggle_list_sign")
+        return KeypadEvent("keypad_sign")
     if code in {KEY_KPPLUS, KEY_SPACE}:
-        return KeypadEvent("edit_list_key", button_id="space")
-    if code in {KEY_KPDOT, KEY_BACKSPACE, KEY_DELETE}:
-        return KeypadEvent("edit_list_key", button_id="backspace")
+        return KeypadEvent("keypad_space")
+    if code == KEY_KPDOT:
+        return KeypadEvent("keypad_decimal")
+    if code in {KEY_BACKSPACE, KEY_DELETE}:
+        return KeypadEvent("keypad_backspace")
     if code == KEY_KPSLASH:
-        return KeypadEvent("step_list_field", delta=-1)
+        return KeypadEvent("keypad_step", delta=-1)
     if code == KEY_KPASTERISK:
-        return KeypadEvent("step_list_field", delta=1)
+        return KeypadEvent("keypad_step", delta=1)
     return None
 
 
