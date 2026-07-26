@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass
 
 import pigpio
+from shadowbox.keypad import NumericKeypadReader
 from shadowbox.touch import TouchLayout, TouchZoneReader, direct_action_for_point
 
 
@@ -82,6 +83,8 @@ class EncoderInput:
         self._touch_reader: TouchZoneReader | None = None
         self._touch_layout: TouchLayout | None = None
         self._touch_capture: tuple[str, int | None, str] | None = None
+        self._keypad_reader: NumericKeypadReader | None = None
+        self._init_keypad_reader()
 
         if self.input_kind in {"touch_zones", "touch_direct"}:
             self._init_touch_reader()
@@ -207,6 +210,17 @@ class EncoderInput:
             device=os.environ.get("SHADOWBOX_TOUCH_DEVICE") or None,
             width=_env_int("SHADOWBOX_TOUCH_WIDTH", 800),
             height=_env_int("SHADOWBOX_TOUCH_HEIGHT", 480),
+        )
+
+    def _init_keypad_reader(self) -> None:
+        keypad_device = os.environ.get("SHADOWBOX_KEYPAD_DEVICE", "").strip()
+        if not keypad_device:
+            return
+        auto_detect = keypad_device.lower() == "auto"
+        self._keypad_reader = NumericKeypadReader(
+            device=None if auto_detect else keypad_device,
+            auto_detect=auto_detect,
+            exclusive=_env_bool("SHADOWBOX_KEYPAD_EXCLUSIVE", True),
         )
 
     def set_touch_layout(self, layout: TouchLayout | None) -> None:
@@ -335,6 +349,15 @@ class EncoderInput:
     # --------------------------------------------------------
 
     def get_events(self) -> list[EncoderEvent]:
+        if self._keypad_reader is not None:
+            for event in self._keypad_reader.read_events():
+                self._events.append(
+                    EncoderEvent(
+                        kind=event.kind,
+                        delta=event.delta,
+                        button_id=event.button_id,
+                    )
+                )
         if self.input_kind == "touch_zones":
             if self._touch_reader is not None:
                 for sample in self._touch_reader.read_samples():
@@ -433,6 +456,8 @@ class EncoderInput:
             self._cb_b.cancel()
         if hasattr(self, "_touch_reader") and self._touch_reader is not None:
             self._touch_reader.close()
+        if hasattr(self, "_keypad_reader") and self._keypad_reader is not None:
+            self._keypad_reader.close()
         if hasattr(self, "_pi") and self._pi is not None:
             self._pi.stop()
 
@@ -449,6 +474,13 @@ def _env_float(name: str, default: float) -> float:
     if value is None or value == "":
         return default
     return float(value)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _env_optional_int(name: str, default: int | None) -> int | None:

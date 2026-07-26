@@ -204,6 +204,19 @@ Touch behavior:
 - `SEND` parses the complete draft and transmits one atomic OSC list
 - long press or back returns to the instance menu
 
+Optional USB numeric-keypad behavior:
+- `0..9` enter digits
+- numpad `+` enters a space
+- numpad `.` deletes one character
+- numpad `-` toggles the sign of the current token
+- numpad `Enter` sends the selected field
+- numpad `/` and `*` select the previous and next fields
+
+The keypad is configured with `SHADOWBOX_KEYPAD_DEVICE`. Shadowbox exclusively
+grabs the configured evdev device while running so its keys do not appear on
+the Linux console behind the framebuffer interface. These keypad events are
+ignored unless the ListSequencer surface is active.
+
 6. RNBO authoring guidelines
 
 For metadata-driven UI integration, the RNBO side should follow these rules:

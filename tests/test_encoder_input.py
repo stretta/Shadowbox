@@ -153,6 +153,34 @@ class EncoderInputTests(unittest.TestCase):
         self.assertEqual(encoder.input_kind, "waveshare_144_hat")
         encoder.close()
 
+    def test_optional_keypad_events_are_merged_with_primary_input(self) -> None:
+        keypad_event = types.SimpleNamespace(kind="edit_list_key", delta=0, button_id="7")
+
+        class _FakeKeypadReader:
+            def __init__(self, *args, **kwargs):
+                self.events = [keypad_event]
+                self.closed = False
+
+            def read_events(self):
+                events = self.events[:]
+                self.events.clear()
+                return events
+
+            def close(self):
+                self.closed = True
+
+        with (
+            mock.patch.dict(os.environ, {"SHADOWBOX_KEYPAD_DEVICE": "/dev/input/by-id/test-event-kbd"}, clear=False),
+            mock.patch.object(self.encoder_module, "NumericKeypadReader", _FakeKeypadReader),
+        ):
+            encoder = self.encoder_module.EncoderInput()
+
+        events = encoder.get_events()
+
+        self.assertEqual([(event.kind, event.button_id) for event in events], [("edit_list_key", "7")])
+        encoder.close()
+        self.assertTrue(encoder._keypad_reader.closed)
+
 
 if __name__ == "__main__":
     unittest.main()

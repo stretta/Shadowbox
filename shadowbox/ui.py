@@ -2603,6 +2603,8 @@ class ShadowboxUI:
             self._handle_list_sign()
         elif event.kind == "send_list_field":
             self._send_list_field()
+        elif event.kind == "step_list_field":
+            self._handle_list_field_step(event.delta)
         elif event.kind == "set_ttid_pc":
             self._handle_touch_ttid_pc(event.index)
         elif event.kind == "set_ttid_root":
@@ -2746,6 +2748,12 @@ class ShadowboxUI:
         if not self._list_surface_ready() or index is None:
             return
         self.state.surface_focus = max(0, min(len(FIELD_KEYS) - 1, int(index)))
+        self.request_render("list_field")
+
+    def _handle_list_field_step(self, delta: int) -> None:
+        if not self._list_surface_ready() or delta == 0:
+            return
+        self.state.surface_focus = self._cycle(self.state.surface_focus, len(FIELD_KEYS), int(delta))
         self.request_render("list_field")
 
     def _handle_list_key(self, key_value: str) -> None:

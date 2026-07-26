@@ -64,6 +64,12 @@ Module responsibilities:
 - Owns refresh timing, idle dim/sleep behavior, post-action refresh/restart flows, and live OSC state listener registration
 - Applies a shared base render cadence and a higher turbo cadence for screens that explicitly opt in through `ui.py`
 
+`keypad.py`
+- Optionally opens a configured USB keyboard event device alongside the primary encoder/touch input
+- Uses an exclusive evdev grab so numeric-keypad input does not leak to the Linux console behind the framebuffer UI
+- Emits only ListSequencer-specific semantic events; `ui.py` ignores them outside that instance surface
+- Reconnects after keypad unplug/replug without restarting Shadowbox
+
 Data flow:
 1. `rnbo.py` reads OSCQuery and produces a snapshot
 2. `ui.py` applies the snapshot and exposes derived state for navigation

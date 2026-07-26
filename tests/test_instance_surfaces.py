@@ -344,6 +344,20 @@ class InstanceSurfaceTests(unittest.TestCase):
         write = next(action for action in ui.pop_actions() if action.kind == "send_osc")
         self.assertEqual(write.value, [-60])
 
+    def test_list_sequencer_keypad_field_steps_are_surface_scoped(self):
+        ui = ShadowboxUI()
+        ui.handle_event(UIEvent("step_list_field", delta=1))
+        self.assertEqual(ui.state.surface_focus, 0)
+
+        ui.apply_runner_snapshot(_snapshot([_list_sequencer_instance()]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        ui.handle_event(UIEvent("step_list_field", delta=1))
+        self.assertEqual(ui.state.surface_focus, 1)
+        ui.handle_event(UIEvent("step_list_field", delta=-1))
+        self.assertEqual(ui.state.surface_focus, 0)
+
     def test_list_sequencer_steps_reject_non_binary_values(self):
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(_snapshot([_list_sequencer_instance()]))
