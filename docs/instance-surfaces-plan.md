@@ -15,6 +15,10 @@ The instance-surfaces plan is implemented:
 - Automated registry, lifecycle, navigation, touch, rendering, and cadence
   coverage
 
+The remainder of this document preserves the original phased design rationale.
+Future-tense phase text is historical; the current runtime contract is defined
+by `shadowbox/surfaces/`, `shadowbox/ui.py`, and the summary above.
+
 The Organ surface uses the live `wren` export contract: `Bass`, `Quint`,
 `Neutral`, `Octave`, `Nazard`, `Block-flute`, `Tierce`, `Larigot`, and
 `Sifflute` are continuous `-96..0 dB` parameters mapped to the canonical
@@ -64,6 +68,7 @@ Organ             -> organ
 AnalogSequencer   -> analog_sequencer
 TimeDomainScope   -> time_domain_scope
 Tuner             -> tuner
+ListSequencer     -> list_sequencer
 ```
 
 Resolution must use the instance's exported patcher `name`, not its mutable
@@ -124,6 +129,7 @@ shadowbox/surfaces/
     analog_sequencer.py
     time_domain_scope.py
     tuner.py
+    list_sequencer.py
 ```
 
 This should remain an internal API rather than becoming a general plug-in
@@ -391,6 +397,7 @@ Instance surfaces:
 - Analog Sequencer
 - Time Domain Scope
 - Tuner
+- ListSequencer
 
 Remove obsolete Scope, Tuner, and Analog Sequencer branches from generic
 `EDIT` only after their compatibility routes are no longer required.

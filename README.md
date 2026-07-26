@@ -17,7 +17,9 @@ It provides:
 - Startup discovery/status screen
 - Display interface for SSD1306, SSD1309, generic ST7789, Waveshare 1.44-inch LCD HAT, Waveshare 2-inch ST7789V, and Waveshare 5-inch DSI hardware
 - Rotary encoder or Waveshare HAT navigation
-- Custom parameter editors for `step16`, TTID, and pitch display metadata
+- Custom parameter editors for `step16` and TTID metadata
+- Contract-validated instance surfaces for Organ, AnalogSequencer, TimeDomainScope, Tuner, and ListSequencer
+- Optional USB numeric-keypad entry for ListSequencer fields and ordinary numeric parameters
 
 Shadowbox complements the RNBO Runner web interface by providing a minimal physical control surface.
 
@@ -29,6 +31,8 @@ Shadowbox complements the RNBO Runner web interface by providing a minimal physi
 - [docs/architecture.md](./docs/architecture.md): codebase and runtime structure
 - [docs/walkthrough.md](./docs/walkthrough.md): end-to-end RNBO-to-Shadowbox editor flow, including `step16`
 - [docs/wiring.md](./docs/wiring.md): encoder and display wiring reference
+- [docs/instance-surfaces-plan.md](./docs/instance-surfaces-plan.md): implemented instance-surface design and contract record
+- [docs/ui-performance-plan.md](./docs/ui-performance-plan.md): implemented responsiveness architecture and remaining hardware validation checklist
 
 ---
 
@@ -314,8 +318,11 @@ pip install -r requirements-dev.txt
 Run the test suite:
 
 ```
-python -m pytest
+python -m pytest -q tests
 ```
+
+Keep the explicit `tests` path on development machines. Repository-root pytest
+collection can also find Pi-only hardware scripts under `tools/`.
 
 Run a focused test file:
 
@@ -550,9 +557,9 @@ Display selection is controlled through environment variables. The service reads
 /etc/default/shadowbox
 ```
 
-All currently supported `/etc/default/shadowbox` settings:
+Common `/etc/default/shadowbox` settings:
 
-- General UI/runtime: `SHADOWBOX_POST_LOAD_VIEW`, `SHADOWBOX_TURBO_FPS`, `SHADOWBOX_BRICK_PANEL_FPS`, `SHADOWBOX_AUDIO_DEVICE_PRIORITY`
+- General UI/runtime: `SHADOWBOX_POST_LOAD_VIEW`, `SHADOWBOX_TURBO_FPS`, `SHADOWBOX_BRICK_PANEL_FPS`, `SHADOWBOX_RENDER_SCHEDULER`, `SHADOWBOX_PERF_LOG`, `SHADOWBOX_AUDIO_DEVICE_PRIORITY`, `SHADOWBOX_UPDATE_CHECK_ON_STARTUP`
 - Direct Ethernet rescue: `SHADOWBOX_DIRECT_ETHERNET_HELPER`, `SHADOWBOX_DIRECT_ETHERNET_IFACE`, `SHADOWBOX_DIRECT_ETHERNET_CIDR`
 - Idle/backlight: `SHADOWBOX_DIM_TIMEOUT`, `SHADOWBOX_SLEEP_TIMEOUT`, `SHADOWBOX_BRIGHTNESS_NORMAL`, `SHADOWBOX_BRIGHTNESS_DIM`
 - Encoder/buttons/touch/keypad: `SHADOWBOX_INPUT_KIND`, `SHADOWBOX_ENCODER_CLK`, `SHADOWBOX_ENCODER_DT`, `SHADOWBOX_ENCODER_SW`, `SHADOWBOX_BACK_BUTTON_PIN`, `SHADOWBOX_ENCODER_STEPS_PER_DETENT`, `SHADOWBOX_ENCODER_LONG_PRESS_SECONDS`, `SHADOWBOX_ENCODER_AB_GLITCH_US`, `SHADOWBOX_ENCODER_SW_GLITCH_US`, `SHADOWBOX_BACK_BUTTON_GLITCH_US`, `SHADOWBOX_ENCODER_ACCEL_FAST_SECONDS`, `SHADOWBOX_ENCODER_ACCEL_FAST_MULTIPLIER`, `SHADOWBOX_ENCODER_ACCEL_TURBO_SECONDS`, `SHADOWBOX_ENCODER_ACCEL_TURBO_MULTIPLIER`, `SHADOWBOX_HAT_JOY_UP`, `SHADOWBOX_HAT_JOY_DOWN`, `SHADOWBOX_HAT_JOY_LEFT`, `SHADOWBOX_HAT_JOY_RIGHT`, `SHADOWBOX_HAT_JOY_PRESS`, `SHADOWBOX_HAT_KEY1`, `SHADOWBOX_HAT_KEY2`, `SHADOWBOX_HAT_KEY3`, `SHADOWBOX_HAT_KEY1_ACTION`, `SHADOWBOX_HAT_KEY2_ACTION`, `SHADOWBOX_HAT_KEY3_ACTION`, `SHADOWBOX_TOUCH_DEVICE`, `SHADOWBOX_TOUCH_WIDTH`, `SHADOWBOX_TOUCH_HEIGHT`, `SHADOWBOX_KEYPAD_DEVICE`, `SHADOWBOX_KEYPAD_EXCLUSIVE`
@@ -598,7 +605,8 @@ SHADOWBOX_TURBO_FPS=40
 ```
 
 This is separate from the base UI frame rate and only applies to screens that
-explicitly opt in. Right now, Brick Panel is the only turbo-rendered screen.
+explicitly opt in. Brick Panel and animated instance surfaces such as
+AnalogSequencer, TimeDomainScope, and Tuner use capped animation cadences.
 For compatibility, the older `SHADOWBOX_BRICK_PANEL_FPS` name is still accepted
 as a fallback, but new configs should prefer `SHADOWBOX_TURBO_FPS`.
 
@@ -1001,8 +1009,11 @@ tools/deploy_pi.sh --alias pt4
 ```
 shadowbox/
 ├── assets/
+│   └── fonts/
 ├── docs/
 │   ├── architecture.md
+│   ├── instance-surfaces-plan.md
+│   ├── ui-performance-plan.md
 │   ├── uispec.md
 │   ├── walkthrough.md
 │   └── wiring.md
@@ -1016,37 +1027,34 @@ shadowbox/
 │   ├── __init__.py
 │   ├── brick_panel.py
 │   ├── data/
+│   ├── discovery.py
 │   ├── display/
 │   │   └── waveshare_5inch_dsi.py
 │   ├── editors/
 │   ├── encoder.py
+│   ├── keypad.py
 │   ├── midi_mappings.py
+│   ├── performance.py
+│   ├── render_scheduler.py
 │   ├── renderer.py
 │   ├── rnbo.py
 │   ├── shadowbox.py
+│   ├── surfaces/
 │   ├── touch.py
 │   ├── ui.py
 │   └── version.py
 ├── tests/
-│   ├── test_brick_panel.py
-│   ├── test_display_defaults.py
-│   ├── test_encoder_input.py
-│   ├── test_instance_actions.py
-│   ├── test_param_metadata.py
-│   ├── test_pitch_display.py
-│   ├── test_step16_renderer.py
-│   ├── test_tft_text.py
-│   ├── test_touch_direct_ui.py
-│   ├── test_touch_zones.py
-│   ├── test_ttid_renderer.py
-│   ├── test_waveshare_5inch_dsi.py
-│   └── test_version.py
+│   ├── test_instance_surfaces.py
+│   ├── test_keypad_input.py
+│   ├── test_ui_performance.py
+│   └── ...
 └── tools/
     ├── deploy_pi.sh
     ├── display_test.py
     ├── encoder_display_test.py
     ├── encoder_test.py
     ├── rnbo_runner_presets_to_maxsnap.py
+    ├── sample_ui_performance.py
     ├── st7789_raw_test.py
     ├── st7789_test.py
     ├── touch_raw_test.py

@@ -1,12 +1,30 @@
 # Shadowbox UI Performance Plan
 
+## Implementation status
+
+The runtime portions of this plan are implemented:
+
+- opt-in performance summaries through `SHADOWBOX_PERF_LOG`;
+- background Runner and network coordination in `shadowbox/discovery.py`;
+- dirty-state and mode-aware scheduling in `shadowbox/render_scheduler.py`;
+- bounded/cached scope rendering and duplicate-frame suppression for the DSI
+  framebuffer;
+- automated performance, discovery, scope, touch, and framebuffer coverage;
+- the `tools/sample_ui_performance.py` hardware measurement helper.
+
+`SHADOWBOX_RENDER_SCHEDULER=legacy|dirty` remains available for rollout and
+diagnostics, with `dirty` as the default. The hardware targets and soak steps
+below remain a validation checklist rather than a claim about every supported
+device. The remainder of this document preserves the original phased design
+rationale, so its future-tense implementation language is historical.
+
 ## Purpose
 
 This plan addresses the sustained CPU load and periodic responsiveness stalls observed on the 800x480 Waveshare DSI Shadowbox UI. The work should preserve live editor behavior while removing blocking discovery from the UI thread and avoiding unnecessary full-frame rendering.
 
 The implementation should be delivered as narrow, independently reversible commits: measure first, separate discovery domains, add render invalidation, optimize live editors, and then validate on hardware.
 
-## Current behavior and diagnosis
+## Original behavior and diagnosis
 
 - `shadowbox/shadowbox.py` runs periodic discovery every three seconds.
 - `RNBOClient.discover()` builds a full snapshot, and `discover_system()` calls `discover_host_network()`.

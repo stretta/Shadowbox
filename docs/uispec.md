@@ -1,4 +1,4 @@
-Shadowbox UI Specification (draft)
+Shadowbox UI Specification
 
 1. Purpose
 
@@ -95,7 +95,9 @@ OUTPUTS
 SYSTEM
 STATUS
 AUDIO
+STARTUP
 NETWORK
+UPDATE
 ABOUT
 MAINT
 

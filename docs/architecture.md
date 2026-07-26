@@ -57,12 +57,25 @@ Module responsibilities:
   - system audio/status information
 - May also provide a small curated set of host-level `SYSTEM` data when that information is not instance-owned and is outside the published OSCQuery tree
 
+`discovery.py`
+- Runs Runner and network discovery outside the input/render loop
+- Coalesces duplicate requests, rejects stale results, and preserves the last good UI snapshot after transient failures
+- Keeps WiFi listing and rescan work separate from ordinary Runner discovery
+
 `shadowbox.py`
 - Runtime coordinator
 - Wires hardware input, UI state machine, renderer, and RNBO client together
 - Executes UI actions against RNBO
 - Owns refresh timing, idle dim/sleep behavior, post-action refresh/restart flows, and live OSC state listener registration
-- Applies a shared base render cadence and a higher turbo cadence for screens that explicitly opt in through `ui.py`
+- Applies discovery results on the main thread and drives dirty-state rendering
+
+`render_scheduler.py`
+- Skips unchanged static frames
+- Coalesces burst updates and caps animation-heavy screens at their declared frame rates
+- Retains `legacy` scheduling as an explicit rollout/diagnostic mode
+
+`performance.py`
+- Provides opt-in, low-rate timing and event summaries through `SHADOWBOX_PERF_LOG`
 
 `keypad.py`
 - Optionally opens a configured USB keyboard event device alongside the primary encoder/touch input
@@ -71,13 +84,14 @@ Module responsibilities:
 - Reconnects after keypad unplug/replug without restarting Shadowbox
 
 Data flow:
-1. `rnbo.py` reads OSCQuery and produces a snapshot
-2. `ui.py` applies the snapshot and exposes derived state for navigation
-3. `renderer.py` draws the current UI state
-4. User input is converted into UI events by `encoder.py`
+1. `discovery.py` runs `rnbo.py` discovery work in background workers
+2. `shadowbox.py` applies completed, current-generation results on the main thread
+3. `ui.py` exposes derived state for navigation and requests a render when visible state changes
+4. User input is converted into UI events by `encoder.py` and optional `keypad.py`
 5. `ui.py` turns those events into UI actions
 6. `shadowbox.py` executes those actions via `rnbo.py`
-7. The app refreshes discovery as needed and repeats
+7. `renderer.py` draws only when `render_scheduler.py` determines a dirty or animated frame is due
+8. Live OSC state updates enter the same UI cache and render-invalidation path
 
 Design rules:
 - OSCQuery is the source of truth for instance-scoped runtime structure

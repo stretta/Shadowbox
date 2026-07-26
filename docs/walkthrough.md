@@ -139,7 +139,10 @@ This allows editors such as `step16` to update their runtime display without wai
 
 5a. Tuner instance-surface contract
 
-The `pitch_display` editor is a live viewer for two runtime state values, typically note name/number and pitch deviation in cents.
+The Tuner instance surface is a live viewer for two runtime state values,
+typically note name/number and pitch deviation in cents. `pitch_display`
+metadata is retained as an optional binding hint; it no longer dispatches a
+parameter editor.
 
 Expected published structure:
 - viewer param: `/rnbo/inst/<id>/params/<name>`
@@ -159,7 +162,11 @@ Shadowbox behavior:
 
 5b. Time Domain Scope instance-surface contract
 
-The `scope` editor is a live oscilloscope-style viewer for scalar amplitude samples. It is intended for a parameter such as `SamplingRate` tagged with scope metadata, so turning the encoder adjusts that parameter while the waveform remains visible.
+The TimeDomainScope instance surface is a live oscilloscope-style viewer for
+scalar amplitude samples. It uses a parameter such as `SamplingRate` tagged
+with scope metadata as its editable binding, so turning the encoder adjusts
+that parameter while the waveform remains visible. The metadata no longer
+dispatches a parameter editor.
 
 Expected published structure:
 - editable sample-rate param: `/rnbo/inst/<id>/params/SamplingRate`
@@ -249,8 +256,12 @@ For the tuner-style pitch display, the recommended split is:
 8. Relevant files
 
 - `shadowbox/rnbo.py`: OSCQuery discovery and metadata parsing
+- `shadowbox/discovery.py`: background discovery coordination
 - `shadowbox/ui.py`: UI state machine and editor behavior
 - `shadowbox/renderer.py`: visual rendering
+- `shadowbox/render_scheduler.py`: dirty-state and per-surface frame scheduling
 - `shadowbox/shadowbox.py`: runtime loop, refresh logic, and live OSC listener
+- `shadowbox/keypad.py`: optional USB numeric-keypad input
+- `shadowbox/surfaces/`: instance-surface registry and contract resolvers
 - `shadowbox/editors/step16.py`: `step16` editor logic
 - `docs/uispec.md`: UI behavior and editor rules
