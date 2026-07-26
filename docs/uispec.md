@@ -123,6 +123,9 @@ Rules:
 - ListSequencer renders those fields as single-line, full-height values prefixed by `Stp`, `Stp2`, `Rot`, `Rot2`, `Oct`, `Vel`, and `Dur`
 - ListSequencer uses a compact `1..9 / SPC 0 DEL` keypad, a contextual sign control for signed fields, and an explicit `SEND` action so incomplete multi-digit entries are never transmitted
 - ListSequencer hydrates fields through matching `<InportName>Ack` outports after sending the export's `-999` read request; ACK state is not represented as a parameter
+- The ListVelSequencer surface binds eight ordered velocity-list rows to `1row` through `8row`, requires the corresponding `1map` through `8map` pitch parameters, and shows each row's current pitch beside its row number
+- ListVelSequencer uses the same compact keypad and ACK-backed `-999` hydration pattern as ListSequencer; `SEND ROW` transmits only the selected row as one atomic list and accepts MIDI velocity values from `0` through `127`
+- ListVelSequencer pitch maps remain ordinary parameters under `PARAMETERS`; the instance surface displays their live values for row context without synthesizing another pitch editor
 - `ADD INSTANCE` should appear in the `INSTANCES` menu only if the backend exposes a supported command path for creating an instance from a patcher
 - `SYSTEM` is always present
 - Outside `SYSTEM`, only published branches appear; empty branches may render as empty lists, but no synthetic content should be added

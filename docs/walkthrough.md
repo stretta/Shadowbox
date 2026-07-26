@@ -81,6 +81,7 @@ Current registered instance exports:
 - `TimeDomainScope`
 - `Tuner`
 - `ListSequencer`
+- `ListVelSequencer`
 
 The current Organ export on `wren` publishes continuous `-96..0 dB` tonewheel
 controls. The Organ surface maps `-96 dB` to the top/off position and `0 dB`
@@ -223,7 +224,27 @@ Optional USB numeric-keypad behavior:
 The keypad is configured with `SHADOWBOX_KEYPAD_DEVICE`. Shadowbox exclusively
 grabs the configured evdev device while running so its keys do not appear on
 the Linux console behind the framebuffer interface. Outside ListSequencer,
-these keypad events are ignored except by the regular numeric parameter editor.
+ListVelSequencer, and the regular numeric parameter editor, these keypad events
+are ignored.
+
+5d. ListVelSequencer instance-surface contract
+
+`ListVelSequencer` publishes eight velocity lists as OSC message inports
+`1row` through `8row`, with matching `1rowAck` through `8rowAck` state
+outports. Each row also publishes a `1map` through `8map` parameter that maps
+the row to a MIDI pitch.
+
+The surface presents eight selectable rows using the ListSequencer list-entry
+model. Each row label includes its current pitch-map value, while the editable
+draft contains that row's velocity sequence. On entry, Shadowbox sends
+`[-999]` to all eight row inports and hydrates clean drafts from their ACK
+values. `SEND ROW` sends only the selected velocity list and rejects values
+outside `0..127`. Pitch maps remain editable through the ordinary
+`PARAMETERS` menu.
+
+The compact touch keypad and optional USB numeric keypad use the same digit,
+space, delete, send, and row-selection behavior as ListSequencer. ListVel rows
+are unsigned and therefore do not expose the contextual sign control.
 
 In the regular numeric parameter editor, the same keypad provides direct value
 entry. Digits begin a fresh draft, numpad `.` enters a decimal point, Backspace

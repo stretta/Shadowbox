@@ -11,6 +11,7 @@ The instance-surfaces plan is implemented:
 - Time Domain Scope and Tuner instance-surface migrations
 - Contract-driven 16-stage Analog Sequencer surface
 - OSC-inport-driven ListSequencer surface with ACK readback
+- Eight-row ListVelSequencer surface with pitch-map context and ACK readback
 - Removal of the obsolete Scope and Tuner parameter-editor dispatch routes
 - Automated registry, lifecycle, navigation, touch, rendering, and cadence
   coverage

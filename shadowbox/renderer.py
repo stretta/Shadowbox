@@ -15,6 +15,7 @@ from shadowbox.editors.step16 import build_cells, is_step16_param
 from shadowbox.editors.ttid import get_root_names, is_pc_on, is_ttid_param, note_name
 from shadowbox.rnbo import RNBO_HOST
 from shadowbox.surfaces.list_sequencer import FIELD_KEYS, FIELD_LABELS, FIELD_SHORT_LABELS, SIGNED_FIELD_KEYS
+from shadowbox.surfaces.list_vel_sequencer import ROW_KEYS, ROW_LABELS
 from shadowbox.surfaces.organ import FOOTAGE_COLORS, FOOTAGES
 from shadowbox.touch import TouchLayout, TouchSample
 from shadowbox.ui import (
@@ -3420,17 +3421,60 @@ class ShadowboxRenderer:
         if key == "list_sequencer":
             self.draw_list_sequencer_surface(ui, state)
             return
+        if key == "list_vel_sequencer":
+            self.draw_list_vel_sequencer_surface(ui, state)
+            return
         self.text_center("surface unavailable", self.edit_content_top(8))
 
     def draw_list_sequencer_surface(self, ui, state) -> None:
-        focus = max(0, min(len(FIELD_KEYS) - 1, int(state.surface_focus)))
+        self._draw_list_surface(
+            ui,
+            state,
+            keys=FIELD_KEYS,
+            labels=FIELD_LABELS,
+            short_labels=FIELD_SHORT_LABELS,
+            signed_keys=SIGNED_FIELD_KEYS,
+            send_label="SEND",
+        )
+
+    def draw_list_vel_sequencer_surface(self, ui, state) -> None:
+        short_labels = {}
+        labels = {}
+        for key in ROW_KEYS:
+            row = ROW_LABELS[key]
+            param = ui.surface_param_binding(f"{key}_map")
+            pitch = format_display_value(param.get("value"), integer_style=True) if param is not None else "-"
+            short_labels[key] = f"{row}:{pitch}"
+            labels[key] = f"Row {row} · Pitch {pitch}"
+        self._draw_list_surface(
+            ui,
+            state,
+            keys=ROW_KEYS,
+            labels=labels,
+            short_labels=short_labels,
+            signed_keys=frozenset(),
+            send_label="SEND ROW",
+        )
+
+    def _draw_list_surface(
+        self,
+        ui,
+        state,
+        *,
+        keys,
+        labels,
+        short_labels,
+        signed_keys,
+        send_label: str,
+    ) -> None:
+        focus = max(0, min(len(keys) - 1, int(state.surface_focus)))
         drafts = state.surface_state.get("drafts", {})
         if not isinstance(drafts, dict):
             drafts = {}
 
         if not self.touch_layout_enabled:
-            key = FIELD_KEYS[focus]
-            label = FIELD_LABELS[key]
+            key = keys[focus]
+            label = labels[key]
             draft = str(drafts.get(key, "")) or "-"
             self.text_center(shorten(label, 20), self.edit_content_top(32))
             self.text_center(shorten(draft, 20), self.edit_content_top(32) + 18)
@@ -3441,12 +3485,12 @@ class ShadowboxRenderer:
         fields_x = 24
         fields_w = 420
         fields_gap = 4
-        field_h = max(38, (content_h - fields_gap * (len(FIELD_KEYS) - 1)) // len(FIELD_KEYS))
+        field_h = max(38, (content_h - fields_gap * (len(keys) - 1)) // len(keys))
         label_col_w = 72
         keypad_x = fields_x + fields_w + 24
         keypad_w = self.display.width - keypad_x - 24
 
-        for index, key in enumerate(FIELD_KEYS):
+        for index, key in enumerate(keys):
             y = content_y + index * (field_h + fields_gap)
             selected = index == focus
             if self.has_color:
@@ -3462,9 +3506,9 @@ class ShadowboxRenderer:
                 field_h,
                 action_kind="select_list_field",
                 index=index,
-                label=FIELD_SHORT_LABELS[key],
+                label=short_labels[key],
             )
-            label = FIELD_SHORT_LABELS[key]
+            label = short_labels[key]
             label_h = self._measure_text(label, 2, "medium")[1]
             label_y = y + max(0, (field_h - label_h) // 2)
             value_y = label_y
@@ -3509,8 +3553,8 @@ class ShadowboxRenderer:
                 self._text_theme(label, x + max(0, (key_w - text_w) // 2), y + max(0, (key_h - text_h) // 2), "text", 2, "medium")
 
         action_y = content_y + 4 * (key_h + gap)
-        selected_key = FIELD_KEYS[focus]
-        if selected_key in SIGNED_FIELD_KEYS:
+        selected_key = keys[focus]
+        if selected_key in signed_keys:
             sign_w = key_w
             if self.has_color:
                 self._rounded_theme(keypad_x, action_y, sign_w, action_h, 10, "panel", True)
@@ -3548,10 +3592,10 @@ class ShadowboxRenderer:
             action_h,
             action_kind="send_list_field",
             button_id="send",
-            label="SEND",
+            label=send_label,
         )
-        send_text_w, send_text_h = self._measure_text("SEND", 2, "medium")
-        self._text_theme("SEND", send_x + max(0, (send_w - send_text_w) // 2), action_y + max(0, (action_h - send_text_h) // 2), "text", 2, "medium")
+        send_text_w, send_text_h = self._measure_text(send_label, 2, "medium")
+        self._text_theme(send_label, send_x + max(0, (send_w - send_text_w) // 2), action_y + max(0, (action_h - send_text_h) // 2), "text", 2, "medium")
 
     def draw_organ_surface(self, ui, state) -> None:
         labels = {

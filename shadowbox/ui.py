@@ -42,6 +42,7 @@ from shadowbox.editors.step16 import (
 from shadowbox.rnbo import RNBO_HOST, RNBO_PORT
 from shadowbox.surfaces import resolve_instance_surface, surface_spec_for_key
 from shadowbox.surfaces.list_sequencer import FIELD_KEYS, SIGNED_FIELD_KEYS, format_list_value
+from shadowbox.surfaces.list_vel_sequencer import ROW_KEYS
 from shadowbox.surfaces.organ import FOOTAGES
 
 
@@ -706,10 +707,10 @@ class ShadowboxUI:
                 anchor = active[1].params.get("sample_rate")
                 if anchor is not None:
                     self.state.edit_value = normalize_current_value_for_edit(anchor)
-            elif self.state.active_surface_key == "list_sequencer":
+            elif self.state.active_surface_key in {"list_sequencer", "list_vel_sequencer"}:
                 drafts = self._list_surface_drafts()
                 dirty = self.state.surface_state.get("dirty", {})
-                for key in FIELD_KEYS:
+                for key in self._list_surface_keys():
                     ack = active[1].state.get(f"{key}_ack")
                     if ack is not None and not (isinstance(dirty, dict) and dirty.get(key)):
                         drafts[key] = format_list_value(ack.get("value"))
@@ -763,7 +764,7 @@ class ShadowboxUI:
                         active = self.active_instance_surface
                         dirty = self.state.surface_state.get("dirty", {})
                         if active is not None:
-                            for key in FIELD_KEYS:
+                            for key in self._list_surface_keys():
                                 if active[1].state.get(f"{key}_ack") is item:
                                     if not (isinstance(dirty, dict) and dirty.get(key)):
                                         self._list_surface_drafts()[key] = format_list_value(value)
@@ -1790,9 +1791,10 @@ class ShadowboxUI:
             samples = resolved.state.get("samples")
             self.state.edit_value = normalize_current_value_for_edit(anchor) if anchor else None
             self.state.edit_scope_samples = normalize_scope_samples(samples.get("value") if samples else None)
-        elif spec.key == "list_sequencer":
+        elif spec.key in {"list_sequencer", "list_vel_sequencer"}:
             drafts = {}
-            for key in FIELD_KEYS:
+            keys = FIELD_KEYS if spec.key == "list_sequencer" else ROW_KEYS
+            for key in keys:
                 ack = resolved.state.get(f"{key}_ack")
                 drafts[key] = format_list_value(ack.get("value")) if ack else ""
             self.state.surface_state.update({"drafts": drafts, "dirty": {}})
@@ -2767,13 +2769,22 @@ class ShadowboxUI:
         self.request_render("surface_toggle")
 
     def _list_surface_ready(self) -> bool:
-        return self.state.ui_mode == "INSTANCE_SURFACE" and self.state.active_surface_key == "list_sequencer"
+        return (
+            self.state.ui_mode == "INSTANCE_SURFACE"
+            and self.state.active_surface_key in {"list_sequencer", "list_vel_sequencer"}
+        )
+
+    def _list_surface_keys(self) -> tuple[str, ...]:
+        if self.state.active_surface_key == "list_vel_sequencer":
+            return ROW_KEYS
+        return FIELD_KEYS
 
     def _list_surface_key(self) -> str | None:
         if not self._list_surface_ready():
             return None
-        focus = max(0, min(len(FIELD_KEYS) - 1, int(self.state.surface_focus)))
-        return FIELD_KEYS[focus]
+        keys = self._list_surface_keys()
+        focus = max(0, min(len(keys) - 1, int(self.state.surface_focus)))
+        return keys[focus]
 
     def _list_surface_drafts(self) -> dict[str, str]:
         drafts = self.state.surface_state.setdefault("drafts", {})
@@ -2787,13 +2798,14 @@ class ShadowboxUI:
     def _handle_list_field_select(self, index: int | None) -> None:
         if not self._list_surface_ready() or index is None:
             return
-        self.state.surface_focus = max(0, min(len(FIELD_KEYS) - 1, int(index)))
+        keys = self._list_surface_keys()
+        self.state.surface_focus = max(0, min(len(keys) - 1, int(index)))
         self.request_render("list_field")
 
     def _handle_list_field_step(self, delta: int) -> None:
         if not self._list_surface_ready() or delta == 0:
             return
-        self.state.surface_focus = self._cycle(self.state.surface_focus, len(FIELD_KEYS), int(delta))
+        self.state.surface_focus = self._cycle(self.state.surface_focus, len(self._list_surface_keys()), int(delta))
         self.request_render("list_field")
 
     def _numeric_keypad_param(self) -> dict | None:
@@ -2942,6 +2954,8 @@ class ShadowboxUI:
             return None
         values = [int(token) for token in tokens]
         if field_key in {"steps", "steps_secondary"} and any(value not in {0, 1} for value in values):
+            return None
+        if self.state.active_surface_key == "list_vel_sequencer" and any(value < 0 or value > 127 for value in values):
             return None
         return values
 
@@ -3572,8 +3586,8 @@ class ShadowboxUI:
                         self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
                 else:
                     self.state.surface_focus = self._cycle(self.state.surface_focus, 16, step)
-            elif self.state.active_surface_key == "list_sequencer":
-                self.state.surface_focus = self._cycle(self.state.surface_focus, len(FIELD_KEYS), step)
+            elif self.state.active_surface_key in {"list_sequencer", "list_vel_sequencer"}:
+                self.state.surface_focus = self._cycle(self.state.surface_focus, len(self._list_surface_keys()), step)
         elif self.state.ui_mode == "REMOVE_INSTANCE_CONFIRM":
             self.state.remove_instance_confirm_cursor = self._cycle(self.state.remove_instance_confirm_cursor, len(REMOVE_INSTANCE_CONFIRM_ITEMS), step)
         elif self.state.ui_mode == "PRESET_LIST":
@@ -4208,7 +4222,7 @@ class ShadowboxUI:
         elif self.state.ui_mode == "INSTANCE_SURFACE":
             if self.state.active_surface_key in {"organ", "analog_sequencer"}:
                 self.state.surface_state["adjusting"] = not bool(self.state.surface_state.get("adjusting"))
-            elif self.state.active_surface_key == "list_sequencer":
+            elif self.state.active_surface_key in {"list_sequencer", "list_vel_sequencer"}:
                 self._send_list_field()
             else:
                 self._exit_instance_surface()

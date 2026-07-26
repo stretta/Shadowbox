@@ -15,6 +15,7 @@ from shadowbox.render_scheduler import RenderScheduler
 from shadowbox.renderer import ShadowboxRenderer
 from shadowbox.surfaces import resolve_instance_surface
 from shadowbox.surfaces.list_sequencer import FIELD_KEYS
+from shadowbox.surfaces.list_vel_sequencer import ROW_KEYS
 from shadowbox.surfaces.organ import FOOTAGES
 from shadowbox.touch import TouchLayout
 from shadowbox.ui import ShadowboxUI, UIEvent
@@ -123,6 +124,24 @@ def _list_sequencer_instance():
         "params": [],
         "inputs": [_list_input(name) for name in names],
         "state": [_state(f"{name}Ack", [0.0, 1.0] if name == "Steps" else [1.0, 2.0]) for name in names],
+    }
+
+
+def _list_vel_sequencer_instance():
+    names = [f"{row}row" for row in range(1, 9)]
+    return {
+        "id": "7",
+        "name": "ListVelSequencer",
+        "label": "VELOCITIES",
+        "params": [
+            _param(f"{row}map", value=float(35 + row), minimum=0.0, maximum=127.0)
+            for row in range(1, 9)
+        ],
+        "inputs": [_list_input(name) for name in names],
+        "state": [
+            _state(f"{name}Ack", [40.0, 80.0] if name == "1row" else [64.0])
+            for name in names
+        ],
     }
 
 
@@ -461,6 +480,100 @@ class InstanceSurfaceTests(unittest.TestCase):
         signs = [target for target in renderer.touch_layout.targets if target.kind == "list_sign"]
         self.assertEqual(len(signs), 1)
         self.assertEqual(signs[0].action_kind, "toggle_list_sign")
+
+    def test_list_vel_sequencer_resolves_rows_maps_and_ack_state(self):
+        resolved = resolve_instance_surface(_list_vel_sequencer_instance())
+
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved[0].key, "list_vel_sequencer")
+        self.assertEqual(tuple(resolved[1].inputs), ROW_KEYS)
+        self.assertEqual(resolved[1].params["row_4_map"]["name"], "4map")
+        self.assertEqual(resolved[1].state["row_8_ack"]["name"], "8rowAck")
+
+    def test_list_vel_sequencer_accepts_legacy_misspelled_fourth_row(self):
+        instance = _list_vel_sequencer_instance()
+        fourth = instance["inputs"][3]
+        fourth["name"] = "4ow"
+        fourth["path"] = "/rnbo/inst/7/messages/in/4ow"
+
+        resolved = resolve_instance_surface(instance)
+
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved[1].inputs["row_4"]["name"], "4ow")
+
+    def test_list_vel_sequencer_open_reads_rows_and_hydrates_drafts(self):
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(_snapshot([_list_vel_sequencer_instance()]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+
+        ui.handle_event(UIEvent("short_press"))
+
+        self.assertEqual(ui.state.active_surface_key, "list_vel_sequencer")
+        self.assertEqual(ui.state.surface_state["drafts"]["row_1"], "40 80")
+        reads = [action for action in ui.pop_actions() if action.kind == "send_osc"]
+        self.assertEqual(len(reads), len(ROW_KEYS))
+        self.assertTrue(all(action.value == [-999] for action in reads))
+
+    def test_list_vel_sequencer_sends_selected_velocity_row(self):
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(_snapshot([_list_vel_sequencer_instance()]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        ui.pop_actions()
+        ui.handle_event(UIEvent("select_list_field", index=2))
+        ui.state.surface_state["drafts"]["row_3"] = "24 48 96"
+
+        ui.handle_event(UIEvent("send_list_field"))
+
+        write = next(action for action in ui.pop_actions() if action.kind == "send_osc")
+        self.assertEqual(write.path, "/rnbo/inst/7/messages/in/3row")
+        self.assertEqual(write.value, [24, 48, 96])
+
+    def test_list_vel_sequencer_rejects_velocity_outside_midi_range(self):
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(_snapshot([_list_vel_sequencer_instance()]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        ui.pop_actions()
+        ui.state.surface_state["drafts"]["row_1"] = "64 128"
+
+        ui.handle_event(UIEvent("send_list_field"))
+
+        self.assertEqual([action for action in ui.pop_actions() if action.kind == "send_osc"], [])
+        self.assertEqual(ui.state.status_message, "INVALID LIST")
+
+    def test_list_vel_sequencer_surface_renders_eight_rows_with_pitch_maps(self):
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(_snapshot([_list_vel_sequencer_instance()]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        renderer = ShadowboxRenderer(_SurfaceDisplay())
+        renderer.set_touch_mode(True)
+
+        renderer.draw(ui)
+
+        rows = [target for target in renderer.touch_layout.targets if target.kind == "list_field"]
+        keys = [target for target in renderer.touch_layout.targets if target.kind == "list_key"]
+        sends = [target for target in renderer.touch_layout.targets if target.kind == "list_send"]
+        self.assertEqual(len(rows), 8)
+        self.assertEqual(len(keys), 12)
+        self.assertEqual(len(sends), 1)
+        self.assertEqual([target.label for target in rows], [
+            "1:36",
+            "2:37",
+            "3:38",
+            "4:39",
+            "5:40",
+            "6:41",
+            "7:42",
+            "8:43",
+        ])
+        self.assertEqual(sends[0].label, "SEND ROW")
+        self.assertFalse(any(target.kind == "list_sign" for target in renderer.touch_layout.targets))
 
     def test_analog_touch_updates_stage_and_toggle(self):
         ui = ShadowboxUI()
