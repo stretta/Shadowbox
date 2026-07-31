@@ -433,6 +433,7 @@ Unlike instance browsing and editing, `SYSTEM` may include a tightly scoped set 
 Initial system areas:
 - status
 - audio device selection
+- standalone chromatic/scalar transpose coordination and designated MIDI controller selection
 - network status, WiFi network selection, and direct Ethernet rescue setup
 - software update status and a fast-forward update action for git checkouts
 - about screen
@@ -443,6 +444,9 @@ Rules:
 - Per-instance structure, lifecycle, parameters, instance presets, and routing remain OSCQuery/published-command driven
 - Non-OSCQuery `SYSTEM` entries must be explicitly chosen product features, not a generic escape hatch for backend gaps
 - Host-derived `SYSTEM` data should stay read-only unless there is a deliberately integrated control path for that feature
+- `TRANSPOSE` must begin unconfigured on installations without saved authority; only explicit `LOCAL` authority may retain and fan out canonical device-local offsets
+- `SHADOWSCORE` transpose authority must never fall back automatically to local authority after connectivity loss
+- designated transpose MIDI input is a sidecar control path centered on MIDI note 60 and must not relay normal performance MIDI
 - `NETWORK` may include a local `DIRECT ETHERNET SETUP` action that manages a fixed fallback address on `eth0` for headless recovery
 - Direct Ethernet setup must be tightly scoped: touch only the configured Ethernet interface and only the configured fallback subnet
 - `UPDATE` may check the checkout's configured upstream branch and run only a fast-forward update path; dirty or diverged local checkouts must not be applied from the unit UI

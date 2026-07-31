@@ -14,6 +14,7 @@ sys.modules.setdefault("pythonosc.udp_client", udp_client_module)
 from shadowbox.renderer import ShadowboxRenderer
 from shadowbox.rnbo import RNBO_PORT, RNBOSnapshot
 from shadowbox.ui import MenuRow, ShadowboxUI
+from shadowbox.transpose_control import MidiInputPort, ROLE_CHROMATIC, ROLE_SCALAR
 
 
 class _FakeDisplay:
@@ -1836,6 +1837,77 @@ class InstanceActionTests(unittest.TestCase):
                 ("/rnbo/inst/control/sets/initial", ""),
             ],
         )
+
+    def test_system_transpose_menu_opens_local_control_screen(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.ui_mode = "SYSTEM_MENU"
+        ui.state.system_cursor = ui.system_menu_items.index("TRANSPOSE") + 1
+
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+
+        self.assertEqual(ui.state.ui_mode, "SYSTEM_TRANSPOSE")
+        self.assertEqual(ui.state.transpose_cursor, 2)
+        self.assertEqual(ui.transpose_rows[0].value, "UNCONFIGURED")
+
+    def test_designated_midi_note_sets_absolute_offset_and_source(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.transpose_authority = "standalone"
+        ui.state.transpose_controller_role = ROLE_CHROMATIC
+
+        self.assertTrue(ui.apply_transpose_midi_note(60, "KeyStep 37"))
+        self.assertEqual(ui.state.transpose_chromatic, 0)
+        actions = [action for action in ui.pop_actions() if action.kind != "save_state"]
+        self.assertEqual([(action.kind, action.path, action.value) for action in actions], [("set_transpose", ROLE_CHROMATIC, 0)])
+        self.assertEqual(ui.state.transpose_last_source, "MIDI KeyStep 37")
+
+        self.assertTrue(ui.apply_transpose_midi_note(57, "KeyStep 37"))
+        self.assertEqual(ui.state.transpose_chromatic, -3)
+
+    def test_controller_and_role_pickers_store_stable_device_identity(self) -> None:
+        ui = ShadowboxUI()
+        device = MidiInputPort("KeyStep 37", "KeyStep 37 MIDI 1", "24:0")
+        ui.set_transpose_devices([device], "")
+        ui.state.ui_mode = "SYSTEM_TRANSPOSE_CONTROLLER"
+        ui.state.transpose_controller_cursor = 2
+
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+
+        self.assertEqual(ui.state.transpose_controller_identity, device.identity)
+        actions = ui.pop_actions()
+        self.assertTrue(any(action.kind == "configure_transpose_midi" and action.value == device.identity for action in actions))
+
+        ui.state.ui_mode = "SYSTEM_TRANSPOSE_ROLE"
+        ui.state.transpose_role_cursor = 3
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+        self.assertEqual(ui.state.transpose_controller_role, ROLE_SCALAR)
+
+    def test_transpose_edit_uses_common_published_target_range(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.transpose_authority = "standalone"
+        ui.state.instances = [
+            {"id": "1", "params": [{"name": "ChromaticTranspose", "path": "/a", "value": 0, "min": -12, "max": 12}]},
+            {"id": "2", "params": [{"name": "ChromaticTranspose", "path": "/b", "value": 0, "min": -7, "max": 7}]},
+        ]
+        ui.state.ui_mode = "SYSTEM_TRANSPOSE_EDIT"
+        ui.state.transpose_edit_role = ROLE_CHROMATIC
+        ui.state.edit_value = 7
+
+        ui.handle_event(type("Evt", (), {"kind": "step", "delta": 1})())
+
+        self.assertEqual(ui.state.transpose_chromatic, 7)
+        self.assertEqual(ui.state.edit_value, 7)
+
+    def test_transpose_requires_explicit_local_authority(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.transpose_controller_role = ROLE_CHROMATIC
+
+        self.assertFalse(ui.apply_transpose_midi_note(64, "KeyStep 37"))
+        self.assertEqual(ui.state.transpose_chromatic, 0)
+        self.assertFalse(any(action.kind == "set_transpose" for action in ui.pop_actions()))
+
+        self.assertTrue(ui.set_transpose_authority("standalone"))
+        self.assertTrue(ui.apply_transpose_midi_note(64, "KeyStep 37"))
+        self.assertEqual(ui.state.transpose_chromatic, 4)
 
 
 if __name__ == "__main__":

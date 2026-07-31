@@ -96,6 +96,8 @@ https://www.adafruit.com/product/4484
 - Direct Ethernet rescue setup with a fixed fallback IP on `eth0`
 - Audio device switching
 - JACK restart
+- Standalone chromatic/scalar transpose coordination across compatible RNBO instances
+- Designated ALSA MIDI note controllers with middle C as neutral transpose
 - Saved top-level cursor and audio-device selection in `~/rnbo-ui/shadowbox_state.json`
 
 Shadowbox treats the published live OSCQuery runtime tree as the source of truth.
@@ -104,6 +106,29 @@ Set load/save/startup behavior is executed only through Runner-published set and
 A curated `NEW SET` action is acceptable when it maps directly to the published set load path using a verified backend template.
 The `SYSTEM -> NETWORK` screen also includes WiFi network selection and a local direct-Ethernet setup action that can assign a predictable fallback IP for headless rescue connections.
 The WiFi chooser uses NetworkManager's `nmcli` when available, connects saved profiles directly, opens an on-device password editor for first-time secured networks, and includes a `RESCAN` row for intentionally refreshing the access-point list.
+
+`SYSTEM -> TRANSPOSE` coordinates the standardized RNBO parameters
+`ChromaticTranspose` and `ScalarTranspose`. Authority is initially
+`UNCONFIGURED` on upgraded installations so Shadowbox cannot silently compete
+with ShadowScore. Select `LOCAL` explicitly for standalone operation;
+`SHADOWSCORE` records managed intent without enabling a competing local
+fanout. In local mode, Shadowbox retains both offsets, applies them once to new
+compatible instances, and reports mixed target state without continually
+rewriting direct external edits.
+
+A connected ALSA MIDI input can be designated as `None`, `Chromatic
+Transpose`, or `Scalar Transpose`. Note-on pitch selects an absolute offset:
+middle C (MIDI note 60) is `0`, note 61 is `+1`, and note 59 is `-1`.
+Velocity is ignored and note-off does not change the latched value. The reader
+is a sidecar control input; ordinary performance MIDI is not relayed through
+Shadowbox and gains no additional processing latency. Controller identity and
+standalone offsets are saved in `~/rnbo-ui/shadowbox_state.json`.
+
+Source-aware local OSC may address the Shadowbox listener on port 13333 at
+`/shadowbox/transpose/chromatic` or `/shadowbox/transpose/scalar`. The first
+argument is the integer offset and an optional second string identifies the
+source. Bare direct RNBO parameter changes cannot be attributed reliably and
+are displayed only through target agreement or mixed state.
 
 ---
 

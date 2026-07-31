@@ -44,12 +44,27 @@ from shadowbox.surfaces import resolve_instance_surface, surface_spec_for_key
 from shadowbox.surfaces.list_sequencer import FIELD_KEYS, SIGNED_FIELD_KEYS, format_list_value
 from shadowbox.surfaces.list_vel_sequencer import ROW_KEYS
 from shadowbox.surfaces.organ import FOOTAGES
+from shadowbox.transpose_control import (
+    ROLE_CHROMATIC,
+    ROLE_LABELS,
+    ROLE_NONE,
+    ROLE_SCALAR,
+    common_target_range,
+    normalize_role,
+    split_midi_port_identity,
+    target_status,
+)
 
 
 STATE_PATH = Path.home() / "rnbo-ui" / "shadowbox_state.json"
 
 ROUTING_GROUP_ITEMS = ["INPUTS", "OUTPUTS"]
 SYSTEM_AUDIO_ITEMS = ["DEVICE", "SAMPLE RATE", "BUFFER SIZE"]
+TRANSPOSE_AUTHORITY_LABELS = {
+    "unconfigured": "UNCONFIGURED",
+    "standalone": "LOCAL",
+    "shadowscore": "SHADOWSCORE",
+}
 REMOVE_INSTANCE_CONFIRM_ITEMS = ["..", "REMOVE"]
 REMOVE_INSTANCE_CONFIRM_BUTTONS = ["CANCEL", "REMOVE"]
 MAINT_ITEMS_REFRESH = "REFRESH"
@@ -139,6 +154,10 @@ class UIState:
     network_cursor: int = 0
     wifi_network_cursor: int = 0
     system_audio_cursor: int = 0
+    transpose_cursor: int = 0
+    transpose_controller_cursor: int = 0
+    transpose_role_cursor: int = 0
+    transpose_authority_cursor: int = 0
     maint_cursor: int = 0
     software_update_cursor: int = 0
     audio_device_cursor: int = 0
@@ -154,6 +173,16 @@ class UIState:
     pending_add_instance_count: int = 0
     midi_learn_instance_id: str = ""
     midi_learn_param_path: str = ""
+
+    transpose_authority: str = "unconfigured"
+    transpose_chromatic: int = 0
+    transpose_scalar: int = 0
+    transpose_controller_identity: str = ""
+    transpose_controller_role: str = ROLE_NONE
+    transpose_controller_devices: list[Any] = field(default_factory=list)
+    transpose_controller_connected_identity: str = ""
+    transpose_last_source: str = "Local"
+    transpose_edit_role: str = ""
 
     edit_value: Any = None
     edit_numeric_draft: str = ""
@@ -212,6 +241,11 @@ def load_state_file() -> dict:
 def save_state_file(data: dict) -> None:
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     STATE_PATH.write_text(json.dumps(data, indent=2))
+
+
+def normalize_transpose_authority(value: Any) -> str:
+    authority = str(value or "").strip().lower()
+    return authority if authority in TRANSPOSE_AUTHORITY_LABELS else "unconfigured"
 
 
 def clamp_index(idx: int, count: int) -> int:
@@ -502,12 +536,30 @@ class ShadowboxUI:
         saved = self._saved_state_cache
         self.state.top_index = clamp_index(int(saved.get("top_index", 0)), len(self.top_level_items))
         self.state.saved_audio_card = str(saved.get("saved_audio_card", ""))
+        transpose = saved.get("transpose_control", {})
+        if not isinstance(transpose, dict):
+            transpose = {}
+        self.state.transpose_authority = normalize_transpose_authority(transpose.get("authority"))
+        self.state.transpose_chromatic = int(transpose.get("chromatic", 0) or 0)
+        self.state.transpose_scalar = int(transpose.get("scalar", 0) or 0)
+        self.state.transpose_controller_identity = str(transpose.get("controller_identity", "") or "")
+        self.state.transpose_controller_role = normalize_role(transpose.get("controller_role"))
+        self.state.transpose_last_source = str(transpose.get("last_source", "Local") or "Local")
 
     def save_state(self) -> None:
         save_state_file(
             {
                 "top_index": self.state.top_index,
                 "saved_audio_card": self.current_audio_card,
+                "transpose_control": {
+                    "version": 1,
+                    "authority": normalize_transpose_authority(self.state.transpose_authority),
+                    "chromatic": int(self.state.transpose_chromatic),
+                    "scalar": int(self.state.transpose_scalar),
+                    "controller_identity": self.state.transpose_controller_identity,
+                    "controller_role": normalize_role(self.state.transpose_controller_role),
+                    "last_source": self.state.transpose_last_source,
+                },
             }
         )
 
@@ -538,6 +590,10 @@ class ShadowboxUI:
         self.state.network_cursor = 1 if self.network_value_rows else 0
         self.state.wifi_network_cursor = self.wifi_network_initial_cursor()
         self.state.system_audio_cursor = 1
+        self.state.transpose_cursor = 2
+        self.state.transpose_controller_cursor = 0
+        self.state.transpose_role_cursor = 0
+        self.state.transpose_authority_cursor = 0
         self.state.maint_cursor = 1 if self.maint_menu_items else 0
         self.state.software_update_cursor = self.software_update_check_cursor
         self.state.audio_device_cursor = 1 if self.audio_options else 0
@@ -925,10 +981,150 @@ class ShadowboxUI:
         items = ["STATUS", "AUDIO"]
         if self.graph_startup_menu_items:
             items.append("STARTUP")
-        items.extend(["NETWORK", "UPDATE", "ABOUT"])
+        items.extend(["TRANSPOSE", "NETWORK", "UPDATE", "ABOUT"])
         if self.maint_menu_items:
             items.append("MAINT")
         return items
+
+    @property
+    def transpose_controller_display(self) -> str:
+        identity = self.state.transpose_controller_identity
+        if not identity:
+            return "NONE"
+        device = next(
+            (item for item in self.state.transpose_controller_devices if getattr(item, "identity", "") == identity),
+            None,
+        )
+        if device is not None:
+            name = str(getattr(device, "display_name", "") or "MIDI")
+            return name if self.state.transpose_controller_connected_identity == identity else f"{name} OFFLINE"
+        client_name, port_name = split_midi_port_identity(identity)
+        name = f"{client_name}: {port_name}" if client_name and port_name != client_name else client_name or port_name or "MIDI"
+        return f"{name} OFFLINE"
+
+    @property
+    def transpose_rows(self) -> list[ValueRow]:
+        chromatic_status = target_status(self.state.instances, ROLE_CHROMATIC, self.state.transpose_chromatic)
+        scalar_status = target_status(self.state.instances, ROLE_SCALAR, self.state.transpose_scalar)
+
+        def value_text(value: int, status) -> str:
+            prefix = f"{value:+d}"
+            if status.mixed:
+                return f"{prefix} MIXED {status.matching}/{status.compatible}"
+            return f"{prefix} {status.matching}/{status.compatible}"
+
+        return [
+            ValueRow(
+                "authority",
+                TRANSPOSE_AUTHORITY_LABELS[normalize_transpose_authority(self.state.transpose_authority)],
+                current=self.state.transpose_authority == "standalone",
+            ),
+            ValueRow("chromatic", value_text(self.state.transpose_chromatic, chromatic_status), current=chromatic_status.mixed),
+            ValueRow("scalar", value_text(self.state.transpose_scalar, scalar_status), current=scalar_status.mixed),
+            ValueRow("controller", self.transpose_controller_display, current=bool(self.state.transpose_controller_connected_identity)),
+            ValueRow("function", ROLE_LABELS[normalize_role(self.state.transpose_controller_role)]),
+            ValueRow("source", self.state.transpose_last_source),
+        ]
+
+    @property
+    def transpose_controller_items(self) -> list[str]:
+        return ["..", "NONE"] + [label for _identity, label in self.transpose_controller_choices]
+
+    @property
+    def transpose_controller_choices(self) -> list[tuple[str, str]]:
+        choices: list[tuple[str, str]] = []
+        configured = self.state.transpose_controller_identity
+        seen: set[str] = set()
+        for device in self.state.transpose_controller_devices:
+            identity = str(getattr(device, "identity", "") or "")
+            if not identity or identity in seen:
+                continue
+            seen.add(identity)
+            choices.append((identity, str(getattr(device, "display_name", "") or identity)))
+        if configured and configured not in seen:
+            choices.append((configured, self.transpose_controller_display))
+        return choices
+
+    @property
+    def transpose_role_items(self) -> list[str]:
+        return ["..", ROLE_LABELS[ROLE_NONE], ROLE_LABELS[ROLE_CHROMATIC], ROLE_LABELS[ROLE_SCALAR]]
+
+    @property
+    def transpose_authority_items(self) -> list[str]:
+        return ["..", "UNCONFIGURED", "LOCAL", "SHADOWSCORE"]
+
+    @property
+    def transpose_edit_param(self) -> dict:
+        role = normalize_role(self.state.transpose_edit_role)
+        minimum, maximum = common_target_range(self.state.instances, role)
+        name = "Chromatic Transpose" if role == ROLE_CHROMATIC else "Scalar Transpose"
+        return {
+            "name": name,
+            "min": minimum,
+            "max": maximum,
+            "metadata": {"edit_as": "int", "display_as": "int", "edit_step": 1},
+        }
+
+    def set_transpose_devices(self, devices: list[Any], connected_identity: str = "") -> None:
+        old = (
+            [(getattr(item, "identity", ""), getattr(item, "address", "")) for item in self.state.transpose_controller_devices],
+            self.state.transpose_controller_connected_identity,
+        )
+        self.state.transpose_controller_devices = list(devices)
+        self.state.transpose_controller_connected_identity = str(connected_identity or "")
+        new = (
+            [(getattr(item, "identity", ""), getattr(item, "address", "")) for item in self.state.transpose_controller_devices],
+            self.state.transpose_controller_connected_identity,
+        )
+        if new != old:
+            self.request_render("transpose_devices")
+
+    def set_transpose_value(self, role: str, value: Any, source: str) -> bool:
+        if normalize_transpose_authority(self.state.transpose_authority) != "standalone":
+            self.set_status_message("Select LOCAL transpose authority")
+            return False
+        role = normalize_role(role)
+        if role not in {ROLE_CHROMATIC, ROLE_SCALAR}:
+            return False
+        param = {
+            "name": ROLE_LABELS[role],
+            "min": -60,
+            "max": 67,
+            "metadata": {"edit_as": "int", "display_as": "int", "edit_step": 1},
+        }
+        numeric = quantize_edit_value(param, value)
+        numeric = int(numeric)
+        field_name = "transpose_chromatic" if role == ROLE_CHROMATIC else "transpose_scalar"
+        previous = int(getattr(self.state, field_name))
+        source_text = str(source or "Local")
+        changed = previous != numeric or self.state.transpose_last_source != source_text
+        setattr(self.state, field_name, numeric)
+        self.state.transpose_last_source = source_text
+        if self.state.transpose_edit_role == role:
+            self.state.edit_value = numeric
+        if changed:
+            self.queue_action(UIAction(kind="set_transpose", path=role, value=numeric))
+            self.queue_action(UIAction(kind="save_state"))
+            self.state.activity_ticks += 1
+            self.request_render("transpose_value")
+        return changed
+
+    def apply_transpose_midi_note(self, note: int, device_name: str = "MIDI") -> bool:
+        role = normalize_role(self.state.transpose_controller_role)
+        if role == ROLE_NONE:
+            return False
+        return self.set_transpose_value(role, int(note) - 60, f"MIDI {device_name}")
+
+    def set_transpose_authority(self, authority: str) -> bool:
+        authority = normalize_transpose_authority(authority)
+        if authority == self.state.transpose_authority:
+            return False
+        self.state.transpose_authority = authority
+        self.state.transpose_last_source = "Local" if authority == "standalone" else "ShadowScore" if authority == "shadowscore" else "None"
+        self.queue_action(UIAction(kind="set_transpose_authority", value=authority))
+        self.queue_action(UIAction(kind="save_state"))
+        self.request_render("transpose_authority")
+        return True
 
     @property
     def graph_menu_items(self) -> list[str]:
@@ -2587,6 +2783,10 @@ class ShadowboxUI:
             "SYSTEM_AUDIO_RATE",
             "SYSTEM_AUDIO_BUFFER",
             "SYSTEM_AUDIO_RESTART",
+            "SYSTEM_TRANSPOSE_CONTROLLER",
+            "SYSTEM_TRANSPOSE_ROLE",
+            "SYSTEM_TRANSPOSE_AUTHORITY",
+            "SYSTEM_TRANSPOSE_EDIT",
             "BRICK_PANEL",
         }
 
@@ -2674,6 +2874,8 @@ class ShadowboxUI:
         surface_scope = self.state.ui_mode == "INSTANCE_SURFACE" and self.state.active_surface_key == "time_domain_scope"
         if surface_scope:
             param = self.surface_param_binding("sample_rate")
+        elif self.state.ui_mode == "SYSTEM_TRANSPOSE_EDIT":
+            param = self.transpose_edit_param
         elif self.state.ui_mode == "EDIT":
             param = self.selected_param
         else:
@@ -2705,6 +2907,8 @@ class ShadowboxUI:
         if surface_scope and normalized_path:
             quantized_fraction = (float(value) - float(pmin)) / (float(pmax) - float(pmin))
             self.queue_action(UIAction(kind="set_param", path=normalized_path, value=quantized_fraction))
+        elif self.state.ui_mode == "SYSTEM_TRANSPOSE_EDIT":
+            self.set_transpose_value(self.state.transpose_edit_role, value, "Touchscreen")
         elif not is_discrete_param(param):
             self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
         if not pressed:
@@ -3298,6 +3502,18 @@ class ShadowboxUI:
         if mode == "SYSTEM_AUDIO":
             scroll_cursor("system_audio_cursor", len(SYSTEM_AUDIO_ITEMS))
             return
+        if mode == "SYSTEM_TRANSPOSE":
+            scroll_cursor("transpose_cursor", len(self.transpose_rows), first_index=1)
+            return
+        if mode == "SYSTEM_TRANSPOSE_CONTROLLER":
+            scroll_cursor("transpose_controller_cursor", len(self.transpose_controller_items))
+            return
+        if mode == "SYSTEM_TRANSPOSE_ROLE":
+            scroll_cursor("transpose_role_cursor", len(self.transpose_role_items))
+            return
+        if mode == "SYSTEM_TRANSPOSE_AUTHORITY":
+            scroll_cursor("transpose_authority_cursor", len(self.transpose_authority_items))
+            return
         if mode == "SYSTEM_AUDIO_DEVICE":
             scroll_cursor("audio_device_cursor", len(self.audio_options))
             return
@@ -3480,6 +3696,16 @@ class ShadowboxUI:
             handled = self._set_touch_cursor("routing_overview_cursor", row_index + 1, len(self.routing_overview_rows))
         elif mode == "SYSTEM_MENU":
             handled = self._set_touch_cursor("system_cursor", row_index, len(self.system_menu_items) + 1)
+        elif mode == "SYSTEM_TRANSPOSE":
+            if self.transpose_rows:
+                self.state.transpose_cursor = max(1, min(row_index, len(self.transpose_rows)))
+                handled = True
+        elif mode == "SYSTEM_TRANSPOSE_CONTROLLER":
+            handled = self._set_touch_cursor("transpose_controller_cursor", row_index, len(self.transpose_controller_items))
+        elif mode == "SYSTEM_TRANSPOSE_ROLE":
+            handled = self._set_touch_cursor("transpose_role_cursor", row_index, len(self.transpose_role_items))
+        elif mode == "SYSTEM_TRANSPOSE_AUTHORITY":
+            handled = self._set_touch_cursor("transpose_authority_cursor", row_index, len(self.transpose_authority_items))
         elif mode == "NETWORK":
             if self.network_value_rows:
                 self.state.network_cursor = max(1, min(row_index, len(self.network_value_rows)))
@@ -3621,6 +3847,19 @@ class ShadowboxUI:
                 self.state.active_instance_id = str(selected.get("id", ""))
         elif self.state.ui_mode == "SYSTEM_MENU":
             self.state.system_cursor = self._cycle(self.state.system_cursor, len(self.system_menu_items) + 1, step)
+        elif self.state.ui_mode == "SYSTEM_TRANSPOSE":
+            self.state.transpose_cursor = self._cycle_one_based(self.state.transpose_cursor, len(self.transpose_rows), step)
+        elif self.state.ui_mode == "SYSTEM_TRANSPOSE_CONTROLLER":
+            self.state.transpose_controller_cursor = self._cycle(self.state.transpose_controller_cursor, len(self.transpose_controller_items), step)
+        elif self.state.ui_mode == "SYSTEM_TRANSPOSE_ROLE":
+            self.state.transpose_role_cursor = self._cycle(self.state.transpose_role_cursor, len(self.transpose_role_items), step)
+        elif self.state.ui_mode == "SYSTEM_TRANSPOSE_AUTHORITY":
+            self.state.transpose_authority_cursor = self._cycle(self.state.transpose_authority_cursor, len(self.transpose_authority_items), step)
+        elif self.state.ui_mode == "SYSTEM_TRANSPOSE_EDIT":
+            role = normalize_role(self.state.transpose_edit_role)
+            current = int(self.state.edit_value or 0)
+            value = quantize_edit_value(self.transpose_edit_param, current + step)
+            self.set_transpose_value(role, value, "Encoder")
         elif self.state.ui_mode == "NETWORK":
             self.state.network_cursor = self._cycle_one_based(self.state.network_cursor, len(self.network_value_rows), step)
         elif self.state.ui_mode == "SOFTWARE_UPDATE":
@@ -4100,6 +4339,9 @@ class ShadowboxUI:
                 elif choice == "NETWORK":
                     self.state.ui_mode = "NETWORK"
                     self.state.network_cursor = 1 if self.network_value_rows else 0
+                elif choice == "TRANSPOSE":
+                    self.state.ui_mode = "SYSTEM_TRANSPOSE"
+                    self.state.transpose_cursor = 2
                 elif choice == "UPDATE":
                     self.state.ui_mode = "SOFTWARE_UPDATE"
                     self.state.software_update_cursor = self.software_update_check_cursor
@@ -4109,6 +4351,82 @@ class ShadowboxUI:
                 else:
                     self._about_press_count = 0
                     self.state.ui_mode = choice
+
+        elif self.state.ui_mode == "SYSTEM_TRANSPOSE":
+            row = self.transpose_rows[self.state.transpose_cursor - 1] if 0 < self.state.transpose_cursor <= len(self.transpose_rows) else None
+            if row is not None and row.label == "authority":
+                self.state.ui_mode = "SYSTEM_TRANSPOSE_AUTHORITY"
+                authorities = ["unconfigured", "standalone", "shadowscore"]
+                self.state.transpose_authority_cursor = authorities.index(normalize_transpose_authority(self.state.transpose_authority)) + 1
+            elif row is not None and row.label in {"chromatic", "scalar"}:
+                if self.state.transpose_authority != "standalone":
+                    self.set_status_message("Select LOCAL transpose authority")
+                    self.queue_action(UIAction(kind="save_state"))
+                    return
+                role = ROLE_CHROMATIC if row.label == "chromatic" else ROLE_SCALAR
+                self.state.transpose_edit_role = role
+                self.state.edit_value = self.state.transpose_chromatic if role == ROLE_CHROMATIC else self.state.transpose_scalar
+                self.state.ui_mode = "SYSTEM_TRANSPOSE_EDIT"
+            elif row is not None and row.label == "controller":
+                self.state.ui_mode = "SYSTEM_TRANSPOSE_CONTROLLER"
+                configured = self.state.transpose_controller_identity
+                self.state.transpose_controller_cursor = 1
+                for idx, (identity, _label) in enumerate(self.transpose_controller_choices, start=2):
+                    if identity == configured:
+                        self.state.transpose_controller_cursor = idx
+                        break
+            elif row is not None and row.label == "function":
+                self.state.ui_mode = "SYSTEM_TRANSPOSE_ROLE"
+                role_order = [ROLE_NONE, ROLE_CHROMATIC, ROLE_SCALAR]
+                self.state.transpose_role_cursor = role_order.index(normalize_role(self.state.transpose_controller_role)) + 1
+
+        elif self.state.ui_mode == "SYSTEM_TRANSPOSE_CONTROLLER":
+            cursor = self.state.transpose_controller_cursor
+            if cursor == 0:
+                self.state.ui_mode = "SYSTEM_TRANSPOSE"
+            elif cursor == 1:
+                self.state.transpose_controller_identity = ""
+                self.state.transpose_controller_role = ROLE_NONE
+                self.queue_action(UIAction(kind="configure_transpose_midi", value=""))
+                self.queue_action(UIAction(kind="save_state"))
+                self.state.ui_mode = "SYSTEM_TRANSPOSE"
+            else:
+                choices = self.transpose_controller_choices
+                index = cursor - 2
+                if 0 <= index < len(choices):
+                    identity = choices[index][0]
+                    self.state.transpose_controller_identity = identity
+                    self.queue_action(UIAction(kind="configure_transpose_midi", value=identity))
+                    self.queue_action(UIAction(kind="save_state"))
+                    self.state.ui_mode = "SYSTEM_TRANSPOSE"
+
+        elif self.state.ui_mode == "SYSTEM_TRANSPOSE_ROLE":
+            cursor = self.state.transpose_role_cursor
+            if cursor == 0:
+                self.state.ui_mode = "SYSTEM_TRANSPOSE"
+            else:
+                roles = [ROLE_NONE, ROLE_CHROMATIC, ROLE_SCALAR]
+                index = cursor - 1
+                if 0 <= index < len(roles):
+                    self.state.transpose_controller_role = roles[index]
+                    self.queue_action(UIAction(kind="save_state"))
+                    self.state.ui_mode = "SYSTEM_TRANSPOSE"
+
+        elif self.state.ui_mode == "SYSTEM_TRANSPOSE_AUTHORITY":
+            cursor = self.state.transpose_authority_cursor
+            if cursor == 0:
+                self.state.ui_mode = "SYSTEM_TRANSPOSE"
+            else:
+                authorities = ["unconfigured", "standalone", "shadowscore"]
+                index = cursor - 1
+                if 0 <= index < len(authorities):
+                    self.set_transpose_authority(authorities[index])
+                    self.state.ui_mode = "SYSTEM_TRANSPOSE"
+
+        elif self.state.ui_mode == "SYSTEM_TRANSPOSE_EDIT":
+            self.state.ui_mode = "SYSTEM_TRANSPOSE"
+            self.state.edit_value = None
+            self.state.transpose_edit_role = ""
 
         elif self.state.ui_mode == "NETWORK":
             selected_row = self.network_value_rows[self.state.network_cursor - 1] if 0 < self.state.network_cursor <= len(self.network_value_rows) else None
@@ -4351,9 +4669,13 @@ class ShadowboxUI:
             self.state.ui_mode = "TOP"
         elif self.state.ui_mode == "REMOVE_INSTANCE_CONFIRM":
             self._cancel_remove_instance_confirm()
-        elif self.state.ui_mode in ("STATUS", "NETWORK", "SOFTWARE_UPDATE", "ABOUT", "MAINT"):
+        elif self.state.ui_mode in ("STATUS", "NETWORK", "SOFTWARE_UPDATE", "ABOUT", "MAINT", "SYSTEM_TRANSPOSE"):
             self._about_press_count = 0
             self.state.ui_mode = "SYSTEM_MENU"
+        elif self.state.ui_mode in {"SYSTEM_TRANSPOSE_CONTROLLER", "SYSTEM_TRANSPOSE_ROLE", "SYSTEM_TRANSPOSE_AUTHORITY", "SYSTEM_TRANSPOSE_EDIT"}:
+            self.state.ui_mode = "SYSTEM_TRANSPOSE"
+            self.state.edit_value = None
+            self.state.transpose_edit_role = ""
         elif self.state.ui_mode in ("SYSTEM_AUDIO_DEVICE", "SYSTEM_AUDIO_RATE", "SYSTEM_AUDIO_BUFFER"):
             self.state.ui_mode = "SYSTEM_AUDIO"
         elif self.state.ui_mode == "SYSTEM_AUDIO":

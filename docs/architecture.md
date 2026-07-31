@@ -102,6 +102,9 @@ Design rules:
 - Curated set shortcuts are allowed only when they map directly to a verified backend capability with well-defined semantics; for example, `NEW SET` may map to loading a published backend template set
 - The UI should be capability-driven; if a backend command or branch is not published, Shadowbox should not invent it
 - System controls must remain separate from per-instance controls
+- Standardized transpose coordination is system-scoped: exact-name `ChromaticTranspose` and `ScalarTranspose` targets may share a canonical value only under explicit standalone authority
+- Existing installations begin with transpose authority unconfigured; network presence or absence never implies an authority transition
+- A designated ALSA MIDI note controller is observed beside the performance path and never becomes an inline MIDI relay
 - `SYSTEM` may include a narrow, explicitly documented set of host-level status or maintenance features outside OSCQuery when they are not owned by an instance
 - Modal selection and edit screens should pause background refresh so discovery does not fight the user
 - Parameter editors remain selected from explicit parameter metadata; instance surfaces are selected only from the canonical export name plus successful runtime binding resolution

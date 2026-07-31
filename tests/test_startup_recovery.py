@@ -70,6 +70,7 @@ from shadowbox.shadowbox import (
     STARTUP_AUDIO_DEVICE_PRIORITY_DEFAULT,
     _audio_device_priority_from_env,
     _audio_needs_recovery,
+    _fanout_transpose,
     _jack_restart_ready,
     _parse_audio_device_priority,
     _preferred_audio_device,
@@ -77,6 +78,7 @@ from shadowbox.shadowbox import (
     _snapshot_waiting_for_instances,
     _startup_status_lines,
     _startup_audio_attempt_timed_out,
+    _transpose_osc_command,
     _try_startup_audio_device,
 )
 
@@ -105,6 +107,14 @@ class _FakeRNBO:
     def discover(self):
         self.discoveries += 1
         return SimpleNamespace()
+
+
+class _TransposeRNBO:
+    def __init__(self):
+        self.sent = []
+
+    def set_param(self, path, value):
+        self.sent.append((path, value))
 
 
 class _FakeUI:
@@ -238,3 +248,66 @@ def test_startup_allows_empty_runner_when_no_set_is_expected():
 
     assert not _snapshot_waiting_for_instances(snapshot)
     assert _snapshot_ready(snapshot)
+
+
+def test_transpose_fanout_sends_each_generation_once_and_can_force_replacement():
+    ui = SimpleNamespace(
+        state=SimpleNamespace(
+            transpose_authority="standalone",
+            instances=[
+                {
+                    "id": "1",
+                    "name": "Voice A",
+                    "params": [
+                        {
+                            "name": "ChromaticTranspose",
+                            "path": "/rnbo/inst/1/params/ChromaticTranspose",
+                            "value": 0,
+                            "min": -12,
+                            "max": 12,
+                        }
+                    ],
+                }
+            ]
+        )
+    )
+    rnbo = _TransposeRNBO()
+    delivered = {}
+
+    assert _fanout_transpose(ui, rnbo, "chromatic", 3, delivered) == (1, 0)
+    assert _fanout_transpose(ui, rnbo, "chromatic", 3, delivered) == (0, 0)
+    assert _fanout_transpose(ui, rnbo, "chromatic", 3, delivered, force_instance_ids={"1"}) == (1, 0)
+    assert rnbo.sent == [
+        ("/rnbo/inst/1/params/ChromaticTranspose", 3),
+        ("/rnbo/inst/1/params/ChromaticTranspose", 3),
+    ]
+
+
+def test_transpose_fanout_reports_out_of_range_without_clamping():
+    ui = SimpleNamespace(
+        state=SimpleNamespace(
+            transpose_authority="standalone",
+            instances=[
+                {
+                    "id": "1",
+                    "params": [
+                        {"name": "ScalarTranspose", "path": "/scalar", "value": 0, "min": -7, "max": 7}
+                    ],
+                }
+            ]
+        )
+    )
+    rnbo = _TransposeRNBO()
+
+    assert _fanout_transpose(ui, rnbo, "scalar", 8, {}) == (0, 1)
+    assert rnbo.sent == []
+
+
+def test_source_aware_transpose_osc_command_preserves_declared_source():
+    assert _transpose_osc_command("/shadowbox/transpose/chromatic", [4, "GraphEditor"]) == (
+        "chromatic",
+        4,
+        "GraphEditor",
+    )
+    assert _transpose_osc_command("/shadowbox/transpose/scalar", -2) == ("scalar", -2, "External OSC")
+    assert _transpose_osc_command("/rnbo/inst/1/params/ScalarTranspose", 2) is None

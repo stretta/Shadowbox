@@ -4650,6 +4650,11 @@ class ShadowboxRenderer:
             "SYSTEM_AUDIO_RATE": "RATE",
             "SYSTEM_AUDIO_BUFFER": "BUFFER",
             "SYSTEM_AUDIO_RESTART": "AUDIO",
+            "SYSTEM_TRANSPOSE": "TRANSPOSE",
+            "SYSTEM_TRANSPOSE_CONTROLLER": "MIDI CONTROLLER",
+            "SYSTEM_TRANSPOSE_ROLE": "MIDI FUNCTION",
+            "SYSTEM_TRANSPOSE_AUTHORITY": "AUTHORITY",
+            "SYSTEM_TRANSPOSE_EDIT": "TRANSPOSE",
             "STATUS": "STATUS",
             "NETWORK": "NETWORK",
             "WIFI_NETWORKS": "WIFI NETWORKS",
@@ -4663,6 +4668,8 @@ class ShadowboxRenderer:
             header = state.status_message
         if state.ui_mode == "EDIT":
             header = self.edit_header_title(ui.selected_param)
+        elif state.ui_mode == "SYSTEM_TRANSPOSE_EDIT":
+            header = self.edit_header_title(ui.transpose_edit_param)
         self._show_back_button = self.touch_layout_enabled and state.ui_mode not in {"TOP", "SYSTEM_AUDIO_RESTART"}
         if not (self.touch_layout_enabled and state.ui_mode == "TOP"):
             self.draw_header(
@@ -4791,6 +4798,16 @@ class ShadowboxRenderer:
             self.draw_system_audio_buffer(ui)
         elif state.ui_mode == "SYSTEM_AUDIO_RESTART":
             self.draw_system_audio_restart(ui)
+        elif state.ui_mode == "SYSTEM_TRANSPOSE":
+            self.draw_selectable_value_rows(ui.transpose_rows, state.transpose_cursor)
+        elif state.ui_mode == "SYSTEM_TRANSPOSE_CONTROLLER":
+            self.draw_string_list(ui.transpose_controller_items, state.transpose_controller_cursor)
+        elif state.ui_mode == "SYSTEM_TRANSPOSE_ROLE":
+            self.draw_string_list(ui.transpose_role_items, state.transpose_role_cursor)
+        elif state.ui_mode == "SYSTEM_TRANSPOSE_AUTHORITY":
+            self.draw_string_list(ui.transpose_authority_items, state.transpose_authority_cursor)
+        elif state.ui_mode == "SYSTEM_TRANSPOSE_EDIT":
+            self.draw_edit(ui, ui.transpose_edit_param, state)
         elif state.ui_mode == "NETWORK":
             self.draw_network(ui)
         elif state.ui_mode == "SOFTWARE_UPDATE":

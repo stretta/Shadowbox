@@ -49,6 +49,8 @@ The component allowed to canonicalize and distribute the value.
 - `standalone`: this Shadowbox owns the canonical local offsets.
 - `shadowscore`: ShadowScore owns the canonical offsets; Shadowbox mirrors
   confirmed state and sends requests rather than asserting local state.
+- `unconfigured`: safe migration state for an installation that has not made
+  an authority choice; no local fanout is permitted.
 
 Source and authority are distinct. In managed operation a local MIDI keyboard
 may be the source of a request while ShadowScore remains the authority.
@@ -124,6 +126,10 @@ In standalone mode:
 Repeated discovery must not continually rewrite every target. Shadowbox tracks
 which instance/parameter paths have received the current generation so routine
 refreshes cannot fight GraphEditor or other direct instance edits.
+
+Existing state files without a transpose authority load as `unconfigured`.
+The user must explicitly select `LOCAL` before touch, MIDI, or semantic OSC can
+change and fan out local canonical state.
 
 ### Managed authority
 

@@ -27,6 +27,13 @@ from shadowbox.ui import ShadowboxUI
 from shadowbox.renderer import create_renderer, should_enable_touch_layout
 from shadowbox.performance import PerformanceProbe, Timer
 from shadowbox.render_scheduler import RenderScheduler
+from shadowbox.transpose_control import (
+    ROLE_CHROMATIC,
+    ROLE_SCALAR,
+    AlsaMidiControllerMonitor,
+    normalize_role,
+    transpose_targets,
+)
 
 
 FPS = 20
@@ -560,6 +567,69 @@ def _assign_next_unused_outputs(ui, rnbo, instance_id: str) -> bool:
     return changed
 
 
+def _fanout_transpose(
+    ui,
+    rnbo,
+    role: str,
+    value: int,
+    delivered: dict[tuple[str, str], int],
+    *,
+    force_instance_ids: set[str] | None = None,
+) -> tuple[int, int]:
+    role = normalize_role(role)
+    sent = 0
+    unsupported = 0
+    for target in transpose_targets(ui.state.instances, role):
+        if not target.accepts(int(value)):
+            unsupported += 1
+            continue
+        key = (role, target.path)
+        forced = force_instance_ids is not None and target.instance_id in force_instance_ids
+        if not forced and delivered.get(key) == int(value):
+            continue
+        rnbo.set_param(target.path, int(value))
+        delivered[key] = int(value)
+        sent += 1
+    return sent, unsupported
+
+
+def _sync_new_transpose_targets(
+    ui,
+    rnbo,
+    delivered: dict[tuple[str, str], int],
+    *,
+    force_instance_ids: set[str] | None = None,
+) -> None:
+    if str(ui.state.transpose_authority) != "standalone":
+        return
+    for role, value in (
+        (ROLE_CHROMATIC, ui.state.transpose_chromatic),
+        (ROLE_SCALAR, ui.state.transpose_scalar),
+    ):
+        _fanout_transpose(
+            ui,
+            rnbo,
+            role,
+            int(value),
+            delivered,
+            force_instance_ids=force_instance_ids,
+        )
+
+
+def _transpose_osc_command(path: str, value: object) -> tuple[str, int, str] | None:
+    role = {
+        "/shadowbox/transpose/chromatic": ROLE_CHROMATIC,
+        "/shadowbox/transpose/scalar": ROLE_SCALAR,
+    }.get(str(path))
+    if role is None:
+        return None
+    values = value if isinstance(value, list) else [value]
+    if not values or isinstance(values[0], bool) or not isinstance(values[0], (int, float)):
+        return None
+    source = str(values[1]).strip() if len(values) > 1 and str(values[1]).strip() else "External OSC"
+    return role, int(round(float(values[0]))), source
+
+
 def main():
     display = load_display_from_env(default_kind="st7789_raw")
     brightness_normal = BRIGHTNESS_NORMAL
@@ -575,6 +645,7 @@ def main():
     osc_listener = RunnerOSCListener()
     encoder = EncoderInput()
     ui = ShadowboxUI(rnbo=rnbo)
+    transpose_midi = AlsaMidiControllerMonitor()
     perf = PerformanceProbe()
     display.performance_probe = perf
     scheduler = RenderScheduler(mode=os.environ.get("SHADOWBOX_RENDER_SCHEDULER", "dirty").strip().lower())
@@ -582,6 +653,8 @@ def main():
     renderer.set_touch_mode(should_enable_touch_layout(encoder.input_kind))
     renderer.draw_startup_status("SHADOWBOX", "starting Shadowbox", "please wait", activity_phase=0.0)
     ui.restore_from_saved_state()
+    transpose_midi.configure(ui.state.transpose_controller_identity)
+    transpose_midi.start()
     osc_listener.start()
     rnbo.send_value("/rnbo/listeners/add", osc_listener.listener_spec)
 
@@ -691,6 +764,8 @@ def main():
 
     # Always start clean at TOP level
     ui.reset_to_top()
+    transpose_delivered: dict[tuple[str, str], int] = {}
+    _sync_new_transpose_targets(ui, rnbo, transpose_delivered)
     ui.set_software_update_status(read_all_software_update_status(fetch=False))
     update_status_queue: SimpleQueue[dict] = SimpleQueue()
     if _env_bool("SHADOWBOX_UPDATE_CHECK_ON_STARTUP", True):
@@ -743,7 +818,18 @@ def main():
             for event in events:
                 ui.handle_event(event)
 
+            ui.set_transpose_devices(transpose_midi.devices, transpose_midi.connected_identity)
+            for midi_event in transpose_midi.drain():
+                if ui.apply_transpose_midi_note(midi_event.note, midi_event.device_name):
+                    mark_activity()
+                    scheduler.request("transpose_midi", input_event=True)
+
             for path, value in osc_listener.drain():
+                transpose_command = _transpose_osc_command(path, value)
+                if transpose_command is not None:
+                    role, offset, source = transpose_command
+                    ui.set_transpose_value(role, offset, source)
+                    continue
                 parsed = _parse_instance_state_path(path)
                 if parsed is None:
                     continue
@@ -780,6 +866,7 @@ def main():
                     continue
                 if result.kind == "runner":
                     ui.apply_runner_snapshot(result.value)
+                    forced_transpose_ids: set[str] = set()
                     if is_jack_restart:
                         expected_card = str(jack_restart_context.get("expected_card", "") or "")
                         elapsed = now - float(jack_restart_context.get("started_at", now))
@@ -808,6 +895,7 @@ def main():
                             ui.state.active_instance_id = new_id
                             ui.state.instance_cursor = after_ids.index(new_id) + 1
                             _apply_post_load_view(ui)
+                            forced_transpose_ids.update(new_ids)
                     elif result.reason == "replace instance":
                         before_ids = context.get("before_ids", [])
                         target_id = context.get("target_id", "")
@@ -819,6 +907,7 @@ def main():
                             apply_midi_profile_to_instance(_instance_by_id(ui, replacement_id), rnbo)
                             ui.state.active_instance_id = replacement_id
                             ui.state.instance_cursor = after_ids.index(replacement_id) + 1
+                            forced_transpose_ids.add(replacement_id)
                         _apply_post_load_view(ui)
                     elif result.reason == "remove instance":
                         after_ids = [str(inst.get("id", "")) for inst in ui.state.instances]
@@ -829,6 +918,12 @@ def main():
                         ui.state.pending_remove_instance_id = ""
                         ui.state.remove_instance_origin = ""
                         ui.state.ui_mode = "INSTANCE_LIST"
+                    _sync_new_transpose_targets(
+                        ui,
+                        rnbo,
+                        transpose_delivered,
+                        force_instance_ids=forced_transpose_ids or None,
+                    )
                 else:
                     ui.apply_network_snapshot(result.value)
                     if result.kind in {"wifi_list", "wifi_rescan"}:
@@ -870,6 +965,28 @@ def main():
                 elif action.kind == "send_osc":
                     if action.path is not None:
                         rnbo.send_value(action.path, action.value)
+
+                elif action.kind == "set_transpose":
+                    if action.path is not None and ui.state.transpose_authority == "standalone":
+                        sent, unsupported = _fanout_transpose(
+                            ui,
+                            rnbo,
+                            action.path,
+                            int(action.value),
+                            transpose_delivered,
+                        )
+                        if unsupported:
+                            ui.set_status_message(f"{unsupported} transpose target out of range")
+                        elif sent == 0 and not transpose_targets(ui.state.instances, action.path):
+                            ui.set_status_message("No compatible transpose targets")
+
+                elif action.kind == "configure_transpose_midi":
+                    transpose_midi.configure(str(action.value or ""))
+
+                elif action.kind == "set_transpose_authority":
+                    transpose_delivered.clear()
+                    if str(action.value or "") == "standalone":
+                        _sync_new_transpose_targets(ui, rnbo, transpose_delivered)
 
                 elif action.kind == "save_midi_profile":
                     instance = _instance_by_id(ui, str(action.value or ui.state.active_instance_id))
@@ -1218,6 +1335,7 @@ def main():
     finally:
         discovery.stop()
         network_operations.stop()
+        transpose_midi.stop()
         try:
             rnbo.send_value("/rnbo/listeners/del", osc_listener.listener_spec)
         except Exception:
