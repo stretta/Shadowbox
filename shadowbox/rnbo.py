@@ -972,6 +972,31 @@ def discover_system(tree: dict) -> dict:
         ["CONTENTS", "rnbo", "CONTENTS", "jack", "CONTENTS", "restart", "FULL_PATH"],
         "",
     )
+    transport_root = safe_get(
+        tree,
+        ["CONTENTS", "rnbo", "CONTENTS", "jack", "CONTENTS", "transport", "CONTENTS"],
+        {},
+    )
+    if not isinstance(transport_root, dict):
+        transport_root = {}
+    bpm_node = transport_root.get("bpm", {})
+    rolling_node = transport_root.get("rolling", {})
+
+    def transport_bool(node: dict) -> bool | None:
+        if not isinstance(node, dict) or not node.get("FULL_PATH"):
+            return None
+        value = node.get("VALUE")
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        type_tag = str(node.get("TYPE", ""))
+        if type_tag == "T":
+            return True
+        if type_tag == "F":
+            return False
+        return None
+
     sets = discover_sets(tree)
     set_presets = discover_set_presets(tree)
 
@@ -995,6 +1020,12 @@ def discover_system(tree: dict) -> dict:
             "cpu_load": cpu_load,
             "xruns": xruns,
             "runner_version": runner_version,
+        },
+        "transport": {
+            "bpm_path": str(bpm_node.get("FULL_PATH", "")) if isinstance(bpm_node, dict) else "",
+            "bpm": bpm_node.get("VALUE") if isinstance(bpm_node, dict) else None,
+            "rolling_path": str(rolling_node.get("FULL_PATH", "")) if isinstance(rolling_node, dict) else "",
+            "rolling": transport_bool(rolling_node),
         },
         "set_name": sets.get("current_name", ""),
         "sets": sets,

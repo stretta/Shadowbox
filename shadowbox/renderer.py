@@ -4650,6 +4650,8 @@ class ShadowboxRenderer:
             "SYSTEM_AUDIO_RATE": "RATE",
             "SYSTEM_AUDIO_BUFFER": "BUFFER",
             "SYSTEM_AUDIO_RESTART": "AUDIO",
+            "SYSTEM_TRANSPORT": "TRANSPORT",
+            "SYSTEM_TRANSPORT_TEMPO_EDIT": "TEMPO",
             "SYSTEM_TRANSPOSE": "TRANSPOSE",
             "SYSTEM_TRANSPOSE_CONTROLLER": "MIDI CONTROLLER",
             "SYSTEM_TRANSPOSE_ROLE": "MIDI FUNCTION",
@@ -4670,6 +4672,8 @@ class ShadowboxRenderer:
             header = self.edit_header_title(ui.selected_param)
         elif state.ui_mode == "SYSTEM_TRANSPOSE_EDIT":
             header = self.edit_header_title(ui.transpose_edit_param)
+        elif state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT":
+            header = self.edit_header_title(ui.transport_tempo_edit_param)
         self._show_back_button = self.touch_layout_enabled and state.ui_mode not in {"TOP", "SYSTEM_AUDIO_RESTART"}
         if not (self.touch_layout_enabled and state.ui_mode == "TOP"):
             self.draw_header(
@@ -4798,6 +4802,10 @@ class ShadowboxRenderer:
             self.draw_system_audio_buffer(ui)
         elif state.ui_mode == "SYSTEM_AUDIO_RESTART":
             self.draw_system_audio_restart(ui)
+        elif state.ui_mode == "SYSTEM_TRANSPORT":
+            self.draw_selectable_value_rows(ui.transport_rows, state.transport_cursor)
+        elif state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT":
+            self.draw_edit(ui, ui.transport_tempo_edit_param, state)
         elif state.ui_mode == "SYSTEM_TRANSPOSE":
             self.draw_selectable_value_rows(ui.transpose_rows, state.transpose_cursor)
         elif state.ui_mode == "SYSTEM_TRANSPOSE_CONTROLLER":

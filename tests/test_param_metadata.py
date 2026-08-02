@@ -981,6 +981,20 @@ class ParamMetadataTests(unittest.TestCase):
                                     }
                                 },
                                 "restart": {"FULL_PATH": "/rnbo/jack/restart"},
+                                "transport": {
+                                    "CONTENTS": {
+                                        "bpm": {
+                                            "FULL_PATH": "/rnbo/jack/transport/bpm",
+                                            "TYPE": "f",
+                                            "VALUE": 89.99995422363281,
+                                        },
+                                        "rolling": {
+                                            "FULL_PATH": "/rnbo/jack/transport/rolling",
+                                            "TYPE": "F",
+                                            "VALUE": None,
+                                        },
+                                    }
+                                },
                             }
                         },
                         "info": {"CONTENTS": {"runner_version": {"VALUE": "1.4.3"}}},
@@ -1016,6 +1030,15 @@ class ParamMetadataTests(unittest.TestCase):
         self.assertEqual(system["set_name"], "StudioA")
         self.assertEqual(system["sets"]["current_name"], "StudioA")
         self.assertEqual(system["sets"]["available_sets"], ["StudioA"])
+        self.assertEqual(
+            system["transport"],
+            {
+                "bpm_path": "/rnbo/jack/transport/bpm",
+                "bpm": 89.99995422363281,
+                "rolling_path": "/rnbo/jack/transport/rolling",
+                "rolling": False,
+            },
+        )
         self.assertNotIn("network", system)
 
 

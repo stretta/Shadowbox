@@ -154,6 +154,7 @@ class UIState:
     network_cursor: int = 0
     wifi_network_cursor: int = 0
     system_audio_cursor: int = 0
+    transport_cursor: int = 0
     transpose_cursor: int = 0
     transpose_controller_cursor: int = 0
     transpose_role_cursor: int = 0
@@ -590,6 +591,7 @@ class ShadowboxUI:
         self.state.network_cursor = 1 if self.network_value_rows else 0
         self.state.wifi_network_cursor = self.wifi_network_initial_cursor()
         self.state.system_audio_cursor = 1
+        self.state.transport_cursor = 1
         self.state.transpose_cursor = 2
         self.state.transpose_controller_cursor = 0
         self.state.transpose_role_cursor = 0
@@ -979,12 +981,63 @@ class ShadowboxUI:
     @property
     def system_menu_items(self) -> list[str]:
         items = ["STATUS", "AUDIO"]
+        if self.transport_available:
+            items.append("TRANSPORT")
         if self.graph_startup_menu_items:
             items.append("STARTUP")
         items.extend(["TRANSPOSE", "NETWORK", "UPDATE", "ABOUT"])
         if self.maint_menu_items:
             items.append("MAINT")
         return items
+
+    @property
+    def transport_available(self) -> bool:
+        transport = self.state.system.get("transport", {})
+        return bool(transport.get("rolling_path") and transport.get("bpm_path"))
+
+    @property
+    def transport_rows(self) -> list[ValueRow]:
+        transport = self.state.system.get("transport", {})
+        rolling = transport.get("rolling")
+        bpm = transport.get("bpm")
+        bpm_text = f"{float(bpm):.1f} BPM" if isinstance(bpm, (int, float)) and not isinstance(bpm, bool) else "-"
+        return [
+            ValueRow("state", "RUNNING" if rolling is True else "STOPPED" if rolling is False else "UNKNOWN", current=rolling is True),
+            ValueRow("tempo", bpm_text),
+        ]
+
+    @property
+    def transport_tempo_edit_param(self) -> dict:
+        transport = self.state.system.get("transport", {})
+        return {
+            "name": "Tempo",
+            "path": transport.get("bpm_path", ""),
+            "value": transport.get("bpm"),
+            "min": 20.0,
+            "max": 300.0,
+            "metadata": {"display_precision": 1, "edit_step": 1.0},
+        }
+
+    def apply_transport_update(self, path: str, value: Any) -> bool:
+        transport = self.state.system.get("transport", {})
+        if not isinstance(transport, dict):
+            return False
+        if str(path) == str(transport.get("rolling_path", "")):
+            next_value = bool(value)
+            if transport.get("rolling") == next_value:
+                return False
+            transport["rolling"] = next_value
+        elif str(path) == str(transport.get("bpm_path", "")) and isinstance(value, (int, float)) and not isinstance(value, bool):
+            next_value = float(value)
+            if transport.get("bpm") == next_value:
+                return False
+            transport["bpm"] = next_value
+            if self.state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT":
+                self.state.edit_value = next_value
+        else:
+            return False
+        self.request_render("transport")
+        return True
 
     @property
     def transpose_controller_display(self) -> str:
@@ -2783,6 +2836,7 @@ class ShadowboxUI:
             "SYSTEM_AUDIO_RATE",
             "SYSTEM_AUDIO_BUFFER",
             "SYSTEM_AUDIO_RESTART",
+            "SYSTEM_TRANSPORT_TEMPO_EDIT",
             "SYSTEM_TRANSPOSE_CONTROLLER",
             "SYSTEM_TRANSPOSE_ROLE",
             "SYSTEM_TRANSPOSE_AUTHORITY",
@@ -2876,6 +2930,8 @@ class ShadowboxUI:
             param = self.surface_param_binding("sample_rate")
         elif self.state.ui_mode == "SYSTEM_TRANSPOSE_EDIT":
             param = self.transpose_edit_param
+        elif self.state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT":
+            param = self.transport_tempo_edit_param
         elif self.state.ui_mode == "EDIT":
             param = self.selected_param
         else:
@@ -2909,6 +2965,9 @@ class ShadowboxUI:
             self.queue_action(UIAction(kind="set_param", path=normalized_path, value=quantized_fraction))
         elif self.state.ui_mode == "SYSTEM_TRANSPOSE_EDIT":
             self.set_transpose_value(self.state.transpose_edit_role, value, "Touchscreen")
+        elif self.state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT":
+            self.state.system["transport"]["bpm"] = value
+            self.queue_action(UIAction(kind="set_transport", path=param.get("path"), value=value))
         elif not is_discrete_param(param):
             self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
         if not pressed:
@@ -3499,6 +3558,9 @@ class ShadowboxUI:
         if mode == "SYSTEM_MENU":
             scroll_cursor("system_cursor", len(self.system_menu_items))
             return
+        if mode == "SYSTEM_TRANSPORT":
+            scroll_cursor("transport_cursor", len(self.transport_rows), first_index=1)
+            return
         if mode == "SYSTEM_AUDIO":
             scroll_cursor("system_audio_cursor", len(SYSTEM_AUDIO_ITEMS))
             return
@@ -3696,6 +3758,10 @@ class ShadowboxUI:
             handled = self._set_touch_cursor("routing_overview_cursor", row_index + 1, len(self.routing_overview_rows))
         elif mode == "SYSTEM_MENU":
             handled = self._set_touch_cursor("system_cursor", row_index, len(self.system_menu_items) + 1)
+        elif mode == "SYSTEM_TRANSPORT":
+            if self.transport_rows:
+                self.state.transport_cursor = max(1, min(row_index, len(self.transport_rows)))
+                handled = True
         elif mode == "SYSTEM_TRANSPOSE":
             if self.transpose_rows:
                 self.state.transpose_cursor = max(1, min(row_index, len(self.transpose_rows)))
@@ -3847,6 +3913,16 @@ class ShadowboxUI:
                 self.state.active_instance_id = str(selected.get("id", ""))
         elif self.state.ui_mode == "SYSTEM_MENU":
             self.state.system_cursor = self._cycle(self.state.system_cursor, len(self.system_menu_items) + 1, step)
+        elif self.state.ui_mode == "SYSTEM_TRANSPORT":
+            self.state.transport_cursor = self._cycle_one_based(self.state.transport_cursor, len(self.transport_rows), step)
+        elif self.state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT":
+            current = self.state.edit_value
+            if not isinstance(current, (int, float)) or isinstance(current, bool):
+                current = self.state.system.get("transport", {}).get("bpm", 120.0)
+            value = quantize_edit_value(self.transport_tempo_edit_param, float(current) + step)
+            self.state.edit_value = value
+            self.state.system["transport"]["bpm"] = value
+            self.queue_action(UIAction(kind="set_transport", path=self.transport_tempo_edit_param.get("path"), value=value))
         elif self.state.ui_mode == "SYSTEM_TRANSPOSE":
             self.state.transpose_cursor = self._cycle_one_based(self.state.transpose_cursor, len(self.transpose_rows), step)
         elif self.state.ui_mode == "SYSTEM_TRANSPOSE_CONTROLLER":
@@ -4333,6 +4409,9 @@ class ShadowboxUI:
                 if choice == "AUDIO":
                     self.state.ui_mode = "SYSTEM_AUDIO"
                     self.state.system_audio_cursor = 1
+                elif choice == "TRANSPORT":
+                    self.state.ui_mode = "SYSTEM_TRANSPORT"
+                    self.state.transport_cursor = 1
                 elif choice == "STARTUP":
                     self.state.ui_mode = "GRAPH_STARTUP"
                     self.state.graph_startup_cursor = 1 if self.graph_startup_menu_items else 0
@@ -4351,6 +4430,22 @@ class ShadowboxUI:
                 else:
                     self._about_press_count = 0
                     self.state.ui_mode = choice
+
+        elif self.state.ui_mode == "SYSTEM_TRANSPORT":
+            transport = self.state.system.get("transport", {})
+            if self.state.transport_cursor == 1 and transport.get("rolling_path"):
+                rolling = not bool(transport.get("rolling"))
+                transport["rolling"] = rolling
+                self.queue_action(UIAction(kind="set_transport", path=transport.get("rolling_path"), value=rolling))
+            elif self.state.transport_cursor == 2 and transport.get("bpm_path"):
+                bpm = transport.get("bpm")
+                self.state.edit_value = float(bpm) if isinstance(bpm, (int, float)) and not isinstance(bpm, bool) else 120.0
+                self.state.edit_numeric_draft = ""
+                self.state.ui_mode = "SYSTEM_TRANSPORT_TEMPO_EDIT"
+
+        elif self.state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT":
+            self.state.ui_mode = "SYSTEM_TRANSPORT"
+            self.state.edit_value = None
 
         elif self.state.ui_mode == "SYSTEM_TRANSPOSE":
             row = self.transpose_rows[self.state.transpose_cursor - 1] if 0 < self.state.transpose_cursor <= len(self.transpose_rows) else None
@@ -4669,13 +4764,16 @@ class ShadowboxUI:
             self.state.ui_mode = "TOP"
         elif self.state.ui_mode == "REMOVE_INSTANCE_CONFIRM":
             self._cancel_remove_instance_confirm()
-        elif self.state.ui_mode in ("STATUS", "NETWORK", "SOFTWARE_UPDATE", "ABOUT", "MAINT", "SYSTEM_TRANSPOSE"):
+        elif self.state.ui_mode in ("STATUS", "NETWORK", "SOFTWARE_UPDATE", "ABOUT", "MAINT", "SYSTEM_TRANSPOSE", "SYSTEM_TRANSPORT"):
             self._about_press_count = 0
             self.state.ui_mode = "SYSTEM_MENU"
         elif self.state.ui_mode in {"SYSTEM_TRANSPOSE_CONTROLLER", "SYSTEM_TRANSPOSE_ROLE", "SYSTEM_TRANSPOSE_AUTHORITY", "SYSTEM_TRANSPOSE_EDIT"}:
             self.state.ui_mode = "SYSTEM_TRANSPOSE"
             self.state.edit_value = None
             self.state.transpose_edit_role = ""
+        elif self.state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT":
+            self.state.ui_mode = "SYSTEM_TRANSPORT"
+            self.state.edit_value = None
         elif self.state.ui_mode in ("SYSTEM_AUDIO_DEVICE", "SYSTEM_AUDIO_RATE", "SYSTEM_AUDIO_BUFFER"):
             self.state.ui_mode = "SYSTEM_AUDIO"
         elif self.state.ui_mode == "SYSTEM_AUDIO":

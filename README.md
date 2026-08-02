@@ -96,6 +96,7 @@ https://www.adafruit.com/product/4484
 - Direct Ethernet rescue setup with a fixed fallback IP on `eth0`
 - Audio device switching
 - JACK restart
+- Global RNBO Runner transport start/stop and tempo control
 - Standalone chromatic/scalar transpose coordination across compatible RNBO instances
 - Designated ALSA MIDI note controllers with middle C as neutral transpose
 - Saved top-level cursor and audio-device selection in `~/rnbo-ui/shadowbox_state.json`
@@ -123,6 +124,12 @@ Velocity is ignored and note-off does not change the latched value. The reader
 is a sidecar control input; ordinary performance MIDI is not relayed through
 Shadowbox and gains no additional processing latency. Controller identity and
 standalone offsets are saved in `~/rnbo-ui/shadowbox_state.json`.
+
+`SYSTEM -> TRANSPORT` appears when OSCQuery publishes both the global Runner
+transport state and BPM controls. The state row starts or stops musical time
+through `/rnbo/jack/transport/rolling`; the tempo row edits
+`/rnbo/jack/transport/bpm`. These controls do not stop or restart JACK and do
+not add ShadowScore-style player or arrangement state.
 
 Source-aware local OSC may address the Shadowbox listener on port 13333 at
 `/shadowbox/transpose/chromatic` or `/shadowbox/transpose/scalar`. The first

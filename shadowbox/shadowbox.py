@@ -272,6 +272,14 @@ def _parse_instance_state_path(path: str) -> tuple[str, str] | None:
     return match.group(2), match.group(1)
 
 
+def _transport_event_key(path: str, system: dict) -> str:
+    transport = system.get("transport", {}) if isinstance(system, dict) else {}
+    for key in ("bpm", "rolling"):
+        if str(path) == str(transport.get(f"{key}_path", "")):
+            return key
+    return ""
+
+
 def _playback_index(name: str) -> int:
     match = re.fullmatch(r"system:playback_(\d+)", str(name))
     return int(match.group(1)) if match else 10**9
@@ -343,6 +351,7 @@ def _snapshot_signature(snapshot) -> tuple:
     audio = snapshot.system.get("audio", {})
     status = snapshot.system.get("status", {})
     maint = snapshot.system.get("maint", {})
+    transport = snapshot.system.get("transport", {})
     return (
         tuple((str(item.get("id", "")), str(item.get("label", ""))) for item in snapshot.instances),
         tuple(str(item) for item in snapshot.patchers),
@@ -353,6 +362,10 @@ def _snapshot_signature(snapshot) -> tuple:
         tuple(str(item) for item in audio.get("card_options", [])),
         tuple(str(item) for item in audio.get("sample_rate_options", [])),
         str(maint.get("jack_restart_path", "")),
+        str(transport.get("bpm_path", "")),
+        transport.get("bpm"),
+        str(transport.get("rolling_path", "")),
+        transport.get("rolling"),
     )
 
 
@@ -834,6 +847,16 @@ def main():
                     role, offset, source = transpose_command
                     ui.set_transpose_value(role, offset, source)
                     continue
+                transport_key = _transport_event_key(path, ui.state.system)
+                if transport_key:
+                    # OSC True/False typetags carry no arguments, so python-osc
+                    # reports both as None. Re-read the advertised tree instead
+                    # of mistaking a True notification for False.
+                    if transport_key == "rolling" and value is None:
+                        discovery.request("runner", "transport listener", delay=0.05)
+                    elif ui.apply_transport_update(path, value):
+                        ui.state.activity_ticks += 1
+                    continue
                 parsed = _parse_instance_state_path(path)
                 if parsed is None:
                     continue
@@ -969,6 +992,11 @@ def main():
                 elif action.kind == "send_osc":
                     if action.path is not None:
                         rnbo.send_value(action.path, action.value)
+
+                elif action.kind == "set_transport":
+                    if action.path is not None:
+                        rnbo.send_value(action.path, action.value)
+                        discovery.request("runner", "transport", delay=0.15)
 
                 elif action.kind == "set_transpose":
                     if action.path is not None and ui.state.transpose_authority == "standalone":

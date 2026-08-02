@@ -1849,6 +1849,61 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(ui.state.transpose_cursor, 2)
         self.assertEqual(ui.transpose_rows[0].value, "UNCONFIGURED")
 
+    def test_system_transport_controls_global_runner_state_and_tempo(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.system = {
+            "transport": {
+                "rolling_path": "/rnbo/jack/transport/rolling",
+                "rolling": False,
+                "bpm_path": "/rnbo/jack/transport/bpm",
+                "bpm": 90.0,
+            }
+        }
+        self.assertIn("TRANSPORT", ui.system_menu_items)
+
+        ui.state.ui_mode = "SYSTEM_MENU"
+        ui.state.system_cursor = ui.system_menu_items.index("TRANSPORT") + 1
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+
+        self.assertEqual(ui.state.ui_mode, "SYSTEM_TRANSPORT")
+        self.assertEqual([(row.label, row.value) for row in ui.transport_rows], [("state", "STOPPED"), ("tempo", "90.0 BPM")])
+
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+        actions = [action for action in ui.pop_actions() if action.kind == "set_transport"]
+        self.assertEqual([(action.path, action.value) for action in actions], [("/rnbo/jack/transport/rolling", True)])
+        self.assertEqual(ui.transport_rows[0].value, "RUNNING")
+
+        ui.state.transport_cursor = 2
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+        self.assertEqual(ui.state.ui_mode, "SYSTEM_TRANSPORT_TEMPO_EDIT")
+        ui.handle_event(type("Evt", (), {"kind": "step", "delta": 1})())
+        actions = [action for action in ui.pop_actions() if action.kind == "set_transport"]
+        self.assertEqual([(action.path, action.value) for action in actions], [("/rnbo/jack/transport/bpm", 91.0)])
+
+    def test_transport_live_updates_refresh_screen_and_renderer(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.system = {
+            "transport": {
+                "rolling_path": "/rnbo/jack/transport/rolling",
+                "rolling": False,
+                "bpm_path": "/rnbo/jack/transport/bpm",
+                "bpm": 90.0,
+            }
+        }
+        ui.state.ui_mode = "SYSTEM_TRANSPORT"
+        ui.state.transport_cursor = 1
+
+        self.assertTrue(ui.apply_transport_update("/rnbo/jack/transport/rolling", True))
+        self.assertTrue(ui.apply_transport_update("/rnbo/jack/transport/bpm", 123.5))
+
+        renderer = _CaptureRenderer()
+        renderer.draw(ui)
+        self.assertEqual(renderer.last_header, "TRANSPORT")
+        self.assertEqual(
+            renderer.last_selectable_value_rows,
+            [("state", "RUNNING", True), ("tempo", "123.5 BPM", False)],
+        )
+
     def test_designated_midi_note_sets_absolute_offset_and_source(self) -> None:
         ui = ShadowboxUI()
         ui.state.transpose_authority = "standalone"

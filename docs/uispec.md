@@ -95,6 +95,7 @@ OUTPUTS
 SYSTEM
 STATUS
 AUDIO
+TRANSPORT
 STARTUP
 NETWORK
 UPDATE
@@ -433,6 +434,7 @@ Unlike instance browsing and editing, `SYSTEM` may include a tightly scoped set 
 Initial system areas:
 - status
 - audio device selection
+- global RNBO Runner transport start/stop and tempo when the Runner publishes both controls
 - standalone chromatic/scalar transpose coordination and designated MIDI controller selection
 - network status, WiFi network selection, and direct Ethernet rescue setup
 - software update status and a fast-forward update action for git checkouts
@@ -444,6 +446,8 @@ Rules:
 - Per-instance structure, lifecycle, parameters, instance presets, and routing remain OSCQuery/published-command driven
 - Non-OSCQuery `SYSTEM` entries must be explicitly chosen product features, not a generic escape hatch for backend gaps
 - Host-derived `SYSTEM` data should stay read-only unless there is a deliberately integrated control path for that feature
+- `TRANSPORT` is a Runner-global control surface, not an instance parameter editor: it writes only the published `/rnbo/jack/transport/rolling` and `/rnbo/jack/transport/bpm` paths
+- `TRANSPORT` must not start/stop JACK, restart the audio engine, or recreate ShadowScore arrangement/player controls
 - `TRANSPOSE` must begin unconfigured on installations without saved authority; only explicit `LOCAL` authority may retain and fan out canonical device-local offsets
 - `SHADOWSCORE` transpose authority must never fall back automatically to local authority after connectivity loss
 - designated transpose MIDI input is a sidecar control path centered on MIDI note 60 and must not relay normal performance MIDI
