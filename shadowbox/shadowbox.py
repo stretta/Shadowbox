@@ -641,17 +641,21 @@ def main():
     display.init()
     display.set_contrast(brightness_normal)
 
+    # Paint the first application-owned frame before constructing input,
+    # network, MIDI, or UI subsystems. The boot helper may already have drawn
+    # the same status screen; this replaces it without a visible transition.
+    perf = PerformanceProbe()
+    display.performance_probe = perf
+    renderer = create_renderer(display=display)
+    renderer.draw_startup_status("SHADOWBOX", "starting Shadowbox", "please wait", activity_phase=0.0)
+
     rnbo = RNBOClient()
     osc_listener = RunnerOSCListener()
     encoder = EncoderInput()
     ui = ShadowboxUI(rnbo=rnbo)
     transpose_midi = AlsaMidiControllerMonitor()
-    perf = PerformanceProbe()
-    display.performance_probe = perf
     scheduler = RenderScheduler(mode=os.environ.get("SHADOWBOX_RENDER_SCHEDULER", "dirty").strip().lower())
-    renderer = create_renderer(display=display)
     renderer.set_touch_mode(should_enable_touch_layout(encoder.input_kind))
-    renderer.draw_startup_status("SHADOWBOX", "starting Shadowbox", "please wait", activity_phase=0.0)
     ui.restore_from_saved_state()
     transpose_midi.configure(ui.state.transpose_controller_identity)
     transpose_midi.start()

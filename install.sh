@@ -90,6 +90,7 @@ REPO_DIR="$(pwd)"
 RUN_USER="$(id -un)"
 VENV_PYTHON="${REPO_DIR}/.venv/bin/python"
 SERVICE_PATH="/etc/systemd/system/shadowbox.service"
+EARLY_SPLASH_SERVICE_PATH="/etc/systemd/system/shadowbox-early-splash.service"
 DEFAULT_ENV_PATH="/etc/default/shadowbox"
 ENABLE_SPI=1
 ENABLE_PIGPIOD=1
@@ -264,6 +265,15 @@ fi
 install_status "quiet boot"
 configure_quiet_boot
 
+if [[ "${DISPLAY_KIND}" == "waveshare_5inch_dsi" ]]; then
+    echo "Reserving the primary framebuffer console for Shadowbox..."
+    # The default tty1 getty can repaint the framebuffer while Shadowbox is
+    # blocked on startup discovery. Keep SSH, the serial console, and alternate
+    # virtual terminals available while preventing tty1 from competing with
+    # the appliance UI.
+    sudo systemctl mask --now getty@tty1.service
+fi
+
 if [[ "${ENABLE_PIGPIOD}" -eq 1 && "${START_SERVICE}" -eq 1 ]]; then
     echo "Starting pigpio daemon..."
     install_status "pigpio"
@@ -371,14 +381,42 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
+if [[ "${DISPLAY_KIND}" == "waveshare_5inch_dsi" ]]; then
+    echo "Installing early DSI splash service..."
+    sudo tee "${EARLY_SPLASH_SERVICE_PATH}" >/dev/null <<EOF
+[Unit]
+Description=Shadowbox early DSI splash
+DefaultDependencies=no
+After=local-fs.target systemd-udev-trigger.service
+Before=shadowbox.service
+
+[Service]
+Type=oneshot
+User=${RUN_USER}
+WorkingDirectory=${REPO_DIR}
+EnvironmentFile=-/etc/default/shadowbox
+ExecStart=${VENV_PYTHON} ${REPO_DIR}/tools/early_framebuffer_splash.py
+TimeoutStartSec=15
+
+[Install]
+WantedBy=multi-user.target
+EOF
+fi
+
 sudo systemctl daemon-reload
 if [[ "${START_SERVICE}" -eq 1 ]]; then
+    if [[ "${DISPLAY_KIND}" == "waveshare_5inch_dsi" ]]; then
+        sudo systemctl enable shadowbox-early-splash
+    else
+        sudo systemctl disable shadowbox-early-splash >/dev/null 2>&1 || true
+    fi
     sudo systemctl enable shadowbox
 
     echo "Starting Shadowbox..."
     install_status "restart service"
     sudo systemctl restart shadowbox
 else
+    sudo systemctl disable shadowbox-early-splash >/dev/null 2>&1 || true
     sudo systemctl disable shadowbox >/dev/null 2>&1 || true
     echo "Shadowbox service installed but not enabled or started."
     echo "After attaching the display/input hardware, run:"

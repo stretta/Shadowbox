@@ -553,6 +553,12 @@ The installer:
 - suppresses Raspberry Pi firmware splash, Plymouth graphics, kernel boot log,
   and systemd status output on the touch display so Shadowbox owns the visible
   boot screen
+- installs an early framebuffer splash service for the Waveshare 5-inch DSI
+  backend; it waits for the final 800x480 `vc4drmfb` framebuffer and paints a
+  static Shadowbox status screen before the full application starts
+- masks the tty1 login prompt on the DSI build so the Linux console cannot
+  repaint over Shadowbox during startup; SSH, the serial console, and alternate
+  virtual terminals remain available
 - enables and starts `pigpiod` only for display/input backends that need it
 - creates the virtual environment as your current user
 - upgrades `pip` and installs `requirements.txt`
@@ -568,13 +574,19 @@ recommended afterward.
 If you exported `SHADOWBOX_DISPLAY` before running `./install.sh`, that value is
 saved for future boots in `/etc/default/shadowbox`.
 
-The repository also includes a static unit file at:
+The repository also includes static unit templates at:
 
 ```
 service/shadowbox.service
+service/shadowbox-early-splash.service
 ```
 
-That file is a template for `/home/pi/Shadowbox`. If your checkout lives elsewhere, either use `./install.sh` or update the unit before installing it manually.
+Those files are templates for `/home/pi/Shadowbox`. If your checkout lives elsewhere, either use `./install.sh` or update the units before installing them manually.
+
+To temporarily restore the primary local login console on a DSI Shadowbox, run
+`sudo systemctl unmask getty@tty1.service` followed by
+`sudo systemctl enable --now getty@tty1.service`. Rerunning the installer with
+the DSI backend reserves tty1 for Shadowbox again.
 
 Display selection is controlled through environment variables. The service reads an optional config file at:
 

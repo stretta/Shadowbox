@@ -1,0 +1,16 @@
+[Unit]
+Description=Shadowbox early DSI splash
+DefaultDependencies=no
+After=local-fs.target systemd-udev-trigger.service
+Before=shadowbox.service
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi/Shadowbox
+EnvironmentFile=-/etc/default/shadowbox
+ExecStart=/home/pi/Shadowbox/.venv/bin/python /home/pi/Shadowbox/tools/early_framebuffer_splash.py
+TimeoutStartSec=15
+
+[Install]
+WantedBy=multi-user.target
