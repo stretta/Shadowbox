@@ -268,6 +268,32 @@ class EncoderTouchZoneTests(unittest.TestCase):
         self.assertEqual([event.index for event in events], [0, 0])
         self.assertIsNone(encoder._touch_capture)
 
+    def test_touch_direct_pitch_range_drag_stays_captured_by_initial_boundary(self) -> None:
+        sample_type = types.SimpleNamespace
+        with (
+            mock.patch.dict(os.environ, {"SHADOWBOX_INPUT_KIND": "touch_direct"}, clear=False),
+            mock.patch.object(self.encoder_module, "TouchZoneReader", _FakeTouchReader),
+        ):
+            encoder = self.encoder_module.EncoderInput()
+
+        layout = TouchLayout(800, 480)
+        layout.add_target("range", 100, 400, 190, 28, action_kind="set_surface_range", button_id="low")
+        layout.add_target("range", 510, 400, 190, 28, action_kind="set_surface_range", button_id="high")
+        encoder.set_touch_layout(layout)
+        encoder._touch_reader.samples.extend(
+            [
+                sample_type(normalized_x=140 / 799, normalized_y=410 / 479, pressed=True),
+                sample_type(normalized_x=600 / 799, normalized_y=410 / 479, pressed=True),
+                sample_type(normalized_x=650 / 799, normalized_y=410 / 479, pressed=False),
+            ]
+        )
+
+        events = encoder.get_events()
+
+        self.assertEqual([event.kind for event in events], ["set_surface_range", "set_surface_range"])
+        self.assertEqual([event.button_id for event in events], ["low", "low"])
+        self.assertIsNone(encoder._touch_capture)
+
 
 if __name__ == "__main__":
     unittest.main()

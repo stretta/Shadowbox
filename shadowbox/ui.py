@@ -32,11 +32,11 @@ from shadowbox.editors.scope import (
     normalize_scope_samples,
 )
 from shadowbox.editors.step16 import (
-    clamp_playhead,
     is_step16_param,
     move_focus as move_step16_focus,
     normalize_mask as normalize_step16_mask,
     playhead_state_key,
+    playhead_stage_index,
     toggle_step as toggle_step16,
 )
 from shadowbox.rnbo import RNBO_HOST, RNBO_PORT
@@ -2772,10 +2772,11 @@ class ShadowboxUI:
 
     @property
     def active_step16_playhead(self) -> Optional[int]:
-        item = self._find_active_state_value(playhead_state_key(self.selected_param))
+        state_key = playhead_state_key(self.selected_param)
+        item = self._find_active_state_value(state_key)
         if item is None:
             return None
-        return clamp_playhead(item.get("value"))
+        return playhead_stage_index(item.get("value"), state_key)
 
     @property
     def uses_turbo_rendering(self) -> bool:
@@ -2875,6 +2876,8 @@ class ShadowboxUI:
             self._handle_touch_edit_value(event.value, pressed=bool(getattr(event, "pressed", False)))
         elif event.kind == "set_surface_value":
             self._handle_surface_value(event.index, event.value, pressed=bool(getattr(event, "pressed", False)))
+        elif event.kind == "set_surface_range":
+            self._handle_analog_pitch_range(event.button_id, event.value)
         elif event.kind == "toggle_surface_value":
             self._handle_surface_toggle(event.index)
         elif event.kind == "select_list_field":
@@ -3002,7 +3005,7 @@ class ShadowboxUI:
         param = self.surface_param_binding(f"stage_{stage:02d}_value")
         if param is None:
             return
-        pmin, pmax = param.get("min"), param.get("max")
+        pmin, pmax = self.analog_stage_pitch_bounds(param)
         if not isinstance(pmin, (int, float)) or not isinstance(pmax, (int, float)) or pmax <= pmin:
             return
         fraction = max(0.0, min(1.0, float(normalized_value)))
@@ -3015,6 +3018,62 @@ class ShadowboxUI:
         self.state.surface_focus = stage - 1
         self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
         self.request_render("surface_touch")
+
+    @property
+    def analog_pitch_range(self) -> tuple[int, int]:
+        pitch_range = self.state.surface_state.setdefault("pitch_range", {"low": 24, "high": 72})
+        if not isinstance(pitch_range, dict):
+            pitch_range = {"low": 24, "high": 72}
+            self.state.surface_state["pitch_range"] = pitch_range
+        try:
+            low = max(0, min(127, int(round(float(pitch_range.get("low", 24))))))
+            high = max(0, min(127, int(round(float(pitch_range.get("high", 72))))))
+        except (TypeError, ValueError):
+            low, high = 24, 72
+        low = min(low, high)
+        pitch_range.update({"low": low, "high": high})
+        return low, high
+
+    def analog_stage_pitch_bounds(self, param: dict | None) -> tuple[float | None, float | None]:
+        if not isinstance(param, dict):
+            return None, None
+        wire_min, wire_max = param.get("min"), param.get("max")
+        if not isinstance(wire_min, (int, float)) or not isinstance(wire_max, (int, float)):
+            return None, None
+        low, high = self.analog_pitch_range
+        bounded_low = max(float(wire_min), float(low))
+        bounded_high = min(float(wire_max), float(high))
+        if bounded_low <= bounded_high:
+            return bounded_low, bounded_high
+        nearest = max(float(wire_min), min(float(wire_max), float(low)))
+        return nearest, nearest
+
+    def _handle_analog_pitch_range(self, boundary: str, normalized_value: float | None) -> None:
+        if self.state.ui_mode != "INSTANCE_SURFACE" or self.state.active_surface_key != "analog_sequencer":
+            return
+        if boundary not in {"low", "high"} or normalized_value is None:
+            return
+        low, high = self.analog_pitch_range
+        value = max(0, min(127, int(round(max(0.0, min(1.0, float(normalized_value))) * 127.0))))
+        if boundary == "low":
+            low = min(value, high)
+        else:
+            high = max(value, low)
+        self.state.surface_state["pitch_range"] = {"low": low, "high": high}
+
+        for stage in range(1, 17):
+            param = self.surface_param_binding(f"stage_{stage:02d}_value")
+            if param is None or not isinstance(param.get("value"), (int, float)):
+                continue
+            pmin, pmax = self.analog_stage_pitch_bounds(param)
+            if pmin is None or pmax is None:
+                continue
+            clipped = quantize_edit_value(param, max(pmin, min(pmax, float(param["value"]))))
+            if abs(float(clipped) - float(param["value"])) < 1e-9:
+                continue
+            param["value"] = clipped
+            self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=clipped))
+        self.request_render("analog_pitch_range")
 
     def _handle_surface_toggle(self, index: int | None) -> None:
         if self.state.ui_mode != "INSTANCE_SURFACE" or index is None:
@@ -3874,6 +3933,9 @@ class ShadowboxUI:
                     param = self.surface_param_binding(f"stage_{stage:02d}_value")
                     if param is not None:
                         value = apply_edit_delta(param, param.get("value"), step)
+                        pmin, pmax = self.analog_stage_pitch_bounds(param)
+                        if pmin is not None and pmax is not None:
+                            value = max(pmin, min(pmax, value))
                         param["value"] = value
                         self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
                 else:

@@ -402,9 +402,9 @@ class EncoderInput:
                             sample.normalized_y,
                             layout=self._touch_layout,
                         )
-                    if sample_pressed and self._touch_capture is None and action.kind == "set_surface_value":
+                    if sample_pressed and self._touch_capture is None and action.kind in {"set_surface_value", "set_surface_range"}:
                         self._touch_capture = (action.kind, action.index, action.button_id)
-                    if sample_pressed and action.kind not in {"set_edit_value", "set_surface_value"}:
+                    if sample_pressed and action.kind not in {"set_edit_value", "set_surface_value", "set_surface_range"}:
                         continue
                     event = EncoderEvent(
                         kind=action.kind,
@@ -413,7 +413,7 @@ class EncoderInput:
                         value=action.value,
                         pressed=sample_pressed,
                     )
-                    if action.kind in {"set_edit_value", "set_surface_value"} and sample_pressed:
+                    if action.kind in {"set_edit_value", "set_surface_value", "set_surface_range"} and sample_pressed:
                         latest_slider_event = event
                         continue
                     if latest_slider_event is not None:

@@ -12,7 +12,7 @@ sys.modules.setdefault("pythonosc", pythonosc_module)
 sys.modules.setdefault("pythonosc.udp_client", udp_client_module)
 
 from shadowbox.renderer import STEP16_ENABLED_FILL_LEVEL, ShadowboxRenderer
-from shadowbox.editors.step16 import is_step16_param
+from shadowbox.editors.step16 import is_step16_param, playhead_stage_index, playhead_state_key
 
 
 class _Step16Display:
@@ -51,6 +51,21 @@ class Step16RendererTests(unittest.TestCase):
     def test_trigger_sequencer_editor_alias_selects_step16(self) -> None:
         self.assertTrue(is_step16_param({"metadata": {"editor": "trigger sequencer"}}))
         self.assertTrue(is_step16_param({"metadata": {"editor": "trigger_sequencer"}}))
+
+    def test_trigger_sequencer_defaults_to_one_based_current_stage(self) -> None:
+        param = {"metadata": {"editor": "step16"}}
+
+        self.assertEqual(playhead_state_key(param), "current_stage")
+        self.assertEqual(playhead_stage_index([1.0], "current_stage"), 0)
+        self.assertEqual(playhead_stage_index([16.0], "current_stage"), 15)
+        self.assertIsNone(playhead_stage_index([0.0], "current_stage"))
+
+    def test_explicit_legacy_playhead_state_remains_zero_based(self) -> None:
+        param = {"metadata": {"editor": "step16", "playhead_state": "step16_playhead"}}
+
+        self.assertEqual(playhead_state_key(param), "step16_playhead")
+        self.assertEqual(playhead_stage_index([0.0], "step16_playhead"), 0)
+        self.assertEqual(playhead_stage_index([15.0], "step16_playhead"), 15)
 
     def test_tft_active_steps_use_70_percent_fill_level(self) -> None:
         display = _Step16Display()

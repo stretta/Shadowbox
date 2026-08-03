@@ -174,6 +174,13 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
         canvas.paste(scaled, (left, top))
         return canvas
 
+    def save_bitmap(self, path: str | Path) -> Path:
+        """Save the current rendered frame as a PNG without touching hardware."""
+        destination = Path(path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        self._frame_image().save(destination, format="PNG")
+        return destination
+
     def _pack_frame(self, image: Image.Image) -> bytes:
         def _pack_padded_rows(row_data: bytes, row_bytes: int) -> bytes:
             if self._stride == row_bytes:

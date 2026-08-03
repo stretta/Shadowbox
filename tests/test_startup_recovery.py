@@ -66,6 +66,7 @@ from shadowbox.shadowbox import (
     JACK_CARD_PATH_DEFAULT,
     JACK_RESTART_TIMEOUT_SECONDS,
     JACK_RESTART_PATH_DEFAULT,
+    STARTUP_EMPTY_SET_GRACE_SECONDS,
     STARTUP_DISCOVERY_TIMEOUT,
     STARTUP_AUDIO_DEVICE_PRIORITY_DEFAULT,
     _audio_device_priority_from_env,
@@ -74,12 +75,15 @@ from shadowbox.shadowbox import (
     _jack_restart_ready,
     _parse_audio_device_priority,
     _preferred_audio_device,
+    _report_transpose_delivery,
     _snapshot_ready,
     _snapshot_waiting_for_instances,
+    _startup_discovery_timed_out,
     _startup_status_lines,
     _startup_audio_attempt_timed_out,
     _transpose_osc_command,
     _try_startup_audio_device,
+    _update_empty_set_settling,
 )
 
 for _name, _module in _SAVED_MODULES.items():
@@ -227,6 +231,147 @@ def test_startup_waits_when_set_is_published_before_instances():
     assert _startup_status_lines(snapshot, stable_passes=0) == ("loading set", "Finch")
 
 
+def test_startup_accepts_named_set_that_remains_stably_empty():
+    snapshot = SimpleNamespace(
+        instances=[],
+        patchers=["Empty"],
+        add_instance_path="/rnbo/inst/control/load",
+        remove_instance_path="/rnbo/inst/control/unload",
+        system={
+            "set_name": "New Blank Graph",
+            "sets": {
+                "current_name": "New Blank Graph",
+                "initial_value": "",
+                "auto_start_last": True,
+            },
+            "status": {"runner_version": "1.4.4"},
+            "audio": {"current_card": "hw:Dummy", "card_options": ["hw:Dummy"], "sample_rate_options": [48000]},
+            "maint": {"jack_restart_path": "/rnbo/jack/restart"},
+        },
+    )
+
+    signature, settled_since, allow_empty = _update_empty_set_settling(snapshot, None, None, 10.0)
+    assert not allow_empty
+
+    signature, settled_since, allow_empty = _update_empty_set_settling(
+        snapshot,
+        signature,
+        settled_since,
+        10.0 + STARTUP_EMPTY_SET_GRACE_SECONDS,
+    )
+
+    assert allow_empty
+    assert _snapshot_ready(snapshot, allow_empty_set=True)
+    assert _startup_status_lines(snapshot, allow_empty_set=True) == ("RNBO found", "stabilizing...")
+
+
+def test_empty_set_grace_resets_when_runner_snapshot_changes():
+    def snapshot(set_name, card="hw:Dummy"):
+        return SimpleNamespace(
+            instances=[],
+            patchers=["Empty"],
+            add_instance_path="/rnbo/inst/control/load",
+            remove_instance_path="/rnbo/inst/control/unload",
+            system={
+                "set_name": set_name,
+                "sets": {"current_name": set_name, "initial_value": "", "auto_start_last": True},
+                "status": {"runner_version": "1.4.4"},
+                "audio": {"current_card": card, "card_options": [card], "sample_rate_options": [48000]},
+                "maint": {"jack_restart_path": "/rnbo/jack/restart"},
+            },
+        )
+
+    signature, settled_since, _allow_empty = _update_empty_set_settling(snapshot("Blank A"), None, None, 5.0)
+    changed_signature, changed_since, allow_empty = _update_empty_set_settling(
+        snapshot("Blank B", card="hw:ES8"),
+        signature,
+        settled_since,
+        5.0 + STARTUP_EMPTY_SET_GRACE_SECONDS,
+    )
+
+    assert changed_signature != signature
+    assert changed_since == 5.0 + STARTUP_EMPTY_SET_GRACE_SECONDS
+    assert not allow_empty
+
+
+def test_empty_set_grace_clears_when_instances_arrive():
+    snapshot = SimpleNamespace(
+        instances=[],
+        patchers=["Voice"],
+        add_instance_path="/rnbo/inst/control/load",
+        remove_instance_path="/rnbo/inst/control/unload",
+        system={
+            "set_name": "Slow Set",
+            "sets": {"current_name": "Slow Set", "initial_value": "", "auto_start_last": True},
+            "status": {"runner_version": "1.4.4"},
+            "audio": {"current_card": "hw:Dummy", "card_options": ["hw:Dummy"], "sample_rate_options": [48000]},
+            "maint": {"jack_restart_path": "/rnbo/jack/restart"},
+        },
+    )
+    signature, settled_since, _allow_empty = _update_empty_set_settling(snapshot, None, None, 2.0)
+    snapshot.instances = [{"id": "1", "label": "Voice"}]
+
+    signature, settled_since, allow_empty = _update_empty_set_settling(
+        snapshot,
+        signature,
+        settled_since,
+        3.0,
+    )
+
+    assert signature is None
+    assert settled_since is None
+    assert not allow_empty
+    assert _snapshot_ready(snapshot)
+
+
+def test_empty_set_grace_ignores_volatile_transport_values():
+    snapshot = SimpleNamespace(
+        instances=[],
+        patchers=["Empty"],
+        add_instance_path="/rnbo/inst/control/load",
+        remove_instance_path="/rnbo/inst/control/unload",
+        system={
+            "set_name": "New Blank Graph",
+            "sets": {"current_name": "New Blank Graph", "initial_value": "", "auto_start_last": True},
+            "status": {"runner_version": "1.4.4"},
+            "audio": {"current_card": "hw:Dummy", "card_options": ["hw:Dummy"], "sample_rate_options": [48000]},
+            "maint": {"jack_restart_path": "/rnbo/jack/restart"},
+            "transport": {"bpm": 120.0, "rolling": False},
+        },
+    )
+    signature, settled_since, _allow_empty = _update_empty_set_settling(snapshot, None, None, 4.0)
+    snapshot.system["transport"] = {"bpm": 98.0, "rolling": True}
+
+    unchanged_signature, unchanged_since, allow_empty = _update_empty_set_settling(
+        snapshot,
+        signature,
+        settled_since,
+        4.0 + STARTUP_EMPTY_SET_GRACE_SECONDS,
+    )
+
+    assert unchanged_signature == signature
+    assert unchanged_since == settled_since
+    assert allow_empty
+
+
+def test_startup_timeout_is_not_blocked_by_named_empty_set():
+    snapshot = SimpleNamespace(
+        instances=[],
+        patchers=["Empty"],
+        add_instance_path="/rnbo/inst/control/load",
+        remove_instance_path="/rnbo/inst/control/unload",
+        system={
+            "set_name": "New Blank Graph",
+            "sets": {"current_name": "New Blank Graph", "initial_value": "", "auto_start_last": True},
+            "status": {"runner_version": "1.4.4"},
+            "audio": {"current_card": "hw:Dummy", "card_options": ["hw:Dummy"], "sample_rate_options": [48000]},
+            "maint": {"jack_restart_path": "/rnbo/jack/restart"},
+        },
+    )
+
+    assert _startup_discovery_timed_out(0.0, STARTUP_DISCOVERY_TIMEOUT, "", snapshot)
+
+
 def test_startup_allows_empty_runner_when_no_set_is_expected():
     snapshot = SimpleNamespace(
         instances=[],
@@ -301,6 +446,22 @@ def test_transpose_fanout_reports_out_of_range_without_clamping():
 
     assert _fanout_transpose(ui, rnbo, "scalar", 8, {}) == (0, 1)
     assert rnbo.sent == []
+
+
+def test_transpose_delivery_feedback_is_quiet_when_no_target_participates():
+    ui = SimpleNamespace(status_messages=[], set_status_message=lambda message: ui.status_messages.append(message))
+
+    _report_transpose_delivery(ui, 0)
+
+    assert ui.status_messages == []
+
+
+def test_transpose_delivery_feedback_reports_published_target_range_failure():
+    ui = SimpleNamespace(status_messages=[], set_status_message=lambda message: ui.status_messages.append(message))
+
+    _report_transpose_delivery(ui, 2)
+
+    assert ui.status_messages == ["2 transpose target out of range"]
 
 
 def test_source_aware_transpose_osc_command_preserves_declared_source():

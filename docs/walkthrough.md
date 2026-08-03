@@ -102,15 +102,15 @@ The `step16` editor is designed for a 16-step binary sequence stored in one para
 Expected published structure:
 - editable param: `/rnbo/inst/<id>/params/<name>`
 - param metadata: `{"editor":"step16"}`
-- runtime playhead: `/rnbo/inst/<id>/messages/out/step16_playhead`
+- runtime playhead: `/rnbo/inst/<id>/messages/out/current_stage`
 
 Expected semantics:
 - the editable parameter is a 16-bit mask in the range `0..65535`
 - bit 0 corresponds to step 1 in the UI
-- the playhead is a read-only integer-like value in the range `0..15`
+- `current_stage` is a read-only integer-like value in the range `1..16`
 
 Optional metadata overrides:
-- `playhead_state`: alternate state key for the playhead
+- `playhead_state`: alternate state key for a legacy or custom zero-based playhead
 
 Shadowbox behavior:
 - step input moves the focus step
@@ -260,9 +260,14 @@ For metadata-driven UI integration, the RNBO side should follow these rules:
 - use metadata to describe UI intent, including specialized editors, display hints, and edit behavior
 - keep UI navigation state out of the patch
 
-For `step16`, the recommended split is:
+For the `TriggerSequencer` `step16` editor, the recommended split is:
 - param: sequence mask
-- out: step16_playhead
+- out: current_stage (1..16)
+
+The remaining normalized Trigger Sequencer parameter names are `MaxSteps`
+(an enum displayed as 1..16 with underlying values 0..15) and
+`TriggerDuration`. Shadowbox consumes those names and enum choices directly
+from the live OSCQuery tree rather than hard-coding parameter aliases.
 
 For the tuner-style pitch display, the recommended split is:
 - param: viewer/dummy parameter with `{"editor":"pitch_display"}`

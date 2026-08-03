@@ -46,6 +46,7 @@ STARTUP_DISCOVERY_TIMEOUT = 60.0
 STARTUP_DISCOVERY_POLL_SECONDS = 0.4
 STARTUP_STABLE_PASSES = 2
 STARTUP_FOUND_HOLD_SECONDS = 1.0
+STARTUP_EMPTY_SET_GRACE_SECONDS = 8.0
 STARTUP_AUDIO_DEVICE_PRIORITY_DEFAULT = (
     "hw:ES8",
     "hw:sndrpihifiberry",
@@ -125,6 +126,10 @@ SLEEP_TIMEOUT = max(DIM_TIMEOUT, _env_float("SHADOWBOX_SLEEP_TIMEOUT", SLEEP_TIM
 BRIGHTNESS_NORMAL = max(0, min(255, _env_int("SHADOWBOX_BRIGHTNESS_NORMAL", BRIGHTNESS_NORMAL)))
 BRIGHTNESS_DIM = max(0, min(BRIGHTNESS_NORMAL, _env_int("SHADOWBOX_BRIGHTNESS_DIM", BRIGHTNESS_DIM)))
 STARTUP_DISCOVERY_TIMEOUT = max(0.0, _env_float("SHADOWBOX_STARTUP_DISCOVERY_TIMEOUT", STARTUP_DISCOVERY_TIMEOUT))
+STARTUP_EMPTY_SET_GRACE_SECONDS = max(
+    0.0,
+    _env_float("SHADOWBOX_STARTUP_EMPTY_SET_GRACE_SECONDS", STARTUP_EMPTY_SET_GRACE_SECONDS),
+)
 STARTUP_AUDIO_DEVICE_PRIORITY = _audio_device_priority_from_env()
 JACK_RESTART_TIMEOUT_SECONDS = max(
     1.0,
@@ -290,10 +295,10 @@ def _capture_index(name: str) -> int:
     return int(match.group(1)) if match else 10**9
 
 
-def _snapshot_ready(snapshot) -> bool:
+def _snapshot_ready(snapshot, *, allow_empty_set: bool = False) -> bool:
     if snapshot is None:
         return False
-    if _snapshot_waiting_for_instances(snapshot):
+    if _snapshot_waiting_for_instances(snapshot) and not allow_empty_set:
         return False
     audio = snapshot.system.get("audio", {})
     status = snapshot.system.get("status", {})
@@ -352,6 +357,9 @@ def _snapshot_signature(snapshot) -> tuple:
     status = snapshot.system.get("status", {})
     maint = snapshot.system.get("maint", {})
     transport = snapshot.system.get("transport", {})
+    sets = snapshot.system.get("sets", {})
+    if not isinstance(sets, dict):
+        sets = {}
     return (
         tuple((str(item.get("id", "")), str(item.get("label", ""))) for item in snapshot.instances),
         tuple(str(item) for item in snapshot.patchers),
@@ -366,6 +374,71 @@ def _snapshot_signature(snapshot) -> tuple:
         transport.get("bpm"),
         str(transport.get("rolling_path", "")),
         transport.get("rolling"),
+        str(sets.get("current_name", "") or snapshot.system.get("set_name", "")),
+        str(sets.get("initial_value", "")),
+        sets.get("auto_start_last") is True,
+    )
+
+
+def _empty_set_settling_signature(snapshot) -> tuple:
+    """Track readiness inputs without volatile transport values.
+
+    RNBO publishes a set name before its instances and does not expose a set-loading
+    flag. A stable signature therefore provides the bounded settling signal for a
+    set that may intentionally contain no instances.
+    """
+    audio = snapshot.system.get("audio", {})
+    status = snapshot.system.get("status", {})
+    maint = snapshot.system.get("maint", {})
+    sets = snapshot.system.get("sets", {})
+    if not isinstance(sets, dict):
+        sets = {}
+    return (
+        tuple((str(item.get("id", "")), str(item.get("label", ""))) for item in snapshot.instances),
+        tuple(str(item) for item in snapshot.patchers),
+        str(snapshot.add_instance_path),
+        str(snapshot.remove_instance_path),
+        str(status.get("runner_version", "")),
+        str(audio.get("current_card", "")),
+        tuple(str(item) for item in audio.get("card_options", [])),
+        tuple(str(item) for item in audio.get("sample_rate_options", [])),
+        str(maint.get("jack_restart_path", "")),
+        str(sets.get("current_name", "") or snapshot.system.get("set_name", "")),
+        str(sets.get("initial_value", "")),
+        sets.get("auto_start_last") is True,
+    )
+
+
+def _update_empty_set_settling(
+    snapshot,
+    previous_signature: tuple | None,
+    settled_since: float | None,
+    now: float,
+) -> tuple[tuple | None, float | None, bool]:
+    if not _snapshot_waiting_for_instances(snapshot):
+        return None, None, False
+
+    signature = _empty_set_settling_signature(snapshot)
+    if signature != previous_signature or settled_since is None:
+        settled_since = now
+
+    settled = (now - settled_since) >= STARTUP_EMPTY_SET_GRACE_SECONDS
+    return signature, settled_since, settled
+
+
+def _startup_discovery_timed_out(
+    startup_started: float,
+    now: float,
+    startup_audio_attempted_device: str,
+    snapshot,
+    *,
+    allow_empty_set: bool = False,
+) -> bool:
+    return bool(
+        STARTUP_DISCOVERY_TIMEOUT > 0.0
+        and (now - startup_started) >= STARTUP_DISCOVERY_TIMEOUT
+        and not startup_audio_attempted_device
+        and not _snapshot_ready(snapshot, allow_empty_set=allow_empty_set)
     )
 
 
@@ -479,13 +552,18 @@ def _apply_saved_midi_profile(ui, rnbo, instance_id: str) -> int:
     return applied
 
 
-def _startup_status_lines(snapshot, stable_passes: int = 0) -> tuple[str, str]:
-    if _snapshot_waiting_for_instances(snapshot):
+def _startup_status_lines(
+    snapshot,
+    stable_passes: int = 0,
+    *,
+    allow_empty_set: bool = False,
+) -> tuple[str, str]:
+    if _snapshot_waiting_for_instances(snapshot) and not allow_empty_set:
         label = _snapshot_loading_set_label(snapshot)
         if label:
             return "loading set", label
         return "loading instances", "waiting for RNBO"
-    if _snapshot_ready(snapshot):
+    if _snapshot_ready(snapshot, allow_empty_set=allow_empty_set):
         if stable_passes < STARTUP_STABLE_PASSES:
             return "RNBO found", "stabilizing..."
         return "OSCQuery Runner found!", "Launching..."
@@ -606,6 +684,12 @@ def _fanout_transpose(
     return sent, unsupported
 
 
+def _report_transpose_delivery(ui, unsupported: int) -> None:
+    """Report actionable target failures; having no target is a valid synth setup."""
+    if unsupported:
+        ui.set_status_message(f"{unsupported} transpose target out of range")
+
+
 def _sync_new_transpose_targets(
     ui,
     rnbo,
@@ -684,6 +768,9 @@ def main():
     startup_audio_failed_devices: set[str] = set()
     startup_audio_attempted_device = ""
     startup_audio_attempt_started = None
+    startup_empty_set_signature = None
+    startup_empty_set_since = None
+    startup_allow_empty_set = False
 
     current_snapshot = None
     proceed_from_startup = False
@@ -731,9 +818,35 @@ def main():
                     startup_signature = None
                     startup_stable_passes = 0
                     startup_found_at = None
+                    startup_empty_set_signature = None
+                    startup_empty_set_since = None
+                    startup_allow_empty_set = False
                     continue
 
-                if not startup_audio_attempted_device and _snapshot_ready(current_snapshot):
+                was_allowing_empty_set = startup_allow_empty_set
+                if startup_audio_attempted_device or _audio_needs_recovery(audio):
+                    startup_empty_set_signature = None
+                    startup_empty_set_since = None
+                    startup_allow_empty_set = False
+                else:
+                    (
+                        startup_empty_set_signature,
+                        startup_empty_set_since,
+                        startup_allow_empty_set,
+                    ) = _update_empty_set_settling(
+                        current_snapshot,
+                        startup_empty_set_signature,
+                        startup_empty_set_since,
+                        now,
+                    )
+                if startup_allow_empty_set and not was_allowing_empty_set:
+                    label = _snapshot_loading_set_label(current_snapshot) or "unnamed set"
+                    print(f"RNBO set {label!r} remained empty; continuing startup")
+
+                if not startup_audio_attempted_device and _snapshot_ready(
+                    current_snapshot,
+                    allow_empty_set=startup_allow_empty_set,
+                ):
                     signature = _snapshot_signature(current_snapshot)
                     if signature == startup_signature:
                         startup_stable_passes += 1
@@ -755,12 +868,12 @@ def main():
             if startup_found_at is not None and (now - startup_found_at) >= STARTUP_FOUND_HOLD_SECONDS:
                 break
 
-            if (
-                STARTUP_DISCOVERY_TIMEOUT > 0.0
-                and (now - startup_started) >= STARTUP_DISCOVERY_TIMEOUT
-                and not startup_audio_attempted_device
-                and not _snapshot_ready(current_snapshot)
-                and not _snapshot_waiting_for_instances(current_snapshot)
+            if _startup_discovery_timed_out(
+                startup_started,
+                now,
+                startup_audio_attempted_device,
+                current_snapshot,
+                allow_empty_set=startup_allow_empty_set,
             ):
                 print("Startup discovery timed out; leaving the configured audio device unchanged")
                 break
@@ -768,6 +881,7 @@ def main():
             status_line, hint_line = _startup_status_lines(
                 current_snapshot,
                 startup_stable_passes,
+                allow_empty_set=startup_allow_empty_set,
             )
             renderer.draw_startup_status(
                 "SHADOWBOX",
@@ -1000,17 +1114,14 @@ def main():
 
                 elif action.kind == "set_transpose":
                     if action.path is not None and ui.state.transpose_authority == "standalone":
-                        sent, unsupported = _fanout_transpose(
+                        _sent, unsupported = _fanout_transpose(
                             ui,
                             rnbo,
                             action.path,
                             int(action.value),
                             transpose_delivered,
                         )
-                        if unsupported:
-                            ui.set_status_message(f"{unsupported} transpose target out of range")
-                        elif sent == 0 and not transpose_targets(ui.state.instances, action.path):
-                            ui.set_status_message("No compatible transpose targets")
+                        _report_transpose_delivery(ui, unsupported)
 
                 elif action.kind == "configure_transpose_midi":
                     transpose_midi.configure(str(action.value or ""))

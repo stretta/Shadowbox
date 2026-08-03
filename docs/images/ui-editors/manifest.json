@@ -1,0 +1,68 @@
+{
+  "screenshots": [
+    {
+      "file": "ttid.png",
+      "title": "TTID",
+      "category": "parameter editor",
+      "description": "Pitch-class set keyboard and scale controls.",
+      "width": 800,
+      "height": 480
+    },
+    {
+      "file": "step16.png",
+      "title": "Step 16",
+      "category": "parameter editor",
+      "description": "Sixteen-step trigger-pattern editor.",
+      "width": 800,
+      "height": 480
+    },
+    {
+      "file": "organ.png",
+      "title": "Organ",
+      "category": "instance surface",
+      "description": "Nine-drawbar organ surface.",
+      "width": 800,
+      "height": 480
+    },
+    {
+      "file": "analog-sequencer.png",
+      "title": "Analog Sequencer",
+      "category": "instance surface",
+      "description": "Sixteen-stage pitch and gate surface.",
+      "width": 800,
+      "height": 480
+    },
+    {
+      "file": "time-domain-scope.png",
+      "title": "Time Domain Scope",
+      "category": "instance surface",
+      "description": "Live waveform and sampling-rate surface.",
+      "width": 800,
+      "height": 480
+    },
+    {
+      "file": "tuner.png",
+      "title": "Tuner",
+      "category": "instance surface",
+      "description": "Pitch and cents display.",
+      "width": 800,
+      "height": 480
+    },
+    {
+      "file": "list-sequencer.png",
+      "title": "List Sequencer",
+      "category": "instance surface",
+      "description": "Seven list fields with direct-entry keypad.",
+      "width": 800,
+      "height": 480
+    },
+    {
+      "file": "list-vel-sequencer.png",
+      "title": "List Velocity Sequencer",
+      "category": "instance surface",
+      "description": "Eight velocity rows with pitch context.",
+      "width": 800,
+      "height": 480
+    }
+  ]
+}

@@ -3752,8 +3752,9 @@ class ShadowboxRenderer:
                 value_param = ui.surface_param_binding(f"stage_{index + 1:02d}_value")
                 enabled_param = ui.surface_param_binding(f"stage_{index + 1:02d}_enabled")
                 value = value_param.get("value") if value_param else 0
-                pmin = value_param.get("min") if value_param else 0
-                pmax = value_param.get("max") if value_param else 127
+                pmin, pmax = ui.analog_stage_pitch_bounds(value_param)
+                pmin = pmin if pmin is not None else 0
+                pmax = pmax if pmax is not None else 127
                 try:
                     fraction = (float(value) - float(pmin)) / max(1e-9, float(pmax) - float(pmin))
                 except (TypeError, ValueError):
@@ -3804,9 +3805,46 @@ class ShadowboxRenderer:
 
             focused_param = ui.surface_param_binding(f"stage_{focus + 1:02d}_value")
             focused_value = focused_param.get("value") if focused_param else "-"
+            range_low, range_high = ui.analog_pitch_range
+            range_y = panel_y + panel_h - 38
+            range_h = 28
+            range_w = 190
+            low_x = panel_x + 16
+            high_x = panel_x + panel_w - 16 - range_w
+            for boundary, value, range_x in (("low", range_low, low_x), ("high", range_high, high_x)):
+                if self.has_color:
+                    self._rounded_theme(range_x, range_y, range_w, range_h, 7, "panel_alt", True)
+                    self._rect_theme(range_x, range_y, range_w, range_h, "line", False)
+                    rail_x = range_x + 8
+                    rail_w = range_w - 16
+                    marker_x = rail_x + int(round((rail_w - 1) * (value / 127.0)))
+                    self._hline_theme(rail_x, range_y + range_h - 5, rail_w, "line")
+                    self._fill_theme(max(rail_x, marker_x - 2), range_y + range_h - 9, 4, 8, "accent")
+                    label = f"{boundary.upper()}  {self._midi_note_name(value)}  {value}"
+                    label_w, label_h = self._measure_text(label, 1, "medium")
+                    self._text_theme(
+                        label,
+                        range_x + max(6, (range_w - label_w) // 2),
+                        range_y + max(2, (range_h - label_h) // 2),
+                        "text",
+                        1,
+                        "medium",
+                    )
+                else:
+                    self.display.rect(range_x, range_y, range_w, range_h, True, False)
+                self._record_touch_target(
+                    "analog_pitch_range",
+                    range_x,
+                    range_y,
+                    range_w,
+                    range_h,
+                    action_kind="set_surface_range",
+                    button_id=boundary,
+                    label=f"{boundary.upper()} {self._midi_note_name(value)}",
+                )
             self._text_theme(
                 f"STAGE {focus + 1:02d}  {format_display_value(focused_value)}",
-                panel_x + 18,
+                panel_x + (panel_w // 2) - 96,
                 panel_y + panel_h - 26,
                 "accent" if adjusting else "text",
                 2,
@@ -3823,8 +3861,11 @@ class ShadowboxRenderer:
             value_param = ui.surface_param_binding(f"stage_{index + 1:02d}_value")
             enabled_param = ui.surface_param_binding(f"stage_{index + 1:02d}_enabled")
             value = value_param.get("value") if value_param else 0
+            pmin, pmax = ui.analog_stage_pitch_bounds(value_param)
+            pmin = pmin if pmin is not None else 0
+            pmax = pmax if pmax is not None else 127
             try:
-                fraction = max(0.0, min(1.0, float(value) / 127.0))
+                fraction = max(0.0, min(1.0, (float(value) - pmin) / max(1e-9, pmax - pmin)))
             except (TypeError, ValueError):
                 fraction = 0.0
             bar_h = max(1, int(round(height * fraction)))

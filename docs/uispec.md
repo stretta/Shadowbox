@@ -127,6 +127,7 @@ Rules:
 - The ListVelSequencer surface binds eight ordered velocity-list rows to `1row` through `8row`, requires the corresponding `1map` through `8map` pitch parameters, and shows each row's current pitch beside its row number
 - ListVelSequencer uses the same compact keypad and ACK-backed `-999` hydration pattern as ListSequencer; `SEND ROW` transmits only the selected row as one atomic list and accepts MIDI velocity values from `0` through `127`
 - ListVelSequencer pitch maps remain ordinary parameters under `PARAMETERS`; the instance surface displays their live values for row context without synthesizing another pitch editor
+- The AnalogSequencer surface keeps its 16-column stage layout and adds compact `LOW` and `HIGH` MIDI-note rails in the footer. Those editor-only bounds default to MIDI 24 through 72, scale touch and encoder pitch edits across the selected interval, and clip existing stage values only when the user changes a boundary; they do not alter the RNBO parameter range or add snapshot state.
 - `ADD INSTANCE` should appear in the `INSTANCES` menu only if the backend exposes a supported command path for creating an instance from a patcher
 - `SYSTEM` is always present
 - Outside `SYSTEM`, only published branches appear; empty branches may render as empty lists, but no synthetic content should be added
@@ -281,7 +282,7 @@ Editor behavior:
 - Boolean parameters can toggle directly from the parameter list when explicitly marked as bool; they stay opt-in via metadata and do not need the deeper edit screen in the first pass
 - Enum parameters use a list selector when RNBO publishes an explicit enum value list
 - TTID uses a specialized editor only when the parameter metadata explicitly includes `editor: "ttid"`
-- `step16` uses a specialized live editor when the parameter metadata explicitly includes `editor: "step16"`; its default runtime state key is `step16_playhead` and may be overridden with `playhead_state`
+- `step16` uses a specialized live editor when the parameter metadata explicitly includes `editor: "step16"`; its default runtime state key is the one-based `current_stage` outport and may be overridden with `playhead_state` for legacy or custom zero-based feeds
 - Numeric parameters may be presented as integer-style controls only when metadata such as `display_as: "int"` or `edit_as: "int"` is present, even if RNBO Runner publishes the raw value as float-like
 
 8. Instance Presets

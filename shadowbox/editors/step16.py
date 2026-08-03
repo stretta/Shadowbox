@@ -8,6 +8,7 @@ from typing import Any
 
 STEP16_COUNT = 16
 STEP16_MAX_MASK = (1 << STEP16_COUNT) - 1
+STEP16_DEFAULT_PLAYHEAD_STATE = "current_stage"
 STEP16_EDITOR_NAMES = {
     "step16",
     "step 16",
@@ -40,8 +41,28 @@ def playhead_state_key(param: dict | None) -> str:
     metadata = param.get("metadata", {}) if isinstance(param, dict) else {}
     if not isinstance(metadata, dict):
         metadata = {}
-    value = metadata.get("playhead_state", "step16_playhead")
-    return str(value).strip() or "step16_playhead"
+    value = metadata.get("playhead_state", STEP16_DEFAULT_PLAYHEAD_STATE)
+    return str(value).strip() or STEP16_DEFAULT_PLAYHEAD_STATE
+
+
+def playhead_stage_index(value: Any, state_key: str = STEP16_DEFAULT_PLAYHEAD_STATE) -> int | None:
+    """Convert a published playhead value to the editor's zero-based cell index."""
+    if isinstance(value, list):
+        value = value[0] if value else None
+    if value is None:
+        return None
+    try:
+        playhead = int(value)
+    except Exception:
+        return None
+
+    # TriggerSequencer's current_stage outport publishes user-facing stages
+    # 1..16. Legacy/custom step16 state feeds remain zero-based unless they use
+    # the canonical current_stage name.
+    key = str(state_key).strip().lower().lstrip("/")
+    if key == "current_stage" or key.endswith("/current_stage"):
+        playhead -= 1
+    return clamp_playhead(playhead)
 
 
 def normalize_mask(value: Any) -> int:

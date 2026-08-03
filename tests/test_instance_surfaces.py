@@ -585,7 +585,7 @@ class InstanceSurfaceTests(unittest.TestCase):
         ui.handle_event(UIEvent("set_surface_value", index=2, value=0.5, pressed=True))
         ui.handle_event(UIEvent("toggle_surface_value", index=2))
 
-        self.assertAlmostEqual(ui.surface_param_binding("stage_03_value")["value"], 63.5)
+        self.assertAlmostEqual(ui.surface_param_binding("stage_03_value")["value"], 48.0)
         self.assertEqual(ui.surface_param_binding("stage_03_enabled")["value"], 0)
         writes = [action for action in ui.pop_actions() if action.kind == "set_param"]
         self.assertEqual(len(writes), 2)
@@ -603,13 +603,49 @@ class InstanceSurfaceTests(unittest.TestCase):
 
         targets = [target for target in renderer.touch_layout.targets if target.kind == "analog_stage_value"]
         toggles = [target for target in renderer.touch_layout.targets if target.kind == "analog_stage_toggle"]
+        ranges = [target for target in renderer.touch_layout.targets if target.kind == "analog_pitch_range"]
         self.assertEqual(len(targets), 16)
         self.assertEqual(len(toggles), 16)
+        self.assertEqual([target.button_id for target in ranges], ["low", "high"])
+        self.assertEqual([target.label for target in ranges], ["LOW C1", "HIGH C5"])
         self.assertTrue(all(not target.label for target in targets + toggles))
         rendered_text = [op[1] for op in renderer.display.ops if op[0] in {"text", "text_color"}]
         self.assertNotIn("STAGES", rendered_text)
         self.assertFalse(any(text in {str(index) for index in range(1, 17)} for text in rendered_text))
         self.assertTrue(all(toggle.h <= 34 for toggle in toggles))
+
+    def test_analog_pitch_range_clips_stages_and_constrains_touch(self):
+        ui = ShadowboxUI()
+        instance = _analog_instance()
+        instance["params"][0]["value"] = 20.0
+        instance["params"][2]["value"] = 90.0
+        ui.apply_runner_snapshot(_snapshot([instance]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        ui.pop_actions()
+
+        ui.handle_event(UIEvent("set_surface_range", value=48 / 127, button_id="high"))
+
+        self.assertEqual(ui.analog_pitch_range, (24, 48))
+        self.assertEqual(ui.surface_param_binding("stage_01_value")["value"], 24.0)
+        self.assertEqual(ui.surface_param_binding("stage_02_value")["value"], 48.0)
+        clipped = [action for action in ui.pop_actions() if action.kind == "set_param"]
+        self.assertEqual(len(clipped), 16)
+        self.assertEqual({action.value for action in clipped}, {24.0, 48.0})
+
+        ui.handle_event(UIEvent("set_surface_value", index=2, value=1.0, pressed=True))
+        self.assertEqual(ui.surface_param_binding("stage_03_value")["value"], 48.0)
+
+    def test_touch_layout_maps_pitch_range_horizontally(self):
+        layout = TouchLayout(800, 480)
+        layout.add_target("range", 100, 100, 256, 30, action_kind="set_surface_range", button_id="low")
+
+        action = layout.action_for_point(227 / 799, 110 / 479)
+
+        self.assertEqual(action.kind, "set_surface_range")
+        self.assertEqual(action.button_id, "low")
+        self.assertAlmostEqual(action.value, 127 / 255)
 
     def test_organ_touch_maps_top_to_minus_96_and_bottom_to_zero(self):
         ui = ShadowboxUI()
