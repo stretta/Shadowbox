@@ -27,6 +27,7 @@ Shadowbox complements the RNBO Runner web interface by providing a minimal physi
 
 # Documentation
 
+- [Shadowbox user guide](https://stretta.com/shadowbox/): complete user documentation, including a downloadable Raspberry Pi image and full installation walkthrough
 - [docs/uispec.md](./docs/uispec.md): UI behavior and interaction rules
 - [docs/architecture.md](./docs/architecture.md): codebase and runtime structure
 - [docs/walkthrough.md](./docs/walkthrough.md): end-to-end RNBO-to-Shadowbox editor flow, including `step16`
@@ -141,7 +142,11 @@ are displayed only through target agreement or mixed state.
 
 # Installation
 
-These instructions assume a fresh RNBO Raspberry Pi image.
+For the simplest complete setup, use the [Shadowbox user guide](https://stretta.com/shadowbox/).
+It provides a downloadable, ready-to-write Raspberry Pi image and a
+[full build and installation walkthrough](https://stretta.com/shadowbox/building-a-shadowbox/).
+The source-based instructions below are intended for development, customization,
+and manual installation, and assume a fresh RNBO Raspberry Pi image.
 
 Tested on:
 

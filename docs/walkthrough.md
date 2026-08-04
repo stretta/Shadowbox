@@ -24,7 +24,7 @@ On startup and on refresh, `shadowbox/rnbo.py` reads the OSCQuery tree and norma
 The snapshot currently includes:
 - instances
 - patchers
-- saved set capabilities and set names
+- saved set capabilities, set names, and startup configuration controls
 - set presets when Runner publishes `sets/presets`
 - instance presets
 - parameters
@@ -252,7 +252,87 @@ or numpad `+` deletes, numpad `-` toggles the sign when negative values are
 valid, and numpad `Enter` commits the range-clamped value. Encoder or touch
 adjustment cancels an unfinished keypad draft.
 
-6. RNBO authoring guidelines
+6. System control workflows
+
+System controls coordinate Runner-wide or host-level behavior. They are not
+instance surfaces and do not change the contract of ordinary parameter,
+routing, or performance-MIDI paths.
+
+6a. Chromatic and scalar transpose
+
+An RNBO instance participates in ensemble transpose by publishing either or
+both of these exact parameter names:
+
+- `ChromaticTranspose`: an integer offset in semitones
+- `ScalarTranspose`: an integer offset in scale steps
+
+Shadowbox discovers every matching live parameter by exact name. Mutable
+instance labels do not opt an instance in. Each parameter's published range is
+respected; Shadowbox skips an out-of-range target instead of clamping it.
+
+To configure standalone transpose:
+
+1. Open `SYSTEM -> TRANSPOSE`.
+2. Set `AUTHORITY` to `LOCAL`. Existing installations begin at `UNCONFIGURED`,
+   and neither touch, MIDI, nor semantic OSC fans out values until local
+   authority is selected explicitly.
+3. Optionally edit the `CHROMATIC` or `SCALAR` row directly. The editor uses the
+   intersection of the ranges published by all compatible targets.
+4. To use a MIDI keyboard, choose its ALSA input under `CONTROLLER`, then set
+   `FUNCTION` to `CHROMATIC TRANSPOSE` or `SCALAR TRANSPOSE`.
+
+The designated MIDI input maps note pitch to an absolute offset:
+
+```text
+offset = MIDI note - 60
+```
+
+Middle C, MIDI note 60, selects `0`; note 61 selects `+1`; note 59 selects
+`-1`. Only positive-velocity note-on messages change the latched offset.
+Velocity otherwise has no effect, note-off has no effect, and all MIDI
+channels are accepted from the designated port.
+
+This is a sidecar control path. Shadowbox does not relay the controller's
+ordinary performance MIDI to RNBO, so designation does not insert Shadowbox
+into the performance path. The controller is remembered by ALSA client and
+port name rather than its transient numeric address. A remembered disconnected
+port is shown as `OFFLINE` and is eligible to reconnect when the same named port
+returns.
+
+The transpose screen shows each canonical offset and the number of matching
+compatible targets. `MIXED` means at least one observed target differs from the
+canonical value or cannot accept it. In local mode, a newly discovered target
+receives the retained value once; routine discovery does not continually
+overwrite a later direct external edit.
+
+`SHADOWSCORE` records managed-authority intent but does not currently forward
+requests or fan out local values. It never falls back to `LOCAL` automatically.
+Source-aware local OSC can use port `13333` and these addresses:
+
+- `/shadowbox/transpose/chromatic`
+- `/shadowbox/transpose/scalar`
+
+The first argument is the offset; an optional second string is displayed as
+the source. Bare writes to RNBO parameter paths have no reliable provenance.
+
+Authority, offsets, controller identity, controller function, and the last
+source label are persisted in `~/rnbo-ui/shadowbox_state.json` under
+`transpose_control`.
+
+6b. Global Runner transport
+
+`SYSTEM -> TRANSPORT` appears only when OSCQuery publishes both global Runner
+controls:
+
+- `/rnbo/jack/transport/rolling`
+- `/rnbo/jack/transport/bpm`
+
+Selecting `STATE` toggles the published rolling value. Selecting `TEMPO` opens
+an editor constrained to `20.0..300.0 BPM` with one-BPM encoder steps. These
+actions control musical transport only; they do not stop or restart JACK and
+do not introduce ShadowScore player or arrangement state.
+
+7. RNBO authoring guidelines
 
 For metadata-driven UI integration, the RNBO side should follow these rules:
 - publish editable controls as parameters
@@ -274,13 +354,13 @@ For the tuner-style pitch display, the recommended split is:
 - out: pitch_name
 - out: pitch_cents
 
-7. Current limitations
+8. Current limitations
 
 - RNBO parameter values are currently treated as numeric values, so bitmask parameters may appear as floats in OSCQuery even when used as integers semantically
 - Shadowbox can coerce these to integers for editor logic, but the RNBO side should still quantize the parameter range appropriately
 - Unit metadata is only displayable if it is actually exposed through OSCQuery
 
-8. Relevant files
+9. Relevant files
 
 - `shadowbox/rnbo.py`: OSCQuery discovery and metadata parsing
 - `shadowbox/discovery.py`: background discovery coordination
@@ -289,6 +369,7 @@ For the tuner-style pitch display, the recommended split is:
 - `shadowbox/render_scheduler.py`: dirty-state and per-surface frame scheduling
 - `shadowbox/shadowbox.py`: runtime loop, refresh logic, and live OSC listener
 - `shadowbox/keypad.py`: optional USB numeric-keypad input
+- `shadowbox/transpose_control.py`: ALSA controller discovery, note parsing, and exact-name transpose target resolution
 - `shadowbox/surfaces/`: instance-surface registry and contract resolvers
 - `shadowbox/editors/step16.py`: `step16` editor logic
 - `docs/uispec.md`: UI behavior and editor rules

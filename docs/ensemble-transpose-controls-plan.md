@@ -1,5 +1,23 @@
 # Ensemble Transpose Controls Development Plan
 
+## Implementation status
+
+The standalone implementation is present in the current runtime:
+
+- Phases 1 through 3 are implemented, persisted, and covered by automated tests.
+- The source-aware local OSC ingress described below is implemented at
+  `/shadowbox/transpose/chromatic` and `/shadowbox/transpose/scalar`.
+- Deployment and service stability on `wren` were verified without a connected
+  MIDI controller.
+- Physical MIDI note behavior, performance-path latency, and stable-name
+  unplug/replug recovery still require validation with a controller attached.
+- Managed `SHADOWSCORE` authority remains intentionally non-operative pending
+  the cross-repository request/confirmation protocol in Phase 5.
+
+The remainder of this document preserves the original design and validation
+plan. Future-tense phase text is historical unless the status above marks the
+work as outstanding.
+
 ## Purpose
 
 Shadowbox needs a narrow class of standardized real-time system controls for
@@ -264,7 +282,9 @@ only in standalone mode.
 
 ## Initial Delivery Boundary
 
-The first implementation delivery covers Phases 1 through 4: authoritative
-standalone state, local UI, ALSA note input, RNBO fanout, persistence, and live
-`wren` validation. Phase 5 requires coordinated changes outside this repository
-and will not be simulated with an implicit or competing local authority.
+The first implementation delivery covers Phases 1 through 3: authoritative
+standalone state, local UI, ALSA note input, RNBO fanout, and persistence. The
+service portion of Phase 4 was exercised on `wren`, but its physical-controller
+checks remain open. Phase 5 requires coordinated changes outside this
+repository and will not be simulated with an implicit or competing local
+authority.

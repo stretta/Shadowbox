@@ -1,3 +1,6 @@
+For the complete hardware list, downloadable Raspberry Pi image, and illustrated
+installation walkthrough, see the [Shadowbox user guide](https://stretta.com/shadowbox/).
+
 Encoder wiring
 
 Encoder → Raspberry Pi

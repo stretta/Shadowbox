@@ -80,14 +80,20 @@ Module responsibilities:
 `keypad.py`
 - Optionally opens a configured USB keyboard event device alongside the primary encoder/touch input
 - Uses an exclusive evdev grab so numeric-keypad input does not leak to the Linux console behind the framebuffer UI
-- Emits context-neutral numeric-keypad events; `ui.py` routes them to ListSequencer or the regular numeric parameter editor and ignores them elsewhere
+- Emits context-neutral numeric-keypad events; `ui.py` routes them to ListSequencer, ListVelSequencer, or the regular numeric parameter editor and ignores them elsewhere
 - Reconnects after keypad unplug/replug without restarting Shadowbox
+
+`transpose_control.py`
+- Discovers ALSA MIDI input ports through `aconnect -i -l` and follows one designated port by stable client/port name
+- Runs a reconnecting `aseqdump` reader and emits only positive-velocity note-on events for the system transpose control path
+- Resolves compatible targets by the exact RNBO parameter names `ChromaticTranspose` and `ScalarTranspose`
+- Computes shared editable ranges and target agreement without relaying ordinary performance MIDI
 
 Data flow:
 1. `discovery.py` runs `rnbo.py` discovery work in background workers
 2. `shadowbox.py` applies completed, current-generation results on the main thread
 3. `ui.py` exposes derived state for navigation and requests a render when visible state changes
-4. User input is converted into UI events by `encoder.py` and optional `keypad.py`
+4. User input is converted into UI events by `encoder.py`, optional `keypad.py`, and the designated transpose MIDI monitor
 5. `ui.py` turns those events into UI actions
 6. `shadowbox.py` executes those actions via `rnbo.py`
 7. `renderer.py` draws only when `render_scheduler.py` determines a dirty or animated frame is due
@@ -105,6 +111,7 @@ Design rules:
 - Standardized transpose coordination is system-scoped: exact-name `ChromaticTranspose` and `ScalarTranspose` targets may share a canonical value only under explicit standalone authority
 - Existing installations begin with transpose authority unconfigured; network presence or absence never implies an authority transition
 - A designated ALSA MIDI note controller is observed beside the performance path and never becomes an inline MIDI relay
+- Global transport is exposed only when Runner publishes both `/rnbo/jack/transport/rolling` and `/rnbo/jack/transport/bpm`; it controls musical transport without restarting JACK
 - `SYSTEM` may include a narrow, explicitly documented set of host-level status or maintenance features outside OSCQuery when they are not owned by an instance
 - Modal selection and edit screens should pause background refresh so discovery does not fight the user
 - Parameter editors remain selected from explicit parameter metadata; instance surfaces are selected only from the canonical export name plus successful runtime binding resolution
