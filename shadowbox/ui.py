@@ -3539,17 +3539,23 @@ class ShadowboxUI:
     def _handle_touch_page(self, direction: int) -> None:
         if direction == 0:
             return
-        step = (1 if direction > 0 else -1) * TOUCH_PAGE_ROWS
         mode = self.state.ui_mode
 
-        def scroll_cursor(attr: str, count: int, *, first_index: int = 1) -> bool:
+        def scroll_cursor(
+            attr: str,
+            count: int,
+            *,
+            first_index: int = 1,
+            page_rows: int = TOUCH_PAGE_ROWS,
+        ) -> bool:
             if count <= 0:
                 return False
             last_index = first_index + count - 1
             current = int(getattr(self.state, attr))
             if current < first_index or current > last_index:
                 current = first_index
-            setattr(self.state, attr, max(first_index, min(last_index, current + step)))
+            page_step = (1 if direction > 0 else -1) * max(1, int(page_rows))
+            setattr(self.state, attr, max(first_index, min(last_index, current + page_step)))
             self.state.activity_ticks += 1
             return True
 
@@ -3568,6 +3574,10 @@ class ShadowboxUI:
             return
         if mode == "PARAM_LIST":
             scroll_cursor("param_cursor", len(self.active_params))
+            return
+        if mode == "ENUM_LIST":
+            if scroll_cursor("enum_cursor", len(self.active_enum_options), first_index=0, page_rows=4):
+                self.state.edit_value = self.active_enum_options[self.state.enum_cursor]
             return
         if mode == "PRESET_LIST":
             scroll_cursor("preset_cursor", len(self.preset_menu_items), first_index=0)

@@ -188,6 +188,44 @@ class TouchDirectUITests(unittest.TestCase):
         self.assertEqual(ui.state.param_cursor, 6)
         self.assertEqual(bool_param.get("value"), 0)
 
+    def test_enum_page_controls_scroll_maxcnt_and_allow_touch_selection(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.ui_mode = "ENUM_LIST"
+        ui.state.instances = [
+            {
+                "id": "1",
+                "params": [
+                    {
+                        "name": "MaxCnt",
+                        "value": "1",
+                        "path": "/params/MaxCnt",
+                        "vals": [str(value) for value in range(1, 17)],
+                    },
+                ],
+            }
+        ]
+        ui.state.active_instance_id = "1"
+        ui.state.param_cursor = 1
+        ui.state.enum_cursor = 0
+        ui.state.edit_value = "1"
+
+        renderer, _display = _render_touch_layout(ui)
+        page_down = _touch_action_for_target(renderer, kind="page_down", button_id="page_down")
+        ui.handle_event(UIEvent(kind=page_down.kind))
+
+        self.assertEqual(ui.state.enum_cursor, 4)
+        self.assertEqual(ui.state.edit_value, "5")
+
+        renderer, _display = _render_touch_layout(ui)
+        visible_indices = [target.index for target in renderer.touch_layout.targets if target.kind == "row"]
+        self.assertIn(4, visible_indices)
+        selected_row = _touch_action_for_target(renderer, kind="row", index=4)
+        ui.handle_event(UIEvent(kind=selected_row.kind, index=selected_row.index))
+
+        self.assertEqual(ui.state.ui_mode, "PARAM_LIST")
+        self.assertEqual(ui.selected_param["value"], "5")
+        self.assertTrue(any(action.kind == "set_param" and action.value == "5" for action in ui.pop_actions()))
+
     def test_instance_page_controls_scroll_instances_not_action_buttons(self) -> None:
         ui = ShadowboxUI()
         ui.state.ui_mode = "INSTANCE_LIST"
