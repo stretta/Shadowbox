@@ -262,11 +262,17 @@ def _list_sequencer_ui() -> ShadowboxUI:
 
 def _list_vel_sequencer_ui() -> ShadowboxUI:
     rows = range(1, 9)
+    mute_params = [_param(f"{row}mute", value="On" if row in {2, 6} else "Off") for row in rows]
+    for param in mute_params:
+        param["vals"] = ["Off", "On"]
     instance = {
         "id": "7",
         "name": "ListVelSequencer",
         "label": "List Velocity Sequencer",
-        "params": [_param(f"{row}map", value=35 + row, minimum=0, maximum=127) for row in rows],
+        "params": [
+            *[_param(f"{row}map", value=35 + row, minimum=0, maximum=127) for row in rows],
+            *mute_params,
+        ],
         "inputs": [_input(f"{row}row") for row in rows],
         "state": [
             _state(f"{row}rowAck", [max(0, 112 - row * 5), max(0, 96 - row * 3), 72])

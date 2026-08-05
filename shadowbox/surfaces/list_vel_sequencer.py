@@ -10,6 +10,24 @@ ROW_KEYS = tuple(f"row_{index}" for index in range(1, ROW_COUNT + 1))
 ROW_LABELS = {key: str(index) for index, key in enumerate(ROW_KEYS, start=1)}
 
 
+def mute_is_on(param: dict | None) -> bool:
+    if not isinstance(param, dict):
+        return False
+    value = param.get("value")
+    if isinstance(value, list):
+        value = value[0] if value else None
+    if isinstance(value, str):
+        return value.strip().lower() in {"on", "true", "yes", "1", "mute", "muted"}
+    return bool(value)
+
+
+def toggled_mute_value(param: dict) -> object:
+    values = param.get("vals")
+    if isinstance(values, list) and len(values) >= 2:
+        return values[0] if mute_is_on(param) else values[1]
+    return 0 if mute_is_on(param) else 1
+
+
 def _normalized_name(value: object) -> str:
     return "".join(char for char in str(value).lower() if char.isalnum())
 
@@ -40,6 +58,15 @@ def _row_input(inputs_by_name: dict[str, dict], row: int) -> dict | None:
     return candidates[0] if len(candidates) == 1 else None
 
 
+def _row_mute(params_by_name: dict[str, dict], row: int) -> dict | None:
+    candidates = [
+        params_by_name.get(f"{row}mute"),
+        params_by_name.get(f"mute{row}"),
+    ]
+    matches = [candidate for candidate in candidates if candidate is not None]
+    return matches[0] if len(matches) == 1 else None
+
+
 def resolve_list_vel_sequencer_bindings(instance: dict) -> ResolvedSurface | None:
     params_by_name = _items_by_name(instance.get("params"))
     inputs_by_name = _items_by_name(instance.get("inputs"))
@@ -50,10 +77,12 @@ def resolve_list_vel_sequencer_bindings(instance: dict) -> ResolvedSurface | Non
 
     for row, key in enumerate(ROW_KEYS, start=1):
         map_param = params_by_name.get(f"{row}map")
+        mute_param = _row_mute(params_by_name, row)
         input_item = _row_input(inputs_by_name, row)
-        if map_param is None or input_item is None:
+        if map_param is None or mute_param is None or input_item is None:
             return None
         params[f"{key}_map"] = map_param
+        params[f"{key}_mute"] = mute_param
         inputs[key] = input_item
         ack_item = state_by_name.get(f"{row}rowack")
         if ack_item is not None:

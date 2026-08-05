@@ -129,6 +129,12 @@ def _list_sequencer_instance():
 
 def _list_vel_sequencer_instance():
     names = [f"{row}row" for row in range(1, 9)]
+    mute_params = [
+        _param(f"{row}mute", value="On" if row == 2 else "Off")
+        for row in range(1, 9)
+    ]
+    for param in mute_params:
+        param["vals"] = ["Off", "On"]
     return {
         "id": "7",
         "name": "ListVelSequencer",
@@ -136,7 +142,7 @@ def _list_vel_sequencer_instance():
         "params": [
             _param(f"{row}map", value=float(35 + row), minimum=0.0, maximum=127.0)
             for row in range(1, 9)
-        ],
+        ] + mute_params,
         "inputs": [_list_input(name) for name in names],
         "state": [
             _state(f"{name}Ack", [40.0, 80.0] if name == "1row" else [64.0])
@@ -487,6 +493,7 @@ class InstanceSurfaceTests(unittest.TestCase):
         self.assertIsNotNone(resolved)
         self.assertEqual(resolved[0].key, "list_vel_sequencer")
         self.assertEqual(tuple(resolved[1].inputs), ROW_KEYS)
+        self.assertEqual(resolved[1].params["row_1_mute"]["name"], "1mute")
         self.assertEqual(resolved[1].params["row_4_map"]["name"], "4map")
         self.assertEqual(resolved[1].state["row_8_ack"]["name"], "8rowAck")
 
@@ -531,6 +538,22 @@ class InstanceSurfaceTests(unittest.TestCase):
         self.assertEqual(write.path, "/rnbo/inst/7/messages/in/3row")
         self.assertEqual(write.value, [24, 48, 96])
 
+    def test_list_vel_sequencer_mute_button_toggles_row_param(self):
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(_snapshot([_list_vel_sequencer_instance()]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        ui.pop_actions()
+
+        ui.handle_event(UIEvent("toggle_list_mute", index=1))
+
+        self.assertEqual(ui.surface_param_binding("row_2_mute")["value"], "Off")
+        self.assertEqual(ui.state.surface_focus, 1)
+        write = next(action for action in ui.pop_actions() if action.kind == "set_param")
+        self.assertEqual(write.path, "/rnbo/inst/7/params/2mute")
+        self.assertEqual(write.value, "Off")
+
     def test_list_vel_sequencer_rejects_velocity_outside_midi_range(self):
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(_snapshot([_list_vel_sequencer_instance()]))
@@ -559,7 +582,9 @@ class InstanceSurfaceTests(unittest.TestCase):
         rows = [target for target in renderer.touch_layout.targets if target.kind == "list_field"]
         keys = [target for target in renderer.touch_layout.targets if target.kind == "list_key"]
         sends = [target for target in renderer.touch_layout.targets if target.kind == "list_send"]
+        mutes = [target for target in renderer.touch_layout.targets if target.kind == "list_mute"]
         self.assertEqual(len(rows), 8)
+        self.assertEqual(len(mutes), 8)
         self.assertEqual(len(keys), 12)
         self.assertEqual(len(sends), 1)
         self.assertEqual([target.label for target in rows], [
@@ -573,6 +598,7 @@ class InstanceSurfaceTests(unittest.TestCase):
             "8:43",
         ])
         self.assertEqual(sends[0].label, "SEND ROW")
+        self.assertTrue(all(target.label == "M" for target in mutes))
         self.assertFalse(any(target.kind == "list_sign" for target in renderer.touch_layout.targets))
 
     def test_analog_touch_updates_stage_and_toggle(self):

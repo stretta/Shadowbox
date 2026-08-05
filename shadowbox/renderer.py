@@ -15,7 +15,7 @@ from shadowbox.editors.step16 import build_cells, is_step16_param, playhead_stag
 from shadowbox.editors.ttid import get_root_names, is_pc_on, is_ttid_param, note_name
 from shadowbox.rnbo import RNBO_HOST
 from shadowbox.surfaces.list_sequencer import FIELD_KEYS, FIELD_LABELS, FIELD_SHORT_LABELS, SIGNED_FIELD_KEYS
-from shadowbox.surfaces.list_vel_sequencer import ROW_KEYS, ROW_LABELS
+from shadowbox.surfaces.list_vel_sequencer import ROW_KEYS, ROW_LABELS, mute_is_on
 from shadowbox.surfaces.organ import FOOTAGE_COLORS, FOOTAGES
 from shadowbox.touch import TouchLayout, TouchSample
 from shadowbox.ui import (
@@ -3454,6 +3454,7 @@ class ShadowboxRenderer:
             short_labels=short_labels,
             signed_keys=frozenset(),
             send_label="SEND ROW",
+            mute_params={key: ui.surface_param_binding(f"{key}_mute") for key in ROW_KEYS},
         )
 
     def _draw_list_surface(
@@ -3466,6 +3467,7 @@ class ShadowboxRenderer:
         short_labels,
         signed_keys,
         send_label: str,
+        mute_params=None,
     ) -> None:
         focus = max(0, min(len(keys) - 1, int(state.surface_focus)))
         drafts = state.surface_state.get("drafts", {})
@@ -3487,6 +3489,8 @@ class ShadowboxRenderer:
         fields_gap = 4
         field_h = max(38, (content_h - fields_gap * (len(keys) - 1)) // len(keys))
         label_col_w = 72
+        mute_button_w = 42 if mute_params is not None else 0
+        mute_gap = 8 if mute_params is not None else 0
         keypad_x = fields_x + fields_w + 24
         keypad_w = self.display.width - keypad_x - 24
 
@@ -3498,11 +3502,12 @@ class ShadowboxRenderer:
                 self._rect_theme(fields_x, y, fields_w, field_h, "accent" if selected else "line", False)
             else:
                 self.display.rect(fields_x, y, fields_w, field_h, True, selected)
+            field_target_w = fields_w - mute_button_w - mute_gap
             self._record_touch_target(
                 "list_field",
                 fields_x,
                 y,
-                fields_w,
+                field_target_w,
                 field_h,
                 action_kind="select_list_field",
                 index=index,
@@ -3516,8 +3521,41 @@ class ShadowboxRenderer:
             self._vline_theme(fields_x + label_col_w, y + 8, max(1, field_h - 16), "accent" if selected else "line")
             preview = str(drafts.get(key, "")) or "-"
             preview_x = fields_x + label_col_w + 14
-            preview = self._truncate_to_width(preview, fields_x + fields_w - preview_x - 12, 2, "regular")
+            preview = self._truncate_to_width(preview, fields_x + field_target_w - preview_x - 12, 2, "regular")
             self._text_theme(preview, preview_x, value_y, "text" if selected else "muted", 2, "regular")
+
+            if mute_params is not None:
+                mute_param = mute_params.get(key)
+                muted = mute_is_on(mute_param)
+                mute_x = fields_x + fields_w - mute_button_w
+                mute_y = y + max(2, (field_h - min(34, field_h - 4)) // 2)
+                mute_h = min(34, field_h - 4)
+                if self.has_color:
+                    self._rounded_theme(mute_x, mute_y, mute_button_w, mute_h, 7, "accent" if muted else "panel_alt", True)
+                    self._rect_theme(mute_x, mute_y, mute_button_w, mute_h, "accent" if muted else "line", False)
+                    mute_color = "bg" if muted else "muted"
+                else:
+                    self.display.rect(mute_x, mute_y, mute_button_w, mute_h, True, muted)
+                    mute_color = "text"
+                self._record_touch_target(
+                    "list_mute",
+                    mute_x,
+                    y,
+                    mute_button_w,
+                    field_h,
+                    action_kind="toggle_list_mute",
+                    index=index,
+                    label="M",
+                )
+                mute_text_w, mute_text_h = self._measure_text("M", 2, "medium")
+                self._text_theme(
+                    "M",
+                    mute_x + max(0, (mute_button_w - mute_text_w) // 2),
+                    mute_y + max(0, (mute_h - mute_text_h) // 2),
+                    mute_color,
+                    2,
+                    "medium",
+                )
 
         key_rows = (
             (("1", "1"), ("2", "2"), ("3", "3")),

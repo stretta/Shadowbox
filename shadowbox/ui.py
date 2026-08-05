@@ -42,7 +42,7 @@ from shadowbox.editors.step16 import (
 from shadowbox.rnbo import RNBO_HOST, RNBO_PORT
 from shadowbox.surfaces import resolve_instance_surface, surface_spec_for_key
 from shadowbox.surfaces.list_sequencer import FIELD_KEYS, SIGNED_FIELD_KEYS, format_list_value
-from shadowbox.surfaces.list_vel_sequencer import ROW_KEYS
+from shadowbox.surfaces.list_vel_sequencer import ROW_KEYS, toggled_mute_value
 from shadowbox.surfaces.organ import FOOTAGES
 from shadowbox.transpose_control import (
     ROLE_CHROMATIC,
@@ -2910,6 +2910,8 @@ class ShadowboxUI:
             self._handle_list_key(event.button_id)
         elif event.kind == "toggle_list_sign":
             self._handle_list_sign()
+        elif event.kind == "toggle_list_mute":
+            self._handle_list_mute(event.index)
         elif event.kind == "send_list_field":
             self._send_list_field()
         elif event.kind == "step_list_field":
@@ -3113,6 +3115,23 @@ class ShadowboxUI:
         self.state.surface_focus = stage - 1
         self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
         self.request_render("surface_toggle")
+
+    def _handle_list_mute(self, index: int | None) -> None:
+        if (
+            self.state.ui_mode != "INSTANCE_SURFACE"
+            or self.state.active_surface_key != "list_vel_sequencer"
+            or index is None
+        ):
+            return
+        row = max(1, min(len(ROW_KEYS), int(index) + 1))
+        param = self.surface_param_binding(f"row_{row}_mute")
+        if param is None:
+            return
+        value = toggled_mute_value(param)
+        param["value"] = value
+        self.state.surface_focus = row - 1
+        self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
+        self.request_render("list_mute")
 
     def _list_surface_ready(self) -> bool:
         return (
