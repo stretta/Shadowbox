@@ -11,7 +11,7 @@ from typing import Any
 
 from shadowbox.editors.pitch_display import normalize_pitch_to_midi_note
 from shadowbox.editors.scope import scope_time_seconds
-from shadowbox.editors.step16 import build_cells, is_step16_param
+from shadowbox.editors.step16 import build_cells, is_step16_param, playhead_stage_index
 from shadowbox.editors.ttid import get_root_names, is_pc_on, is_ttid_param, note_name
 from shadowbox.rnbo import RNBO_HOST
 from shadowbox.surfaces.list_sequencer import FIELD_KEYS, FIELD_LABELS, FIELD_SHORT_LABELS, SIGNED_FIELD_KEYS
@@ -3724,12 +3724,7 @@ class ShadowboxRenderer:
     def draw_analog_sequencer_surface(self, ui, state) -> None:
         playhead_item = ui.surface_state_binding("playhead")
         playhead_value = playhead_item.get("value") if playhead_item else None
-        if isinstance(playhead_value, list):
-            playhead_value = playhead_value[0] if playhead_value else None
-        try:
-            playhead = max(0, min(15, int(float(playhead_value))))
-        except (TypeError, ValueError):
-            playhead = None
+        playhead = playhead_stage_index(playhead_value, "current_stage")
 
         focus = max(0, min(15, int(state.surface_focus)))
         adjusting = bool(state.surface_state.get("adjusting"))

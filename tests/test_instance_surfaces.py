@@ -614,6 +614,29 @@ class InstanceSurfaceTests(unittest.TestCase):
         self.assertFalse(any(text in {str(index) for index in range(1, 17)} for text in rendered_text))
         self.assertTrue(all(toggle.h <= 34 for toggle in toggles))
 
+    def test_analog_surface_maps_one_based_current_stage_to_stage_cell(self):
+        for current_stage, expected_index in ((1.0, 0), (4.0, 3), (16.0, 15)):
+            instance = _analog_instance()
+            instance["state"][0]["value"] = [current_stage]
+            ui = ShadowboxUI()
+            ui.apply_runner_snapshot(_snapshot([instance]))
+            ui.state.ui_mode = "INSTANCE_MENU"
+            ui.state.instance_menu_cursor = 1
+            ui.handle_event(UIEvent("short_press"))
+            renderer = ShadowboxRenderer(_SurfaceDisplay())
+            renderer.set_touch_mode(True)
+
+            renderer.draw(ui)
+
+            stages = [target for target in renderer.touch_layout.targets if target.kind == "analog_stage_value"]
+            markers = [
+                op
+                for op in renderer.display.ops
+                if op[0] == "fill_rect_color" and op[4] == 5
+            ]
+            self.assertEqual(len(markers), 1)
+            self.assertEqual(markers[0][1], stages[expected_index].x)
+
     def test_analog_pitch_range_clips_stages_and_constrains_touch(self):
         ui = ShadowboxUI()
         instance = _analog_instance()
