@@ -1122,6 +1122,7 @@ class TouchDirectUITests(unittest.TestCase):
 
         self.assertGreater(rail_surface[2], content_top)
         self.assertGreater(up_arrow[3], content_top)
+        self.assertFalse(any(op[0] == "hline_color" for op in display.ops))
 
     def test_status_touch_rows_match_primary_list_layout(self) -> None:
         ui = ShadowboxUI()

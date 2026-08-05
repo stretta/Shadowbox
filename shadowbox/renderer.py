@@ -804,7 +804,6 @@ class ShadowboxRenderer:
         rail_center_x = rail_x + (rail_w // 2)
         if self.has_color:
             self._rounded_theme(rail_x + 14, visual_top, rail_w - 28, visual_h, 10, "panel", True)
-            self._hline_theme(rail_x + 28, visual_top + visual_half_h, rail_w - 56, "line")
             arrow_color = "accent" if page > 1 else "muted"
             down_color = "accent" if page < page_count else "muted"
             self._text_theme("^", rail_center_x - (self._measure_text("^", arrow_scale, "medium")[0] // 2), visual_top + 18, arrow_color, arrow_scale, "medium")
