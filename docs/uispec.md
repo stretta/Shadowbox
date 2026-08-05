@@ -444,6 +444,8 @@ Initial system areas:
 - maintenance actions
 
 Rules:
+- The home screen presents `SETS`, `INSTANCES`, `SYSTEM`, and a state-aware global transport action card; the last card reads `PLAY` when stopped and `STOP` when running
+- On the home screen only, numeric-keypad `Enter` explicitly starts transport and `0` explicitly stops it; these are not toggle commands
 - System must remain clearly separate from per-instance editing and routing
 - Per-instance structure, lifecycle, parameters, instance presets, and routing remain OSCQuery/published-command driven
 - Non-OSCQuery `SYSTEM` entries must be explicitly chosen product features, not a generic escape hatch for backend gaps

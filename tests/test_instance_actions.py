@@ -1880,6 +1880,68 @@ class InstanceActionTests(unittest.TestCase):
         actions = [action for action in ui.pop_actions() if action.kind == "set_transport"]
         self.assertEqual([(action.path, action.value) for action in actions], [("/rnbo/jack/transport/bpm", 91.0)])
 
+    def test_home_transport_card_toggles_global_runner_state(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.system = {
+            "transport": {
+                "rolling_path": "/rnbo/jack/transport/rolling",
+                "rolling": False,
+                "bpm_path": "/rnbo/jack/transport/bpm",
+                "bpm": 90.0,
+            }
+        }
+
+        self.assertEqual(ui.top_level_items, ["SETS", "INSTANCES", "SYSTEM", "PLAY"])
+        ui.state.top_index = 3
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+
+        actions = [action for action in ui.pop_actions() if action.kind == "set_transport"]
+        self.assertEqual([(action.path, action.value) for action in actions], [("/rnbo/jack/transport/rolling", True)])
+        self.assertEqual(ui.state.ui_mode, "TOP")
+        self.assertEqual(ui.top_level_items[-1], "STOP")
+
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+        actions = [action for action in ui.pop_actions() if action.kind == "set_transport"]
+        self.assertEqual([(action.path, action.value) for action in actions], [("/rnbo/jack/transport/rolling", False)])
+        self.assertEqual(ui.top_level_items[-1], "PLAY")
+
+    def test_home_keypad_enter_plays_and_zero_stops_transport(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.system = {
+            "transport": {
+                "rolling_path": "/rnbo/jack/transport/rolling",
+                "rolling": False,
+                "bpm_path": "/rnbo/jack/transport/bpm",
+                "bpm": 90.0,
+            }
+        }
+
+        ui.handle_event(type("Evt", (), {"kind": "keypad_enter"})())
+        ui.handle_event(type("Evt", (), {"kind": "keypad_digit", "button_id": "7"})())
+        ui.handle_event(type("Evt", (), {"kind": "keypad_digit", "button_id": "0"})())
+
+        actions = [action for action in ui.pop_actions() if action.kind == "set_transport"]
+        self.assertEqual(
+            [(action.path, action.value) for action in actions],
+            [
+                ("/rnbo/jack/transport/rolling", True),
+                ("/rnbo/jack/transport/rolling", False),
+            ],
+        )
+        self.assertEqual(ui.state.ui_mode, "TOP")
+
+    def test_home_transport_card_is_disabled_when_transport_is_unavailable(self) -> None:
+        ui = ShadowboxUI()
+        self.assertEqual(ui.top_level_items[-1], "TRANSPORT")
+        ui.state.top_index = 3
+
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+        ui.handle_event(type("Evt", (), {"kind": "keypad_enter"})())
+        ui.handle_event(type("Evt", (), {"kind": "keypad_digit", "button_id": "0"})())
+
+        self.assertEqual([action for action in ui.pop_actions() if action.kind == "set_transport"], [])
+        self.assertEqual(ui.state.ui_mode, "TOP")
+
     def test_transport_live_updates_refresh_screen_and_renderer(self) -> None:
         ui = ShadowboxUI()
         ui.state.system = {

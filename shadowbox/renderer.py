@@ -4537,7 +4537,29 @@ class ShadowboxRenderer:
         for dx, dy, w, h in teeth:
             self.display.rect(x + (dx * s), y + (dy * s), w * s, h * s, on, True)
 
-    def _draw_tft_home_card(self, x: int, y: int, w: int, h: int, label: str, index: int, selected: bool) -> None:
+    def _draw_transport_action_icon(self, x: int, y: int, action: str, on: bool = True, scale: int = 1) -> None:
+        s = max(1, int(scale))
+        if str(action).upper() == "STOP":
+            self.display.rect(x + (16 * s), y + (16 * s), 28 * s, 28 * s, on, True)
+            return
+        if str(action).upper() == "PLAY":
+            for row in range(37):
+                width = 1 + min(row, 36 - row)
+                self.display.rect(x + (18 * s), y + ((12 + row) * s), width * s, s, on, True)
+            return
+        self.display.rect(x + (12 * s), y + (24 * s), 36 * s, 12 * s, on, False)
+
+    def _draw_tft_home_card(
+        self,
+        x: int,
+        y: int,
+        w: int,
+        h: int,
+        label: str,
+        index: int,
+        selected: bool,
+        label_scale: int | None = None,
+    ) -> None:
         if self.touch_layout_enabled and self.has_color:
             fill = "panel_pressed" if self._touch_pressed(kind="card", index=index) else "panel"
             self._rounded_theme(x, y, w, h, 12, fill, True)
@@ -4572,10 +4594,12 @@ class ShadowboxRenderer:
             self._draw_system_icon(icon_x, icon_y, on=True, scale=icon_scale)
         elif label == "SETS":
             self._draw_graphs_icon(icon_x, icon_y, on=True, scale=icon_scale)
-        else:
+        elif label == "INSTANCES":
             self._draw_instances_icon(icon_x, icon_y, on=True, scale=icon_scale)
+        else:
+            self._draw_transport_action_icon(icon_x, icon_y, label, on=True, scale=icon_scale)
 
-        text_scale = 4 if self.touch_layout_enabled else 2 if self.is_full_tft else 1
+        text_scale = label_scale or (4 if self.touch_layout_enabled else 2 if self.is_full_tft else 1)
         effective_selected = selected and not self.touch_layout_enabled
         text_weight = "semibold" if effective_selected and self.is_full_tft else "medium" if effective_selected else "regular"
         display_label = self._menu_label(label)
@@ -4623,6 +4647,12 @@ class ShadowboxRenderer:
         total_w = (card_w * total) + (gap * (total - 1))
         start_x = max(4, (self.display.width - total_w) // 2)
         start_y = max(avail_top + 6, avail_top + ((avail_h - card_h) // 2) - (8 if self.is_full_tft and not self.touch_layout_enabled else 0))
+        label_scale = 4 if self.touch_layout_enabled else 2 if self.is_full_tft else 1
+        while label_scale > 1 and any(
+            self._measure_text(self._menu_label(label), label_scale, "semibold")[0] > max(1, card_w - 16)
+            for label in items
+        ):
+            label_scale -= 1
 
         for idx, label in enumerate(items):
             x = start_x + idx * (card_w + gap)
@@ -4639,7 +4669,7 @@ class ShadowboxRenderer:
                 )
                 if self._touch_pressed(kind="card", index=idx) and not self.has_color:
                     self.display.rect(x + 2, start_y + 2, max(1, card_w - 4), max(1, card_h - 4), True, True)
-            self._draw_tft_home_card(x, start_y, card_w, card_h, str(label), idx, idx == selected_idx)
+            self._draw_tft_home_card(x, start_y, card_w, card_h, str(label), idx, idx == selected_idx, label_scale)
 
     def draw(self, ui, touch_state: TouchSample | None = None) -> None:
         state = ui.state

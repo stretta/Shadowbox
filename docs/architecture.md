@@ -80,7 +80,7 @@ Module responsibilities:
 `keypad.py`
 - Optionally opens a configured USB keyboard event device alongside the primary encoder/touch input
 - Uses an exclusive evdev grab so numeric-keypad input does not leak to the Linux console behind the framebuffer UI
-- Emits context-neutral numeric-keypad events; `ui.py` routes them to ListSequencer, ListVelSequencer, or the regular numeric parameter editor and ignores them elsewhere
+- Emits context-neutral numeric-keypad events; `ui.py` routes them to the home-screen transport shortcuts, ListSequencer, ListVelSequencer, or the regular numeric parameter editor and ignores them elsewhere
 - Reconnects after keypad unplug/replug without restarting Shadowbox
 
 `transpose_control.py`

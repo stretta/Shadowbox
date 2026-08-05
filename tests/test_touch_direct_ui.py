@@ -304,6 +304,29 @@ class TouchDirectUITests(unittest.TestCase):
         self.assertEqual(_touch_action_for_target(renderer, kind="home_card_icon", index=0), TouchAction("tap_row", index=0))
         self.assertEqual(_touch_action_for_target(renderer, kind="home_card_label", index=0), TouchAction("tap_row", index=0))
 
+    def test_home_transport_is_fourth_touch_card_with_state_aware_action(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.system = {
+            "transport": {
+                "rolling_path": "/rnbo/jack/transport/rolling",
+                "rolling": False,
+                "bpm_path": "/rnbo/jack/transport/bpm",
+                "bpm": 90.0,
+            }
+        }
+
+        renderer, display = _render_touch_layout(ui)
+
+        card_targets = [target for target in renderer.touch_layout.targets if target.kind == "card"]
+        self.assertEqual([target.index for target in card_targets], [0, 1, 2, 3])
+        self.assertEqual(_touch_action_for_target(renderer, kind="card", index=3), TouchAction("tap_row", index=3))
+        self.assertTrue(any(op[0] == "text" and op[1] == "Play" for op in display.ops))
+
+        ui.handle_event(UIEvent(kind="tap_row", index=3))
+        actions = [action for action in ui.pop_actions() if action.kind == "set_transport"]
+        self.assertEqual([(action.path, action.value) for action in actions], [("/rnbo/jack/transport/rolling", True)])
+        self.assertEqual(ui.top_level_items[-1], "STOP")
+
     def test_home_card_icons_scale_up_on_touch_layout(self) -> None:
         ui = ShadowboxUI()
         display = _FiveInchDisplay()
@@ -326,8 +349,8 @@ class TouchDirectUITests(unittest.TestCase):
         renderer.set_touch_mode(True)
         renderer.draw(ui, touch_state=SimpleNamespace(pressed=False, normalized_x=0.0, normalized_y=0.0))
 
-        label_ops = [op for op in display.ops if op[0] == "text" and op[1] in {"Sets", "Instances", "System"}]
-        self.assertEqual([op[1] for op in label_ops], ["Sets", "Instances", "System"])
+        label_ops = [op for op in display.ops if op[0] == "text" and op[1] in {"Sets", "Instances", "System", "Transport"}]
+        self.assertEqual([op[1] for op in label_ops], ["Sets", "Instances", "System", "Transport"])
         self.assertEqual(len({op[3] for op in label_ops}), 1)
 
     def test_header_title_sits_closer_to_back_button_on_touch_layout(self) -> None:

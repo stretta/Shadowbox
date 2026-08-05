@@ -944,7 +944,18 @@ class ShadowboxUI:
 
     @property
     def top_level_items(self) -> list[str]:
-        return ["SETS", "INSTANCES", "SYSTEM"]
+        return ["SETS", "INSTANCES", "SYSTEM", self.home_transport_label]
+
+    @property
+    def home_transport_label(self) -> str:
+        if not self.transport_available:
+            return "TRANSPORT"
+        rolling = self.state.system.get("transport", {}).get("rolling")
+        if rolling is True:
+            return "STOP"
+        if rolling is False:
+            return "PLAY"
+        return "TRANSPORT"
 
     @property
     def instance_menu_items(self) -> list[str]:
@@ -1036,6 +1047,19 @@ class ShadowboxUI:
                 self.state.edit_value = next_value
         else:
             return False
+        self.request_render("transport")
+        return True
+
+    def _set_transport_rolling(self, rolling: bool) -> bool:
+        transport = self.state.system.get("transport", {})
+        path = transport.get("rolling_path") if isinstance(transport, dict) else ""
+        if not path:
+            return False
+        rolling = bool(rolling)
+        if transport.get("rolling") == rolling:
+            return False
+        transport["rolling"] = rolling
+        self.queue_action(UIAction(kind="set_transport", path=path, value=rolling))
         self.request_render("transport")
         return True
 
@@ -3144,6 +3168,10 @@ class ShadowboxUI:
         return param
 
     def _handle_keypad_digit(self, digit: str) -> None:
+        if self.state.ui_mode == "TOP":
+            if digit == "0":
+                self._set_transport_rolling(False)
+            return
         if self._list_surface_ready():
             self._handle_list_key(digit)
             return
@@ -3221,6 +3249,9 @@ class ShadowboxUI:
         return True
 
     def _handle_keypad_enter(self) -> None:
+        if self.state.ui_mode == "TOP":
+            self._set_transport_rolling(True)
+            return
         if self._list_surface_ready():
             self._send_list_field()
             return
@@ -4070,17 +4101,21 @@ class ShadowboxUI:
             return
 
         if self.state.ui_mode == "TOP":
-            if self.top_level_items[self.state.top_index] == "SETS":
+            selected_index = max(0, min(self.state.top_index, len(self.top_level_items) - 1))
+            if selected_index == 0:
                 self.state.ui_mode = "GRAPH_SET_LIST"
                 self.state.graph_set_cursor = self.graph_set_initial_cursor()
-            elif self.top_level_items[self.state.top_index] == "INSTANCES":
+            elif selected_index == 1:
                 self.state.ui_mode = "INSTANCE_LIST"
                 self.state.instance_cursor = 1 if self.state.instances or self.can_add_instance or self.can_remove_instances else 0
                 if self.state.instances:
                     self.state.active_instance_id = str(self.state.instances[0].get("id", ""))
-            else:
+            elif selected_index == 2:
                 self.state.ui_mode = "SYSTEM_MENU"
                 self.state.system_cursor = 1
+            else:
+                transport = self.state.system.get("transport", {})
+                self._set_transport_rolling(not bool(transport.get("rolling")))
 
         elif self.state.ui_mode == "GRAPH_MENU":
             if self.state.graph_menu_cursor == 0:
@@ -4506,9 +4541,7 @@ class ShadowboxUI:
         elif self.state.ui_mode == "SYSTEM_TRANSPORT":
             transport = self.state.system.get("transport", {})
             if self.state.transport_cursor == 1 and transport.get("rolling_path"):
-                rolling = not bool(transport.get("rolling"))
-                transport["rolling"] = rolling
-                self.queue_action(UIAction(kind="set_transport", path=transport.get("rolling_path"), value=rolling))
+                self._set_transport_rolling(not bool(transport.get("rolling")))
             elif self.state.transport_cursor == 2 and transport.get("bpm_path"):
                 bpm = transport.get("bpm")
                 self.state.edit_value = float(bpm) if isinstance(bpm, (int, float)) and not isinstance(bpm, bool) else 120.0

@@ -213,6 +213,7 @@ Touch behavior:
 - long press or back returns to the instance menu
 
 Optional USB numeric-keypad behavior:
+- on the home screen, `Enter` starts the global Runner transport and `0` stops it
 - `0..9` enter digits
 - numpad `+` enters a space
 - numpad `.` deletes one character
@@ -223,9 +224,9 @@ Optional USB numeric-keypad behavior:
 
 The keypad is configured with `SHADOWBOX_KEYPAD_DEVICE`. Shadowbox exclusively
 grabs the configured evdev device while running so its keys do not appear on
-the Linux console behind the framebuffer interface. Outside ListSequencer,
-ListVelSequencer, and the regular numeric parameter editor, these keypad events
-are ignored.
+the Linux console behind the framebuffer interface. Outside the home-screen
+transport shortcuts, ListSequencer, ListVelSequencer, and the regular numeric
+parameter editor, these keypad events are ignored.
 
 5d. ListVelSequencer instance-surface contract
 
