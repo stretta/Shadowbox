@@ -753,7 +753,7 @@ class ShadowboxRenderer:
             return
         fill = "panel_pressed" if pressed else "panel"
         self._rounded_theme(x, y, w, h, 10, fill, True)
-        self._rect_theme(x, y, w, h, "line", False)
+        self._rounded_theme(x, y, w, h, 10, "line", False)
 
     def _draw_touch_list_item_background(self, x: int, y: int, w: int, h: int, *, current: bool = False, pressed: bool = False) -> None:
         if not (self.touch_layout_enabled and self.has_color):
@@ -1757,7 +1757,7 @@ class ShadowboxRenderer:
                 pressed = self._touch_pressed(kind="row", index=item_idx)
                 if self.has_color and current and not pressed:
                     self._rounded_theme(content_left + 8, row_top + 7, max(1, row_w - 16), max(1, row_h - 14), 8, "panel_alt", True)
-                    self._rect_theme(content_left + 8, row_top + 7, max(1, row_w - 16), max(1, row_h - 14), "accent", False)
+                    self._rounded_theme(content_left + 8, row_top + 7, max(1, row_w - 16), max(1, row_h - 14), 8, "accent", False)
                 else:
                     self._draw_touch_list_item_background(
                         content_left,
@@ -2925,7 +2925,7 @@ class ShadowboxRenderer:
             pressed = self._touch_pressed(kind=target_kind, index=idx)
             if self.touch_layout_enabled and self.has_color:
                 self._rounded_theme(cx, cy, cell_w, cell_h, 8, "panel_pressed" if pressed else "panel_alt" if selected else "panel", True)
-                self._rect_theme(cx, cy, cell_w, cell_h, "accent" if selected else "line", False)
+                self._rounded_theme(cx, cy, cell_w, cell_h, 8, "accent" if selected else "line", False)
                 scale = 2 if self.is_five_inch_touch else 1
                 weight = "semibold" if selected else "medium"
                 fitted = self._truncate_to_width(label, max(1, cell_w - 12), scale, weight)
@@ -2948,7 +2948,7 @@ class ShadowboxRenderer:
             pressed = self._touch_pressed(kind="ttid_root", index=idx)
             if self.has_color:
                 self._rounded_theme(rx, y, root_w, root_h, 6, "panel_pressed" if pressed else "panel_alt" if selected else "panel", True)
-                self._rect_theme(rx, y, root_w, root_h, "accent" if selected else "line", False)
+                self._rounded_theme(rx, y, root_w, root_h, 6, "accent" if selected else "line", False)
                 text_w, text_h = self._measure_text(root, 1, "semibold" if selected else "medium")
                 self._text_theme(root, rx + max(0, (root_w - text_w) // 2), y + max(0, (root_h - text_h) // 2), "text", 1, "semibold" if selected else "medium")
             else:
@@ -2976,7 +2976,7 @@ class ShadowboxRenderer:
             pressed = self._touch_pressed(kind=kind, index=index)
             if self.has_color:
                 self._rounded_theme(cx, cy, cw, ch, 8, "panel_pressed" if pressed else "panel_alt" if kind == "ttid_scale_name" else "panel", True)
-                self._rect_theme(cx, cy, cw, ch, "accent" if kind == "ttid_load" else "line", False)
+                self._rounded_theme(cx, cy, cw, ch, 8, "accent" if kind == "ttid_load" else "line", False)
                 scale = 2 if kind in {"ttid_scale_name", "ttid_load"} else 2
                 weight = "semibold" if kind == "ttid_load" else "medium"
                 fitted = self._truncate_to_width(label, max(1, cw - 16), scale, weight)
@@ -3114,7 +3114,7 @@ class ShadowboxRenderer:
             if self.has_color:
                 fill = "panel_pressed" if pressed else "panel_alt" if cell.focused else "panel"
                 self._rounded_theme(x, y, cell_w, cell_h, 10, fill, True)
-                self._rect_theme(x, y, cell_w, cell_h, "accent" if cell.playing else "line", False)
+                self._rounded_theme(x, y, cell_w, cell_h, 10, "accent" if cell.playing else "line", False)
                 if cell.active:
                     self._fill_theme(x + 8, y + 8, max(1, cell_w - 16), max(1, cell_h - 16), "accent_soft")
                     self._fill_theme(x + 10, y + 10, max(1, cell_w - 20), max(1, cell_h - 20), "accent")
@@ -3236,7 +3236,7 @@ class ShadowboxRenderer:
 
             if self.has_color:
                 self._rounded_theme(panel_x, panel_y, panel_w, panel_h, 14, "panel", True)
-                self._rect_theme(panel_x, panel_y, panel_w, panel_h, "line", False)
+                self._rounded_theme(panel_x, panel_y, panel_w, panel_h, 14, "line", False)
                 self._text_theme("TUNER", panel_x + 24, panel_y + 18, "muted", 2, "medium")
                 self._hline_theme(panel_x + 24, panel_y + 52, panel_w - 48, "line")
                 self._fill_theme(panel_x + 24, panel_y + 54, 72, 4, "accent")
@@ -3334,7 +3334,7 @@ class ShadowboxRenderer:
 
             if self.has_color:
                 self._rounded_theme(panel_x, panel_y, panel_w, panel_h, 14, "panel", True)
-                self._rect_theme(panel_x, panel_y, panel_w, panel_h, "line", False)
+                self._rounded_theme(panel_x, panel_y, panel_w, panel_h, 14, "line", False)
             else:
                 self.display.rect(panel_x, panel_y, panel_w, panel_h, True, False)
             self.display.rect(x, y, w, h, True, False)
@@ -3498,7 +3498,7 @@ class ShadowboxRenderer:
             selected = index == focus
             if self.has_color:
                 self._rounded_theme(fields_x, y, fields_w, field_h, 8, "panel_alt" if selected else "panel", True)
-                self._rect_theme(fields_x, y, fields_w, field_h, "accent" if selected else "line", False)
+                self._rounded_theme(fields_x, y, fields_w, field_h, 8, "accent" if selected else "line", False)
             else:
                 self.display.rect(fields_x, y, fields_w, field_h, True, selected)
             field_target_w = fields_w - mute_button_w - mute_gap
@@ -3531,7 +3531,7 @@ class ShadowboxRenderer:
                 mute_h = min(34, field_h - 4)
                 if self.has_color:
                     self._rounded_theme(mute_x, mute_y, mute_button_w, mute_h, 7, "accent" if muted else "panel_alt", True)
-                    self._rect_theme(mute_x, mute_y, mute_button_w, mute_h, "accent" if muted else "line", False)
+                    self._rounded_theme(mute_x, mute_y, mute_button_w, mute_h, 7, "accent" if muted else "line", False)
                     mute_color = "bg" if muted else "muted"
                 else:
                     self.display.rect(mute_x, mute_y, mute_button_w, mute_h, True, muted)
@@ -3573,7 +3573,7 @@ class ShadowboxRenderer:
                 x = keypad_x + col_index * (key_w + gap)
                 if self.has_color:
                     self._rounded_theme(x, y, key_w, key_h, 10, "panel", True)
-                    self._rect_theme(x, y, key_w, key_h, "line", False)
+                    self._rounded_theme(x, y, key_w, key_h, 10, "line", False)
                 else:
                     self.display.rect(x, y, key_w, key_h, True, False)
                 self._record_touch_target(
@@ -3595,7 +3595,7 @@ class ShadowboxRenderer:
             sign_w = key_w
             if self.has_color:
                 self._rounded_theme(keypad_x, action_y, sign_w, action_h, 10, "panel", True)
-                self._rect_theme(keypad_x, action_y, sign_w, action_h, "line", False)
+                self._rounded_theme(keypad_x, action_y, sign_w, action_h, 10, "line", False)
             else:
                 self.display.rect(keypad_x, action_y, sign_w, action_h, True, False)
             self._record_touch_target(
@@ -3618,7 +3618,7 @@ class ShadowboxRenderer:
 
         if self.has_color:
             self._rounded_theme(send_x, action_y, send_w, action_h, 10, "accent_soft", True)
-            self._rect_theme(send_x, action_y, send_w, action_h, "accent", False)
+            self._rounded_theme(send_x, action_y, send_w, action_h, 10, "accent", False)
         else:
             self.display.rect(send_x, action_y, send_w, action_h, True, False)
         self._record_touch_target(
@@ -3668,7 +3668,7 @@ class ShadowboxRenderer:
 
             if self.has_color:
                 self._rounded_theme(panel_x, panel_y, panel_w, panel_h, 14, "panel", True)
-                self._rect_theme(panel_x, panel_y, panel_w, panel_h, "line", False)
+                self._rounded_theme(panel_x, panel_y, panel_w, panel_h, 14, "line", False)
             else:
                 self.display.rect(panel_x, panel_y, panel_w, panel_h, True, False)
 
@@ -3775,7 +3775,7 @@ class ShadowboxRenderer:
             track_h = 250
             if self.has_color:
                 self._rounded_theme(panel_x, panel_y, panel_w, panel_h, 14, "panel", True)
-                self._rect_theme(panel_x, panel_y, panel_w, panel_h, "line", False)
+                self._rounded_theme(panel_x, panel_y, panel_w, panel_h, 14, "line", False)
             else:
                 self.display.rect(panel_x, panel_y, panel_w, panel_h, True, False)
 
@@ -3846,7 +3846,7 @@ class ShadowboxRenderer:
             for boundary, value, range_x in (("low", range_low, low_x), ("high", range_high, high_x)):
                 if self.has_color:
                     self._rounded_theme(range_x, range_y, range_w, range_h, 7, "panel_alt", True)
-                    self._rect_theme(range_x, range_y, range_w, range_h, "line", False)
+                    self._rounded_theme(range_x, range_y, range_w, range_h, 7, "line", False)
                     rail_x = range_x + 8
                     rail_w = range_w - 16
                     marker_x = rail_x + int(round((rail_w - 1) * (value / 127.0)))
@@ -4600,7 +4600,7 @@ class ShadowboxRenderer:
         if self.touch_layout_enabled and self.has_color:
             fill = "panel_pressed" if self._touch_pressed(kind="card", index=index) else "panel"
             self._rounded_theme(x, y, w, h, 12, fill, True)
-            self._rect_theme(x, y, w, h, "line", False)
+            self._rounded_theme(x, y, w, h, 12, "line", False)
             self._fill_theme(x + 18, y + h - 10, max(24, w - 36), 4, "line")
         if selected and not self.touch_layout_enabled:
             underline_y = y + h - (14 if self.is_full_tft else 8)

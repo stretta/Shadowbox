@@ -601,6 +601,32 @@ class InstanceSurfaceTests(unittest.TestCase):
         self.assertTrue(all(target.label == "M" for target in mutes))
         self.assertFalse(any(target.kind == "list_sign" for target in renderer.touch_layout.targets))
 
+    def test_list_vel_sequencer_buttons_use_rounded_borders(self):
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(_snapshot([_list_vel_sequencer_instance()]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        display = _SurfaceDisplay()
+        renderer = ShadowboxRenderer(display)
+        renderer.set_touch_mode(True)
+
+        renderer.draw(ui)
+
+        rounded = [op for op in display.ops if op[0] == "rounded_rect_color"]
+        mute = next(target for target in renderer.touch_layout.targets if target.kind == "list_mute")
+        send = next(target for target in renderer.touch_layout.targets if target.kind == "list_send")
+        mute_shapes = [
+            op
+            for op in rounded
+            if op[1] == mute.x and mute.y <= op[2] < mute.y + mute.h and op[3] == mute.w and op[5] == 7
+        ]
+        send_shapes = [op for op in rounded if op[1:5] == (send.x, send.y, send.w, send.h) and op[5] == 10]
+        self.assertEqual([op[-1] for op in mute_shapes], [True, False])
+        self.assertEqual([op[-1] for op in send_shapes], [True, False])
+        self.assertFalse(any(op[0] == "rect_color" and op[1] == mute.x and op[3] == mute.w for op in display.ops))
+        self.assertFalse(any(op[0] == "rect_color" and op[1:5] == (send.x, send.y, send.w, send.h) for op in display.ops))
+
     def test_analog_touch_updates_stage_and_toggle(self):
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(_snapshot([_analog_instance()]))
