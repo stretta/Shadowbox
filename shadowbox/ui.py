@@ -334,6 +334,45 @@ def edit_step(param: dict | None) -> float | None:
     return numeric
 
 
+def rnbo_step(param: dict | None) -> float | None:
+    steps = _metadata_number(param, "steps")
+    if steps is None:
+        return None
+    step_count = int(round(steps))
+    if step_count < 2 or abs(steps - step_count) > 1e-9:
+        return None
+
+    if not isinstance(param, dict):
+        return None
+    pmin = param.get("min")
+    pmax = param.get("max")
+    if (
+        not isinstance(pmin, (int, float))
+        or isinstance(pmin, bool)
+        or not isinstance(pmax, (int, float))
+        or isinstance(pmax, bool)
+    ):
+        return None
+    span = abs(float(pmax) - float(pmin))
+    if not math.isfinite(span) or span <= 0:
+        return None
+    return span / (step_count - 1)
+
+
+def rnbo_integer_step_grid(param: dict | None) -> bool:
+    step = rnbo_step(param)
+    if step is None or not isinstance(param, dict):
+        return False
+    pmin = param.get("min")
+    if not isinstance(pmin, (int, float)) or isinstance(pmin, bool):
+        return False
+    return abs(float(pmin) - round(float(pmin))) <= 1e-9 and abs(step - round(step)) <= 1e-9
+
+
+def parameter_step(param: dict | None) -> float | None:
+    return edit_step(param) or rnbo_step(param)
+
+
 def is_boolish(param: dict) -> bool:
     metadata = param.get("metadata", {})
 
@@ -351,7 +390,7 @@ def is_boolish(param: dict) -> bool:
 def numeric_step(param: dict) -> float:
     pmin = param.get("min")
     pmax = param.get("max")
-    explicit_step = edit_step(param)
+    explicit_step = parameter_step(param)
 
     if explicit_step is not None:
         return explicit_step
@@ -386,7 +425,7 @@ def quantize_edit_value(param: dict | None, value: Any) -> Any:
     if isinstance(pmax, (int, float)):
         numeric = min(float(pmax), numeric)
 
-    step = edit_step(param)
+    step = parameter_step(param)
     if step is not None:
         origin = float(pmin) if isinstance(pmin, (int, float)) else 0.0
         grid_index = math.floor(((numeric - origin) / step) + 0.5)
@@ -508,6 +547,7 @@ class ShadowboxUI:
             and not is_step16_param(param)
             and not is_discrete_param(param)
             and not edit_as_int(param)
+            and rnbo_step(param) is None
         )
 
     def _accelerate_float_edit_delta(self, param: dict | None, delta: int) -> int:

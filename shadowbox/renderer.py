@@ -35,6 +35,7 @@ from shadowbox.ui import (
     display_as_int,
     display_precision,
     edit_as_int,
+    rnbo_integer_step_grid,
 )
 from shadowbox.version import SHADOWBOX_BUILD_INFO, SHADOWBOX_VERSION
 
@@ -144,7 +145,7 @@ def format_param_value(param: dict | None, value: Any) -> str:
     text = format_display_value(
         value,
         precision=display_precision(param),
-        integer_style=display_as_int(param),
+        integer_style=display_as_int(param) or rnbo_integer_step_grid(param),
     )
     unit = param_unit(param)
     if not unit or text in ("-", ""):

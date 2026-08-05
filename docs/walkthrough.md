@@ -89,7 +89,7 @@ to the bottom/full-on position in canonical Hammond footage order.
 
 If metadata is missing or malformed, Shadowbox falls back to numeric behavior. The only non-metadata exception is enums published explicitly by RNBO as a value list.
 
-In practice, the metadata must appear in the published OSCQuery tree so that `rnbo.py` can parse it from the parameter's `meta` node. Shadowbox also accepts direct scalar child nodes for some hints, such as `editor`, `display_name`, and `ui_role`, when RNBO exports them separately instead of bundling them into `meta`.
+In practice, the metadata must appear in the published OSCQuery tree so that `rnbo.py` can parse it from the parameter's `meta` node. Shadowbox also accepts direct scalar child nodes for hints that RNBO exports separately instead of bundling them into `meta`, including `editor`, `display_name`, `ui_role`, and RNBO's native `steps` value. For `steps`, Shadowbox uses RNBO's endpoint-inclusive interval `(max - min) / (steps - 1)` for encoder and touch editing. Native stepped parameters advance one adjacent step per encoder detent without continuous-control acceleration, and grids with integral minima and intervals are displayed without decimal places.
 
 Routing ports follow the same pattern for display labels. Publishing metadata such as `{"label":"Main Input"}` or a direct `display_name` child on an input/output lets Shadowbox show a friendly routing name while preserving the underlying port path and raw node name for control.
 

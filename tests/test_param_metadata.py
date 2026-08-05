@@ -32,6 +32,8 @@ from shadowbox.ui import (
     normalize_current_value_for_edit,
     numeric_step,
     quantize_edit_value,
+    rnbo_integer_step_grid,
+    rnbo_step,
 )
 
 
@@ -206,6 +208,46 @@ class ParamMetadataTests(unittest.TestCase):
     def test_numeric_step_prefers_metadata_edit_step(self) -> None:
         param = {"type": "f", "min": 0, "max": 100, "metadata": {"edit_step": 2.5}}
         self.assertEqual(numeric_step(param), 2.5)
+
+    def test_numeric_step_uses_rnbo_endpoint_inclusive_steps(self) -> None:
+        note = {"type": "f", "min": 0, "max": 127, "metadata": {"steps": 128}}
+        sample = {"type": "f", "min": 0, "max": 102, "metadata": {"steps": 103}}
+
+        self.assertEqual(rnbo_step(note), 1)
+        self.assertEqual(numeric_step(note), 1)
+        self.assertEqual(numeric_step(sample), 1)
+
+    def test_edit_step_overrides_rnbo_steps(self) -> None:
+        param = {"type": "f", "min": 0, "max": 100, "metadata": {"steps": 101, "edit_step": 5}}
+        self.assertEqual(numeric_step(param), 5)
+
+    def test_rnbo_steps_quantize_to_grid_anchored_at_minimum(self) -> None:
+        param = {"type": "f", "min": 0, "max": 64, "metadata": {"steps": 4}}
+
+        self.assertAlmostEqual(numeric_step(param), 64 / 3)
+        self.assertAlmostEqual(quantize_edit_value(param, 20), 64 / 3)
+        self.assertAlmostEqual(apply_edit_delta(param, 20, 1), 128 / 3)
+
+    def test_rnbo_integer_step_grid_is_detected_without_misclassifying_fractional_grid(self) -> None:
+        note = {"min": 0, "max": 127, "metadata": {"steps": 128}}
+        fractional = {"min": 0, "max": 64, "metadata": {"steps": 4}}
+
+        self.assertTrue(rnbo_integer_step_grid(note))
+        self.assertFalse(rnbo_integer_step_grid(fractional))
+
+    def test_rnbo_steps_disable_float_encoder_acceleration(self) -> None:
+        param = {"name": "Sample1/Note", "type": "f", "value": 38.0, "min": 0, "max": 127, "metadata": {"steps": 128}}
+        ui = ShadowboxUI()
+        ui.state.instances = [{"id": "1", "params": [param]}]
+        ui.state.active_instance_id = "1"
+        ui.state.param_cursor = 1
+        ui.state.ui_mode = "EDIT"
+        ui.state.edit_value = 38.0
+
+        ui.handle_event(UIEvent(kind="step", delta=1))
+        ui.handle_event(UIEvent(kind="step", delta=1))
+
+        self.assertEqual(ui.state.edit_value, 40.0)
 
     def test_normalize_current_value_for_edit_coerces_integer_style(self) -> None:
         param = {"type": "f", "value": 7.6, "metadata": {"edit_as": "int"}}
@@ -554,6 +596,14 @@ class ParamMetadataTests(unittest.TestCase):
         param = {"metadata": {"display_as": "int"}}
         self.assertEqual(format_param_value(param, 3.7), "4")
 
+    def test_format_param_value_uses_integer_rnbo_step_grid(self) -> None:
+        param = {"min": 0, "max": 127, "metadata": {"steps": 128}}
+        self.assertEqual(format_param_value(param, 38.0), "38")
+
+    def test_format_param_value_preserves_fractional_rnbo_step_grid(self) -> None:
+        param = {"min": 0, "max": 64, "metadata": {"steps": 4}}
+        self.assertEqual(format_param_value(param, 64 / 3), "21.33")
+
     def test_format_param_value_appends_units_after_precision_formatting(self) -> None:
         param = {"metadata": {"display_precision": 1, "unit": "Hz"}}
         self.assertEqual(format_param_value(param, 42.34), "42.3Hz")
@@ -612,6 +662,7 @@ class ParamMetadataTests(unittest.TestCase):
                 "meta": {"VALUE": '{"display_precision": 1}'},
                 "unit": {"VALUE": "Hz"},
                 "units": {"VALUE": "ignored once unit is present"},
+                "steps": {"VALUE": 128},
             }
         }
 
@@ -621,6 +672,7 @@ class ParamMetadataTests(unittest.TestCase):
                 "display_precision": 1,
                 "unit": "Hz",
                 "units": "ignored once unit is present",
+                "steps": 128,
             },
         )
 
