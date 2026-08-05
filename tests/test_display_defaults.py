@@ -128,6 +128,9 @@ class DisplayDefaultsTests(unittest.TestCase):
                 "logical_height": 480,
                 "pixel_format": "auto",
                 "backlight_path": None,
+                "hdmi_mirror": False,
+                "kms_connector": "DSI-1",
+                "kms_helper_python": "/usr/bin/python3",
             },
         )
 
@@ -155,6 +158,9 @@ class DisplayDefaultsTests(unittest.TestCase):
                 "logical_height": 320,
                 "pixel_format": "rgb565",
                 "backlight_path": "/sys/class/backlight/10-0045",
+                "hdmi_mirror": False,
+                "kms_connector": "DSI-1",
+                "kms_helper_python": "/usr/bin/python3",
             },
         )
 

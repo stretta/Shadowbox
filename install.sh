@@ -218,6 +218,10 @@ if [[ "${ENABLE_PIGPIOD}" -eq 1 ]]; then
     )
 fi
 
+if [[ "${DISPLAY_KIND}" == "waveshare_5inch_dsi" ]]; then
+    SYSTEM_PACKAGES+=(python3-kms++)
+fi
+
 sudo apt install -y \
     "${SYSTEM_PACKAGES[@]}"
 

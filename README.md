@@ -432,6 +432,26 @@ If the framebuffer is not `/dev/fb0`, set `SHADOWBOX_DSI_FRAMEBUFFER`. If your
 OS exposes a non-default framebuffer pixel layout, set
 `SHADOWBOX_DSI_PIXEL_FORMAT` to `bgrx8888`, `rgbx8888`, `rgb565`, or `rgb888`.
 
+When HDMI is connected at the same time, KMS may expose one shared framebuffer
+whose virtual size matches the larger HDMI mode. By default, Shadowbox keeps the
+DSI viewport fixed at the configured 800x480 top-left region so the panel remains
+pixel-aligned with touch input.
+
+For an HDMI switcher or recorder that needs a complete input frame, enable the
+hardware-scaled mirror:
+
+```
+SHADOWBOX_DSI_HDMI_MIRROR=1
+```
+
+Connect HDMI before starting Shadowbox. The backend fills the shared HDMI
+framebuffer, then configures the DSI KMS plane to scale that full frame back to
+800x480. HDMI receives a complete 720p or 1080p Shadowbox image while the DSI
+panel and touch coordinates remain aligned. The DSI installer includes the
+Raspberry Pi `python3-kms++` package used for this plane configuration. Override
+`SHADOWBOX_DSI_KMS_CONNECTOR` only if the panel is exposed under a connector
+name other than `DSI-1`.
+
 If `pigpiod` is not running, startup will fail with `RuntimeError: pigpio daemon not running`.
 
 ---
@@ -616,7 +636,7 @@ Common `/etc/default/shadowbox` settings:
 - Generic ST7789 backends (`st7789`, `st7789_raw`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_ST7789_SPI_BUS`, `SHADOWBOX_ST7789_SPI_CS`, `SHADOWBOX_ST7789_DC`, `SHADOWBOX_ST7789_RST`, `SHADOWBOX_ST7789_BACKLIGHT`, `SHADOWBOX_ST7789_SPI_SPEED_HZ`, `SHADOWBOX_ST7789_ROTATION`, `SHADOWBOX_ST7789_WIDTH`, `SHADOWBOX_ST7789_HEIGHT`, `SHADOWBOX_ST7789_OFFSET_LEFT`, `SHADOWBOX_ST7789_OFFSET_TOP`, `SHADOWBOX_ST7789_INVERT`, `SHADOWBOX_LOGICAL_WIDTH`, `SHADOWBOX_LOGICAL_HEIGHT`
 - Waveshare 1.44-inch LCD HAT backend (`st7735s_hat`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_ST7735_SPI_BUS`, `SHADOWBOX_ST7735_SPI_CS`, `SHADOWBOX_ST7735_DC`, `SHADOWBOX_ST7735_RST`, `SHADOWBOX_ST7735_BACKLIGHT`, `SHADOWBOX_ST7735_SPI_SPEED_HZ`, `SHADOWBOX_ST7735_WIDTH`, `SHADOWBOX_ST7735_HEIGHT`, `SHADOWBOX_ST7735_OFFSET_LEFT`, `SHADOWBOX_ST7735_OFFSET_TOP`, `SHADOWBOX_ST7735_INVERT`, `SHADOWBOX_LOGICAL_WIDTH`, `SHADOWBOX_LOGICAL_HEIGHT`
 - Waveshare 2-inch backend (`waveshare_2inch`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_WAVESHARE_SPI_BUS`, `SHADOWBOX_WAVESHARE_SPI_CS`, `SHADOWBOX_WAVESHARE_DC`, `SHADOWBOX_WAVESHARE_RST`, `SHADOWBOX_WAVESHARE_BACKLIGHT`, `SHADOWBOX_WAVESHARE_SPI_SPEED_HZ`, `SHADOWBOX_LOGICAL_WIDTH`, `SHADOWBOX_LOGICAL_HEIGHT`
-- Waveshare 5-inch DSI backend (`waveshare_5inch_dsi`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_DSI_FRAMEBUFFER`, `SHADOWBOX_DSI_WIDTH`, `SHADOWBOX_DSI_HEIGHT`, `SHADOWBOX_DSI_PIXEL_FORMAT`, `SHADOWBOX_DSI_BACKLIGHT_PATH`, `SHADOWBOX_LOGICAL_WIDTH`, `SHADOWBOX_LOGICAL_HEIGHT`
+- Waveshare 5-inch DSI backend (`waveshare_5inch_dsi`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_DSI_FRAMEBUFFER`, `SHADOWBOX_DSI_WIDTH`, `SHADOWBOX_DSI_HEIGHT`, `SHADOWBOX_DSI_PIXEL_FORMAT`, `SHADOWBOX_DSI_BACKLIGHT_PATH`, `SHADOWBOX_DSI_HDMI_MIRROR`, `SHADOWBOX_DSI_KMS_CONNECTOR`, `SHADOWBOX_KMS_HELPER_PYTHON`, `SHADOWBOX_LOGICAL_WIDTH`, `SHADOWBOX_LOGICAL_HEIGHT`
 
 Notes:
 
@@ -816,6 +836,7 @@ SHADOWBOX_DSI_FRAMEBUFFER=/dev/fb0
 SHADOWBOX_DSI_WIDTH=800
 SHADOWBOX_DSI_HEIGHT=480
 SHADOWBOX_DSI_PIXEL_FORMAT=auto
+SHADOWBOX_DSI_HDMI_MIRROR=0
 SHADOWBOX_LOGICAL_WIDTH=800
 SHADOWBOX_LOGICAL_HEIGHT=480
 SHADOWBOX_BRIGHTNESS_NORMAL=255

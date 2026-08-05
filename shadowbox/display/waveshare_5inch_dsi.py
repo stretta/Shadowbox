@@ -12,6 +12,7 @@ from __future__ import annotations
 import glob
 import mmap
 import os
+import subprocess
 from pathlib import Path
 from time import monotonic
 
@@ -43,6 +44,9 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
         fg_color: tuple[int, int, int] = (244, 247, 242),
         bg_color: tuple[int, int, int] = (15, 18, 18),
         text_scale_factor: float = 1.0,
+        hdmi_mirror: bool = False,
+        kms_connector: str = "DSI-1",
+        kms_helper_python: str = "/usr/bin/python3",
     ):
         self.width = logical_width
         self.height = logical_height
@@ -53,6 +57,9 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
         self.fg_color = fg_color
         self.bg_color = bg_color
         self.text_scale_factor = float(text_scale_factor)
+        self.hdmi_mirror = bool(hdmi_mirror)
+        self.kms_connector = str(kms_connector)
+        self.kms_helper_python = str(kms_helper_python)
         self.is_sleeping = False
         self._backlight_level = 1.0
         self._contrast_level = 255
@@ -62,12 +69,17 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
         self._fb = None
         self._fb_map = None
         self._fb_size = 0
+        self._virtual_width = self.physical_width
+        self._virtual_height = self.physical_height
+        self._output_width = self.physical_width
+        self._output_height = self.physical_height
         self._stride = self.physical_width * 4
         self._bytes_per_pixel = 4
         self._backlight_dir = Path(backlight_path) if backlight_path else self._find_backlight_dir()
         self._backlight_max = self._read_backlight_max()
         self._canvas_revision = 0
         self._last_frame_key: tuple[int, int] | None = None
+        self._kms_mirror_process = None
         self.performance_probe = None
 
     @staticmethod
@@ -119,8 +131,8 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
         virtual_size = self._sysfs_text(sysfs / "virtual_size")
         if virtual_size and "," in virtual_size:
             width, height = virtual_size.split(",", 1)
-            self.physical_width = int(width)
-            self.physical_height = int(height)
+            self._virtual_width = int(width)
+            self._virtual_height = int(height)
 
         bits_per_pixel = self._sysfs_int(sysfs / "bits_per_pixel")
         if bits_per_pixel in {16, 24, 32}:
@@ -128,15 +140,64 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
 
         stride = self._sysfs_int(sysfs / "stride")
         if stride is None:
-            stride = self.physical_width * self._bytes_per_pixel
+            stride = self._virtual_width * self._bytes_per_pixel
         self._stride = stride
+
+        row_bytes = self.physical_width * self._bytes_per_pixel
+        if self._stride < row_bytes or self._virtual_height < self.physical_height:
+            raise RuntimeError(
+                "The configured DSI viewport "
+                f"{self.physical_width}x{self.physical_height} does not fit framebuffer "
+                f"{self._virtual_width}x{self._virtual_height} with stride {self._stride}."
+            )
+
+        if self.hdmi_mirror:
+            self._output_width = self._virtual_width
+            self._output_height = self._virtual_height
 
         if self.pixel_format == "auto":
             self.pixel_format = "rgb565" if self._bytes_per_pixel == 2 else "bgrx8888"
 
+    def _configure_hdmi_mirror(self) -> None:
+        if not self.hdmi_mirror:
+            return
+        if (self._virtual_width, self._virtual_height) == (self.physical_width, self.physical_height):
+            return
+
+        helper = Path(__file__).resolve().parents[2] / "tools" / "configure_dsi_hdmi_mirror.py"
+        command = [
+            self.kms_helper_python,
+            str(helper),
+            "--connector",
+            self.kms_connector,
+            "--source-width",
+            str(self._virtual_width),
+            "--source-height",
+            str(self._virtual_height),
+            "--destination-width",
+            str(self.physical_width),
+            "--destination-height",
+            str(self.physical_height),
+            "--hold",
+        ]
+        try:
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                return_code = process.wait(timeout=0.75)
+            except subprocess.TimeoutExpired:
+                self._kms_mirror_process = process
+                return
+            stdout, stderr = process.communicate()
+            detail = stderr or stdout or f"helper exited with status {return_code}"
+            raise RuntimeError(f"Could not configure the DSI KMS mirror: {detail.strip()}")
+        except OSError as exc:
+            detail = getattr(exc, "stderr", "") or str(exc)
+            raise RuntimeError(f"Could not configure the DSI KMS mirror: {detail.strip()}") from exc
+
     def init(self) -> None:
         self._read_framebuffer_geometry()
-        self._fb_size = self._stride * self.physical_height
+        self._configure_hdmi_mirror()
+        self._fb_size = self._stride * self._virtual_height
         try:
             self._fb = os.open(self.framebuffer, os.O_RDWR)
             self._fb_map = mmap.mmap(self._fb, self._fb_size, mmap.MAP_SHARED, mmap.PROT_WRITE | mmap.PROT_READ)
@@ -144,6 +205,12 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
             raise RuntimeError(
                 f"Could not open {self.framebuffer}. Enable the Waveshare DSI overlay and ensure the framebuffer exists."
             ) from exc
+        # KMS may expose one large framebuffer for both the 800x480 DSI panel
+        # and a higher-resolution HDMI output. Clear that entire shared surface
+        # once. Normal mode writes only the DSI viewport; HDMI mirror mode fills
+        # the surface and uses the DSI plane scaler to preserve touch alignment.
+        self._fb_map.seek(0)
+        self._fb_map.write(bytes(self._fb_size))
         self.is_sleeping = False
         self._set_backlight(self._backlight_level)
         self.clear()
@@ -160,6 +227,9 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
         logical = self._canvas
         if self._contrast_level < 255:
             logical = logical.point(lambda channel: (channel * self._contrast_level) // 255)
+
+        if self.hdmi_mirror and (self._output_width, self._output_height) != (self.width, self.height):
+            return logical.resize((self._output_width, self._output_height), Image.Resampling.NEAREST)
 
         if self.width == self.physical_width and self.height == self.physical_height:
             return logical
@@ -185,8 +255,8 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
         def _pack_padded_rows(row_data: bytes, row_bytes: int) -> bytes:
             if self._stride == row_bytes:
                 return row_data
-            out = bytearray(self._stride * self.physical_height)
-            for y in range(self.physical_height):
+            out = bytearray(self._stride * self._output_height)
+            for y in range(self._output_height):
                 source = y * row_bytes
                 target = y * self._stride
                 out[target : target + row_bytes] = row_data[source : source + row_bytes]
@@ -206,23 +276,23 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
                     | ((rgb[:, :, 1].astype(np.uint16) & 0xFC) << 3)
                     | (rgb[:, :, 2].astype(np.uint16) >> 3)
                 ).astype("<u2", copy=False)
-                row_bytes = self.physical_width * 2
+                row_bytes = self._output_width * 2
                 if self._stride == row_bytes:
                     return packed.tobytes()
-                out = bytearray(self._stride * self.physical_height)
+                out = bytearray(self._stride * self._output_height)
                 packed_rows = packed.tobytes()
-                for y in range(self.physical_height):
+                for y in range(self._output_height):
                     source = y * row_bytes
                     target = y * self._stride
                     out[target : target + row_bytes] = packed_rows[source : source + row_bytes]
                 return bytes(out)
 
             data = image.tobytes()
-            out = bytearray(self._stride * self.physical_height)
+            out = bytearray(self._stride * self._output_height)
             source_index = 0
-            for y in range(self.physical_height):
+            for y in range(self._output_height):
                 row_index = y * self._stride
-                for x in range(self.physical_width):
+                for x in range(self._output_width):
                     r = data[source_index]
                     g = data[source_index + 1]
                     b = data[source_index + 2]
@@ -236,13 +306,13 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
         if self.pixel_format in {"bgrx8888", "bgra8888"}:
             packed = _raw_bytes("BGRX")
             if packed is not None:
-                return _pack_padded_rows(packed, self.physical_width * 4)
+                return _pack_padded_rows(packed, self._output_width * 4)
             data = image.tobytes()
-            out = bytearray(self._stride * self.physical_height)
+            out = bytearray(self._stride * self._output_height)
             source_index = 0
-            for y in range(self.physical_height):
+            for y in range(self._output_height):
                 row_index = y * self._stride
-                for x in range(self.physical_width):
+                for x in range(self._output_width):
                     r = data[source_index]
                     g = data[source_index + 1]
                     b = data[source_index + 2]
@@ -254,13 +324,13 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
         if self.pixel_format == "xrgb8888":
             packed = _raw_bytes("XRGB")
             if packed is not None:
-                return _pack_padded_rows(packed, self.physical_width * 4)
+                return _pack_padded_rows(packed, self._output_width * 4)
             data = image.tobytes()
-            out = bytearray(self._stride * self.physical_height)
+            out = bytearray(self._stride * self._output_height)
             source_index = 0
-            for y in range(self.physical_height):
+            for y in range(self._output_height):
                 row_index = y * self._stride
-                for x in range(self.physical_width):
+                for x in range(self._output_width):
                     r = data[source_index]
                     g = data[source_index + 1]
                     b = data[source_index + 2]
@@ -272,13 +342,13 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
         if self.pixel_format in {"rgbx8888", "rgba8888"}:
             packed = _raw_bytes("RGBX")
             if packed is not None:
-                return _pack_padded_rows(packed, self.physical_width * 4)
+                return _pack_padded_rows(packed, self._output_width * 4)
             data = image.tobytes()
-            out = bytearray(self._stride * self.physical_height)
+            out = bytearray(self._stride * self._output_height)
             source_index = 0
-            for y in range(self.physical_height):
+            for y in range(self._output_height):
                 row_index = y * self._stride
-                for x in range(self.physical_width):
+                for x in range(self._output_width):
                     target = row_index + (x * 4)
                     out[target : target + 3] = data[source_index : source_index + 3]
                     out[target + 3] = 0
@@ -287,7 +357,7 @@ class Waveshare5InchDSIDisplay(DisplayBackend):
 
         if self.pixel_format == "rgb888":
             data = image.tobytes()
-            return _pack_padded_rows(data, self.physical_width * 3)
+            return _pack_padded_rows(data, self._output_width * 3)
 
         raise ValueError(f"Unsupported DSI framebuffer pixel format: {self.pixel_format}")
 

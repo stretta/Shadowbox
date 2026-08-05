@@ -96,6 +96,75 @@ class Waveshare5InchDSITests(unittest.TestCase):
 
         self.assertEqual(display._pack_frame(image), bytes([0, 0, 255, 0, 0, 255, 0, 0]))
 
+    def test_shared_hdmi_framebuffer_preserves_dsi_viewport(self) -> None:
+        display = self.Display(
+            physical_width=800,
+            physical_height=480,
+            logical_width=800,
+            logical_height=480,
+            pixel_format="auto",
+        )
+
+        def sysfs_text(path):
+            return "1920,1080" if Path(path).name == "virtual_size" else None
+
+        def sysfs_int(path):
+            return {"bits_per_pixel": 16, "stride": 3840}.get(Path(path).name)
+
+        display._sysfs_text = sysfs_text
+        display._sysfs_int = sysfs_int
+        display._read_framebuffer_geometry()
+
+        self.assertEqual((display.physical_width, display.physical_height), (800, 480))
+        self.assertEqual((display._virtual_width, display._virtual_height), (1920, 1080))
+        self.assertEqual((display._output_width, display._output_height), (800, 480))
+        self.assertEqual(display._stride, 3840)
+        self.assertEqual(display.pixel_format, "rgb565")
+
+    def test_hdmi_mirror_uses_full_virtual_framebuffer_output(self) -> None:
+        display = self.Display(physical_width=800, physical_height=480, hdmi_mirror=True)
+        display._sysfs_text = lambda _path: "1920,1080"
+        display._sysfs_int = lambda path: {"bits_per_pixel": 16, "stride": 3840}.get(Path(path).name)
+
+        display._read_framebuffer_geometry()
+
+        self.assertEqual((display.physical_width, display.physical_height), (800, 480))
+        self.assertEqual((display._output_width, display._output_height), (1920, 1080))
+
+    def test_hdmi_mirror_invokes_system_kms_helper(self) -> None:
+        display = self.Display(
+            physical_width=800,
+            physical_height=480,
+            hdmi_mirror=True,
+            kms_connector="DSI-1",
+            kms_helper_python="/usr/bin/python3",
+        )
+        display._virtual_width = 1920
+        display._virtual_height = 1080
+
+        process = mock.Mock()
+        process.wait.side_effect = __import__("subprocess").TimeoutExpired("helper", 0.75)
+        with mock.patch("subprocess.Popen", return_value=process) as popen:
+            display._configure_hdmi_mirror()
+
+        command = popen.call_args.args[0]
+        self.assertEqual(command[0], "/usr/bin/python3")
+        self.assertIn("configure_dsi_hdmi_mirror.py", command[1])
+        self.assertEqual(command[-9:], [
+            "--source-width", "1920", "--source-height", "1080",
+            "--destination-width", "800", "--destination-height", "480",
+            "--hold",
+        ])
+        self.assertIs(display._kms_mirror_process, process)
+
+    def test_rejects_dsi_viewport_larger_than_framebuffer(self) -> None:
+        display = self.Display(physical_width=800, physical_height=480)
+        display._sysfs_text = lambda _path: "640,480"
+        display._sysfs_int = lambda path: {"bits_per_pixel": 16, "stride": 1280}.get(Path(path).name)
+
+        with self.assertRaisesRegex(RuntimeError, "does not fit framebuffer"):
+            display._read_framebuffer_geometry()
+
     def test_pack_frame_supports_rgb565_framebuffer_order(self) -> None:
         display = self.Display(
             physical_width=2,

@@ -98,6 +98,9 @@ def load_display_from_env(default_kind: str = "st7789_raw"):
             logical_height=_env_int("SHADOWBOX_LOGICAL_HEIGHT", 480),
             pixel_format=os.environ.get("SHADOWBOX_DSI_PIXEL_FORMAT", "auto"),
             backlight_path=os.environ.get("SHADOWBOX_DSI_BACKLIGHT_PATH") or None,
+            hdmi_mirror=_env_bool("SHADOWBOX_DSI_HDMI_MIRROR", False),
+            kms_connector=os.environ.get("SHADOWBOX_DSI_KMS_CONNECTOR", "DSI-1"),
+            kms_helper_python=os.environ.get("SHADOWBOX_KMS_HELPER_PYTHON", "/usr/bin/python3"),
         )
 
     return create_display(kind, **kwargs)
