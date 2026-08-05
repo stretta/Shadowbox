@@ -44,6 +44,7 @@ class TouchAction:
     button_id: str = ""
     value: float | None = None
     pressed: bool = False
+    page_size: int | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,7 @@ class TouchHitTarget:
     label: str = ""
     page: int | None = None
     page_count: int | None = None
+    page_size: int | None = None
 
 
 class TouchLayout:
@@ -86,6 +88,7 @@ class TouchLayout:
         label: str = "",
         page: int | None = None,
         page_count: int | None = None,
+        page_size: int | None = None,
     ) -> TouchHitTarget:
         target = TouchHitTarget(
             kind=str(kind),
@@ -99,6 +102,7 @@ class TouchLayout:
             label=str(label or ""),
             page=page,
             page_count=page_count,
+            page_size=page_size,
         )
         if target.w > 0 and target.h > 0:
             self.targets.append(target)
@@ -139,7 +143,12 @@ class TouchLayout:
             else:
                 value = (x - target.x) / max(1, target.w - 1)
             return TouchAction(kind=target.action_kind, index=target.index, button_id=target.button_id, value=max(0.0, min(1.0, value)))
-        return TouchAction(kind=target.action_kind, index=target.index, button_id=target.button_id)
+        return TouchAction(
+            kind=target.action_kind,
+            index=target.index,
+            button_id=target.button_id,
+            page_size=target.page_size,
+        )
 
 
 def _eviocgabs(abs_code: int) -> int:

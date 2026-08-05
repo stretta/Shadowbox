@@ -30,6 +30,7 @@ class EncoderEvent:
     button_id: str = ""
     value: float | None = None
     pressed: bool = False
+    page_size: int | None = None
 
 
 # ============================================================
@@ -412,6 +413,7 @@ class EncoderInput:
                         button_id=action.button_id,
                         value=action.value,
                         pressed=sample_pressed,
+                        page_size=action.page_size,
                     )
                     if action.kind in {"set_edit_value", "set_surface_value", "set_surface_range"} and sample_pressed:
                         latest_slider_event = event

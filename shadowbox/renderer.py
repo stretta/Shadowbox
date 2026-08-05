@@ -710,6 +710,7 @@ class ShadowboxRenderer:
         label: str = "",
         page: int | None = None,
         page_count: int | None = None,
+        page_size: int | None = None,
     ) -> None:
         if self.touch_layout is None:
             return
@@ -725,6 +726,7 @@ class ShadowboxRenderer:
             label=label,
             page=page,
             page_count=page_count,
+            page_size=page_size,
         )
 
     def _touch_pressed(self, *, kind: str | None = None, index: int | None = None, button_id: str = "") -> bool:
@@ -777,7 +779,14 @@ class ShadowboxRenderer:
         else:
             self._text(">", chev_x, chev_y, scale, weight)
 
-    def _draw_touch_page_rail(self, content_top: int, content_bottom: int, page: int, page_count: int) -> None:
+    def _draw_touch_page_rail(
+        self,
+        content_top: int,
+        content_bottom: int,
+        page: int,
+        page_count: int,
+        page_size: int | None = None,
+    ) -> None:
         if not self.touch_layout_enabled:
             return
         rail_w = min(120, max(88, self.display.width // 8))
@@ -790,7 +799,16 @@ class ShadowboxRenderer:
         visual_h = max(1, visual_bottom - visual_top)
         visual_half_h = max(1, visual_h // 2)
         self._record_touch_target("page_rail", rail_x, content_top, rail_w, rail_h)
-        self._record_touch_target("page_up", rail_x, content_top, rail_w, half_h, action_kind="page_up", button_id="page_up")
+        self._record_touch_target(
+            "page_up",
+            rail_x,
+            content_top,
+            rail_w,
+            half_h,
+            action_kind="page_up",
+            button_id="page_up",
+            page_size=page_size,
+        )
         self._record_touch_target(
             "page_down",
             rail_x,
@@ -799,6 +817,7 @@ class ShadowboxRenderer:
             rail_h - half_h,
             action_kind="page_down",
             button_id="page_down",
+            page_size=page_size,
         )
 
         arrow_scale = 2 if self.display.height >= 360 else 1
@@ -1027,7 +1046,7 @@ class ShadowboxRenderer:
             content_left, content_right, content_top, content_bottom, row_h, _gap, _row_centers = touch_layout
             page_count = max(1, (total + visible - 1) // max(1, visible))
             current_page = (selected_idx // max(1, visible)) + 1
-            self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count)
+            self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count, visible)
         else:
             content_left, content_right, content_top, content_bottom, row_h = 0, self.display.width, panel_y, panel_h, 0
 
@@ -1158,7 +1177,7 @@ class ShadowboxRenderer:
         selected_zero = max(0, selected_idx - 1)
         page_count = max(1, (max(0, total) + visible - 1) // visible)
         current_page = (selected_zero // visible) + 1 if total else 1
-        self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count)
+        self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count, visible)
 
         if total <= 0:
             y = rows[0]
@@ -1364,7 +1383,7 @@ class ShadowboxRenderer:
             content_left, content_right, content_top, content_bottom, row_h, _gap, _rows = touch_layout
             page_count = max(1, (total + visible - 1) // max(1, visible))
             current_page = (selected_zero // max(1, visible)) + 1
-            self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count)
+            self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count, visible)
         else:
             content_left, content_right, content_top, content_bottom, row_h = 0, self.display.width, panel_y, panel_h, 0
 
@@ -1484,7 +1503,7 @@ class ShadowboxRenderer:
             content_left, content_right, content_top, content_bottom, row_h, _gap, _rows = touch_layout
             page_count = max(1, (max(0, total - 1) + visible - 1) // max(1, visible))
             current_page = (max(0, selected_idx - 1) // max(1, visible)) + 1
-            self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count)
+            self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count, visible)
         else:
             content_left, content_right, content_top, content_bottom, row_h = 0, self.display.width, panel_y, panel_h, 0
 
@@ -1592,7 +1611,7 @@ class ShadowboxRenderer:
         visible = max(1, len(rows))
         page_count = max(1, (max(0, len(labels)) + visible - 1) // visible)
         current_page = (max(0, selected_zero) // visible) + 1 if labels else 1
-        self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count)
+        self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count, visible)
 
         total_items = len(list_items)
         if total_items <= visible:
@@ -1732,7 +1751,7 @@ class ShadowboxRenderer:
                 indices = list(range(start, start + visible))
             page_count = max(1, (len(options) + visible - 1) // visible)
             current_page = (selected_idx // visible) + 1
-            self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count)
+            self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count, visible)
 
         for row_idx, item_idx in enumerate(indices):
             option = options[item_idx]
@@ -1875,7 +1894,7 @@ class ShadowboxRenderer:
             content_left, content_right, content_top, content_bottom, row_h, _gap, _rows = touch_layout
             page_count = max(1, (max(0, total - 1) + visible - 1) // max(1, visible))
             current_page = (max(0, selected_idx - 1) // max(1, visible)) + 1
-            self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count)
+            self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count, visible)
         else:
             content_left, content_right, content_top, content_bottom, row_h = 0, self.display.width, panel_y, panel_h, 0
 
@@ -1978,7 +1997,7 @@ class ShadowboxRenderer:
         selected_zero = max(0, selected_idx - 1)
         page_count = max(1, (max(0, len(assignments)) + visible - 1) // visible)
         current_page = (selected_zero // visible) + 1 if assignments else 1
-        self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count)
+        self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count, visible)
 
         row_w = max(1, content_right - content_left)
         if not assignments:
@@ -2081,7 +2100,7 @@ class ShadowboxRenderer:
         total_targets = len(target_labels)
         page_count = max(1, (max(0, total_targets) + visible - 1) // visible)
         current_page = (max(0, selected_zero) // visible) + 1 if total_targets else 1
-        self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count)
+        self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count, visible)
 
         if total_targets <= 0:
             indices = [0]
@@ -2197,7 +2216,7 @@ class ShadowboxRenderer:
                 content_left, content_right, content_top, content_bottom, row_h, _gap, _rows = touch_layout
                 page_count = max(1, (total + visible - 1) // max(1, visible))
                 current_page = (selected_idx // max(1, visible)) + 1
-                self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count)
+                self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count, visible)
             else:
                 content_left, content_right, content_top, content_bottom, row_h = 0, self.display.width, panel_y, panel_h, 0
 

@@ -211,7 +211,7 @@ class TouchDirectUITests(unittest.TestCase):
 
         renderer, _display = _render_touch_layout(ui)
         page_down = _touch_action_for_target(renderer, kind="page_down", button_id="page_down")
-        ui.handle_event(UIEvent(kind=page_down.kind))
+        ui.handle_event(UIEvent(kind=page_down.kind, page_size=page_down.page_size))
 
         self.assertEqual(ui.state.enum_cursor, 4)
         self.assertEqual(ui.state.edit_value, "5")
@@ -231,27 +231,63 @@ class TouchDirectUITests(unittest.TestCase):
         ui.state.ui_mode = "INSTANCE_LIST"
         ui.state.instances = [
             {"id": str(idx), "label": f"Inst {idx}"}
-            for idx in range(1, 5)
+            for idx in range(1, 8)
         ]
         ui.state.active_instance_id = "1"
         ui.state.instance_cursor = 1
         ui.state.add_instance_path = "/rnbo/inst/control/load"
         ui.state.remove_instance_path = "/rnbo/inst/control/unload"
 
-        ui.handle_event(UIEvent(kind="page_down"))
+        renderer, _display = _render_touch_layout(ui)
+        page_down = _touch_action_for_target(renderer, kind="page_down", button_id="page_down")
+        self.assertEqual(page_down.page_size, 3)
+
+        ui.handle_event(UIEvent(kind=page_down.kind, page_size=page_down.page_size))
 
         self.assertEqual(ui.state.instance_cursor, 4)
         self.assertEqual(ui.state.active_instance_id, "4")
 
-        ui.handle_event(UIEvent(kind="page_down"))
+        ui.handle_event(UIEvent(kind=page_down.kind, page_size=page_down.page_size))
+
+        self.assertEqual(ui.state.instance_cursor, 7)
+        self.assertEqual(ui.state.active_instance_id, "7")
+
+        ui.handle_event(UIEvent(kind="page_up", page_size=page_down.page_size))
 
         self.assertEqual(ui.state.instance_cursor, 4)
         self.assertEqual(ui.state.active_instance_id, "4")
 
-        ui.handle_event(UIEvent(kind="page_up"))
+        ui.handle_event(UIEvent(kind="page_up", page_size=page_down.page_size))
 
         self.assertEqual(ui.state.instance_cursor, 1)
         self.assertEqual(ui.state.active_instance_id, "1")
+
+    def test_instance_paging_visits_every_page_for_arbitrary_item_counts(self) -> None:
+        for count in range(1, 16):
+            with self.subTest(count=count):
+                ui = ShadowboxUI()
+                ui.state.ui_mode = "INSTANCE_LIST"
+                ui.state.instances = [
+                    {"id": str(idx), "label": f"Inst {idx}"}
+                    for idx in range(1, count + 1)
+                ]
+                ui.state.active_instance_id = "1"
+                ui.state.instance_cursor = 1
+
+                renderer, _display = _render_touch_layout(ui)
+                page_down = _touch_action_for_target(renderer, kind="page_down", button_id="page_down")
+                page_size = page_down.page_size
+                self.assertEqual(page_size, 3)
+
+                visited_pages = {1}
+                while ui.state.instance_cursor < count:
+                    before = ui.state.instance_cursor
+                    ui.handle_event(UIEvent(kind=page_down.kind, page_size=page_size))
+                    self.assertGreater(ui.state.instance_cursor, before)
+                    visited_pages.add(((ui.state.instance_cursor - 1) // page_size) + 1)
+
+                expected_page_count = (count + page_size - 1) // page_size
+                self.assertEqual(visited_pages, set(range(1, expected_page_count + 1)))
 
     def test_tap_row_toggles_bool_param_directly(self) -> None:
         ui = ShadowboxUI()
@@ -1247,8 +1283,14 @@ class TouchDirectUITests(unittest.TestCase):
 
         self.assertEqual(_touch_action_for_target(renderer, kind="row", index=1), TouchAction("tap_row", index=1))
         self.assertEqual(_touch_action_for_target(renderer, kind="back_button", button_id="back"), TouchAction("tap_back", button_id="back"))
-        self.assertEqual(_touch_action_for_target(renderer, kind="page_up", button_id="page_up"), TouchAction("page_up", button_id="page_up"))
-        self.assertEqual(_touch_action_for_target(renderer, kind="page_down", button_id="page_down"), TouchAction("page_down", button_id="page_down"))
+        self.assertEqual(
+            _touch_action_for_target(renderer, kind="page_up", button_id="page_up"),
+            TouchAction("page_up", button_id="page_up", page_size=4),
+        )
+        self.assertEqual(
+            _touch_action_for_target(renderer, kind="page_down", button_id="page_down"),
+            TouchAction("page_down", button_id="page_down", page_size=4),
+        )
 
     def test_parameter_list_touch_rows_use_list_style_value_and_chevron(self) -> None:
         ui = ShadowboxUI()

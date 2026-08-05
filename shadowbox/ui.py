@@ -502,6 +502,7 @@ class UIEvent:
     button_id: str = ""
     value: float | None = None
     pressed: bool = False
+    page_size: int | None = None
 
 
 @dataclass
@@ -2933,9 +2934,9 @@ class ShadowboxUI:
         elif event.kind == "tap_button":
             self._handle_tap_button(event.button_id)
         elif event.kind == "page_up":
-            self._handle_touch_page(-1)
+            self._handle_touch_page(-1, event.page_size)
         elif event.kind == "page_down":
-            self._handle_touch_page(1)
+            self._handle_touch_page(1, event.page_size)
         elif event.kind == "set_edit_value":
             self._handle_touch_edit_value(event.value, pressed=bool(getattr(event, "pressed", False)))
         elif event.kind == "set_surface_value":
@@ -3626,7 +3627,7 @@ class ShadowboxUI:
         else:
             self._handle_short_press()
 
-    def _handle_touch_page(self, direction: int) -> None:
+    def _handle_touch_page(self, direction: int, rendered_page_size: int | None = None) -> None:
         if direction == 0:
             return
         mode = self.state.ui_mode
@@ -3644,7 +3645,8 @@ class ShadowboxUI:
             current = int(getattr(self.state, attr))
             if current < first_index or current > last_index:
                 current = first_index
-            page_step = (1 if direction > 0 else -1) * max(1, int(page_rows))
+            actual_page_rows = rendered_page_size if rendered_page_size is not None else page_rows
+            page_step = (1 if direction > 0 else -1) * max(1, int(actual_page_rows))
             setattr(self.state, attr, max(first_index, min(last_index, current + page_step)))
             self.state.activity_ticks += 1
             return True
