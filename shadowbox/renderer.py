@@ -3508,8 +3508,10 @@ class ShadowboxRenderer:
         fields_gap = 4
         field_h = max(38, (content_h - fields_gap * (len(keys) - 1)) // len(keys))
         label_col_w = 72
+        rotate_button_w = 48
         mute_button_w = 42 if mute_params is not None else 0
-        mute_gap = 8 if mute_params is not None else 0
+        field_action_gap = 8
+        field_actions_w = rotate_button_w + (mute_button_w + field_action_gap if mute_params is not None else 0)
         keypad_x = fields_x + fields_w + 24
         keypad_w = self.display.width - keypad_x - 24
 
@@ -3521,7 +3523,7 @@ class ShadowboxRenderer:
                 self._rounded_theme(fields_x, y, fields_w, field_h, 8, "accent" if selected else "line", False)
             else:
                 self.display.rect(fields_x, y, fields_w, field_h, True, selected)
-            field_target_w = fields_w - mute_button_w - mute_gap
+            field_target_w = fields_w - field_actions_w - field_action_gap
             self._record_touch_target(
                 "list_field",
                 fields_x,
@@ -3543,10 +3545,38 @@ class ShadowboxRenderer:
             preview = self._truncate_to_width(preview, fields_x + field_target_w - preview_x - 12, 2, "regular")
             self._text_theme(preview, preview_x, value_y, "text" if selected else "muted", 2, "regular")
 
+            rotate_x = fields_x + fields_w - rotate_button_w
+            rotate_y = y + max(2, (field_h - min(34, field_h - 4)) // 2)
+            rotate_h = min(34, field_h - 4)
+            if self.has_color:
+                self._rounded_theme(rotate_x, rotate_y, rotate_button_w, rotate_h, 7, "panel_alt", True)
+                self._rounded_theme(rotate_x, rotate_y, rotate_button_w, rotate_h, 7, "line", False)
+            else:
+                self.display.rect(rotate_x, rotate_y, rotate_button_w, rotate_h, True, False)
+            self._record_touch_target(
+                "list_rotate",
+                rotate_x,
+                y,
+                rotate_button_w,
+                field_h,
+                action_kind="rotate_list_field",
+                index=index,
+                label="ROT",
+            )
+            rotate_text_w, rotate_text_h = self._measure_text("ROT", 1, "medium")
+            self._text_theme(
+                "ROT",
+                rotate_x + max(0, (rotate_button_w - rotate_text_w) // 2),
+                rotate_y + max(0, (rotate_h - rotate_text_h) // 2),
+                "muted",
+                1,
+                "medium",
+            )
+
             if mute_params is not None:
                 mute_param = mute_params.get(key)
                 muted = mute_is_on(mute_param)
-                mute_x = fields_x + fields_w - mute_button_w
+                mute_x = rotate_x - field_action_gap - mute_button_w
                 mute_y = y + max(2, (field_h - min(34, field_h - 4)) // 2)
                 mute_h = min(34, field_h - 4)
                 if self.has_color:

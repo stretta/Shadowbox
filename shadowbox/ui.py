@@ -865,6 +865,8 @@ class ShadowboxUI:
                         if active is not None:
                             for key in self._list_surface_keys():
                                 if active[1].state.get(f"{key}_ack") is item:
+                                    if self._complete_list_rotation(key, value):
+                                        break
                                     if not (isinstance(dirty, dict) and dirty.get(key)):
                                         self._list_surface_drafts()[key] = format_list_value(value)
                                     break
@@ -2953,6 +2955,8 @@ class ShadowboxUI:
             self._handle_list_sign()
         elif event.kind == "toggle_list_mute":
             self._handle_list_mute(event.index)
+        elif event.kind == "rotate_list_field":
+            self._handle_list_rotation(event.index)
         elif event.kind == "send_list_field":
             self._send_list_field()
         elif event.kind == "step_list_field":
@@ -3173,6 +3177,45 @@ class ShadowboxUI:
         self.state.surface_focus = row - 1
         self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
         self.request_render("list_mute")
+
+    def _handle_list_rotation(self, index: int | None) -> None:
+        if not self._list_surface_ready() or index is None:
+            return
+        keys = self._list_surface_keys()
+        focus = max(0, min(len(keys) - 1, int(index)))
+        key = keys[focus]
+        ack = self.surface_state_binding(f"{key}_ack")
+        input_item = self.surface_input_binding(key)
+        if ack is None or input_item is None:
+            self.set_status_message("LIST READ UNAVAILABLE", frames=48)
+            return
+        if self.state.surface_state.get("pending_rotation"):
+            self.set_status_message("LIST READ PENDING", frames=24)
+            return
+        self.state.surface_focus = focus
+        self.state.surface_state["pending_rotation"] = key
+        self.queue_action(UIAction(kind="send_osc", path=input_item.get("path"), value=[-999]))
+        self.set_status_message("READING LIST", frames=48)
+        self.request_render("list_rotate_read")
+
+    def _complete_list_rotation(self, key: str, value: Any) -> bool:
+        if self.state.surface_state.get("pending_rotation") != key:
+            return False
+        input_item = self.surface_input_binding(key)
+        self.state.surface_state.pop("pending_rotation", None)
+        if input_item is None:
+            self.set_status_message("LIST ROTATE FAILED", frames=48)
+            return False
+        values = list(value) if isinstance(value, (list, tuple)) else ([] if value is None else [value])
+        rotated = values[1:] + values[:1]
+        self._list_surface_drafts()[key] = format_list_value(rotated)
+        dirty = self.state.surface_state.get("dirty", {})
+        if isinstance(dirty, dict):
+            dirty.pop(key, None)
+        self.queue_action(UIAction(kind="send_osc", path=input_item.get("path"), value=rotated))
+        self.set_status_message("LIST ROTATED", frames=24)
+        self.request_render("list_rotate_send")
+        return True
 
     def _list_surface_ready(self) -> bool:
         return (

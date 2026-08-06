@@ -452,6 +452,30 @@ class InstanceSurfaceTests(unittest.TestCase):
         self.assertTrue(ui.apply_instance_state_update("7", steps_ack["path"], [0]))
         self.assertEqual(ui.state.surface_state["drafts"]["steps"], "1 1 01")
 
+    def test_list_sequencer_rotate_reads_current_list_then_moves_first_item_to_end(self):
+        ui = ShadowboxUI()
+        instance = _list_sequencer_instance()
+        ui.apply_runner_snapshot(_snapshot([instance]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        ui.pop_actions()
+        ui.state.surface_state["drafts"]["steps"] = "0 0 0"
+        ui.state.surface_state["dirty"]["steps"] = True
+
+        ui.handle_event(UIEvent("rotate_list_field", index=0))
+
+        read = next(action for action in ui.pop_actions() if action.kind == "send_osc")
+        self.assertEqual(read.path, "/rnbo/inst/7/messages/in/Steps")
+        self.assertEqual(read.value, [-999])
+        steps_ack = next(item for item in instance["state"] if item["name"] == "StepsAck")
+        self.assertTrue(ui.apply_instance_state_update("7", steps_ack["path"], [1, 0, 1]))
+        write = next(action for action in ui.pop_actions() if action.kind == "send_osc")
+        self.assertEqual(write.path, "/rnbo/inst/7/messages/in/Steps")
+        self.assertEqual(write.value, [0, 1, 1])
+        self.assertEqual(ui.state.surface_state["drafts"]["steps"], "0 1 1")
+        self.assertNotIn("steps", ui.state.surface_state["dirty"])
+
     def test_list_sequencer_surface_renders_seven_fields_and_twelve_keys(self):
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(_snapshot([_list_sequencer_instance()]))
@@ -466,9 +490,12 @@ class InstanceSurfaceTests(unittest.TestCase):
         fields = [target for target in renderer.touch_layout.targets if target.kind == "list_field"]
         keys = [target for target in renderer.touch_layout.targets if target.kind == "list_key"]
         sends = [target for target in renderer.touch_layout.targets if target.kind == "list_send"]
+        rotates = [target for target in renderer.touch_layout.targets if target.kind == "list_rotate"]
         self.assertEqual(len(fields), 7)
         self.assertEqual(len(keys), 12)
         self.assertEqual(len(sends), 1)
+        self.assertEqual(len(rotates), 7)
+        self.assertTrue(all(target.label == "ROT" for target in rotates))
         self.assertEqual([target.label for target in fields], [
             "Stp",
             "Stp2",
@@ -538,6 +565,26 @@ class InstanceSurfaceTests(unittest.TestCase):
         self.assertEqual(write.path, "/rnbo/inst/7/messages/in/3row")
         self.assertEqual(write.value, [24, 48, 96])
 
+    def test_list_vel_sequencer_rotate_reads_and_sends_selected_row(self):
+        ui = ShadowboxUI()
+        instance = _list_vel_sequencer_instance()
+        ui.apply_runner_snapshot(_snapshot([instance]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        ui.pop_actions()
+
+        ui.handle_event(UIEvent("rotate_list_field", index=2))
+
+        read = next(action for action in ui.pop_actions() if action.kind == "send_osc")
+        self.assertEqual(read.path, "/rnbo/inst/7/messages/in/3row")
+        self.assertEqual(read.value, [-999])
+        row_ack = next(item for item in instance["state"] if item["name"] == "3rowAck")
+        self.assertTrue(ui.apply_instance_state_update("7", row_ack["path"], [24, 48, 96]))
+        write = next(action for action in ui.pop_actions() if action.kind == "send_osc")
+        self.assertEqual(write.path, "/rnbo/inst/7/messages/in/3row")
+        self.assertEqual(write.value, [48, 96, 24])
+
     def test_list_vel_sequencer_mute_button_toggles_row_param(self):
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(_snapshot([_list_vel_sequencer_instance()]))
@@ -583,8 +630,10 @@ class InstanceSurfaceTests(unittest.TestCase):
         keys = [target for target in renderer.touch_layout.targets if target.kind == "list_key"]
         sends = [target for target in renderer.touch_layout.targets if target.kind == "list_send"]
         mutes = [target for target in renderer.touch_layout.targets if target.kind == "list_mute"]
+        rotates = [target for target in renderer.touch_layout.targets if target.kind == "list_rotate"]
         self.assertEqual(len(rows), 8)
         self.assertEqual(len(mutes), 8)
+        self.assertEqual(len(rotates), 8)
         self.assertEqual(len(keys), 12)
         self.assertEqual(len(sends), 1)
         self.assertEqual([target.label for target in rows], [
@@ -599,6 +648,7 @@ class InstanceSurfaceTests(unittest.TestCase):
         ])
         self.assertEqual(sends[0].label, "SEND ROW")
         self.assertTrue(all(target.label == "M" for target in mutes))
+        self.assertTrue(all(target.label == "ROT" for target in rotates))
         self.assertFalse(any(target.kind == "list_sign" for target in renderer.touch_layout.targets))
 
     def test_list_vel_sequencer_buttons_use_rounded_borders(self):
