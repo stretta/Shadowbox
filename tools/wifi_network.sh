@@ -33,13 +33,31 @@ connect_saved_network() {
 connect_new_network() {
   local ssid="$1"
   local password="${2:-}"
+  local connection_uuid=""
   if [[ -z "${ssid}" ]]; then
     echo "ssid required" >&2
     exit 1
   fi
 
   if [[ -n "${password}" ]]; then
-    nmcli device wifi connect "${ssid}" password "${password}"
+    # A failed first attempt can still leave a NetworkManager profile behind.
+    # Update that profile explicitly so retrying does not reuse its bad secret.
+    while IFS=: read -r uuid connection_type; do
+      if [[ "${connection_type}" != "802-11-wireless" ]]; then
+        continue
+      fi
+      if [[ "$(nmcli -g 802-11-wireless.ssid connection show uuid "${uuid}" 2>/dev/null || true)" == "${ssid}" ]]; then
+        connection_uuid="${uuid}"
+        break
+      fi
+    done < <(nmcli -t -f UUID,TYPE connection show)
+
+    if [[ -n "${connection_uuid}" ]]; then
+      nmcli connection modify uuid "${connection_uuid}" 802-11-wireless-security.psk "${password}"
+      nmcli connection up uuid "${connection_uuid}"
+    else
+      nmcli device wifi connect "${ssid}" password "${password}"
+    fi
   else
     nmcli device wifi connect "${ssid}"
   fi

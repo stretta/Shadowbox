@@ -2,7 +2,7 @@ import time
 import unittest
 from types import SimpleNamespace
 
-from shadowbox.discovery import DiscoveryCoordinator, DiscoveryResult
+from shadowbox.discovery import DiscoveryCoordinator, DiscoveryResult, NetworkOperationCoordinator
 from shadowbox.performance import PerformanceProbe
 from shadowbox.render_scheduler import RenderScheduler
 
@@ -79,6 +79,24 @@ class DiscoveryCoordinatorTests(unittest.TestCase):
         coordinator.request("runner", "first")
         coordinator.request("runner", "second")
         self.assertTrue(coordinator.is_stale(DiscoveryResult("runner", "first", 1)))
+
+
+class NetworkOperationCoordinatorTests(unittest.TestCase):
+    def test_failed_wifi_result_preserves_retry_target(self):
+        coordinator = NetworkOperationCoordinator(_RNBO(), lambda *_: (True, ""), lambda *_: (False, "bad password"))
+        coordinator.start()
+        try:
+            coordinator.request("connect_wifi", "studio-profile")
+            deadline = time.monotonic() + 1.0
+            results = []
+            while not results and time.monotonic() < deadline:
+                results.extend(coordinator.drain())
+                time.sleep(0.005)
+            self.assertEqual(len(results), 1)
+            self.assertFalse(results[0].ok)
+            self.assertEqual(results[0].target, "studio-profile")
+        finally:
+            coordinator.stop()
 
 
 class RenderSchedulerTests(unittest.TestCase):

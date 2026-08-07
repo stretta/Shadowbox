@@ -1129,11 +1129,15 @@ def main():
 
             for result in network_operations.drain():
                 ui.apply_network_snapshot(result.network)
+                retrying_wifi_password = False
                 if result.ok:
                     ui.clear_network_error()
                 else:
                     ui.set_network_error(_short_error_text(result.error))
-                ui.state.ui_mode = "NETWORK"
+                    if result.kind.startswith("connect_wifi") and result.target:
+                        retrying_wifi_password = ui.begin_wifi_password_retry(result.target)
+                if not retrying_wifi_password:
+                    ui.state.ui_mode = "NETWORK"
                 ui.state.network_cursor = 5 if result.kind.startswith("connect_wifi") and len(ui.network_value_rows) >= 5 else 1
                 ui.set_busy(False)
                 scheduler.request("network_operation")

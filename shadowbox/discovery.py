@@ -123,6 +123,7 @@ class NetworkOperationResult:
     ok: bool
     error: str
     network: dict
+    target: str = ""
 
 
 class NetworkOperationCoordinator:
@@ -174,4 +175,5 @@ class NetworkOperationCoordinator:
                 network = self.rnbo.discover_network_status()
             except Exception as exc:
                 ok, error, network = False, str(exc), {}
-            self._results.put(NetworkOperationResult(kind, ok, error, network))
+            target = str(args[0] or "") if args else ""
+            self._results.put(NetworkOperationResult(kind, ok, error, network, target))

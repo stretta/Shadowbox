@@ -637,6 +637,18 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(ui.state.ui_mode, "WIFI_NETWORKS")
         self.assertEqual(ui.state.name_editor_draft, "")
 
+    def test_failed_saved_wifi_can_reopen_password_editor_by_connection_id(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_direct_network())
+
+        retry_started = ui.begin_wifi_password_retry("stage-profile")
+
+        self.assertTrue(retry_started)
+        self.assertEqual(ui.state.ui_mode, "NAME_EDITOR")
+        self.assertEqual(ui.state.name_editor_context, "wifi_password")
+        self.assertEqual(ui.state.pending_wifi_ssid, "stage")
+        self.assertEqual(ui.state.name_editor_draft, "")
+
     def test_wifi_network_picker_queues_open_network_without_password(self) -> None:
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_direct_network())

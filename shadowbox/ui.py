@@ -2655,6 +2655,19 @@ class ShadowboxUI:
             return_mode="WIFI_NETWORKS",
         )
 
+    def begin_wifi_password_retry(self, connection_id_or_ssid: str) -> bool:
+        """Reopen password entry after NetworkManager rejects saved credentials."""
+        target = str(connection_id_or_ssid or "").strip()
+        if not target:
+            return False
+        for network in self.available_wifi_networks:
+            connection_id = str(network.get("id", "") or "").strip()
+            ssid = str(network.get("ssid", "") or "").strip()
+            if target in {connection_id, ssid} and ssid:
+                self._begin_wifi_password_editor(ssid)
+                return True
+        return False
+
     @property
     def network_direct_setup_ready(self) -> bool:
         return bool(self.network_info.get("direct_setup_ready"))
