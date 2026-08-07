@@ -93,7 +93,7 @@ https://www.adafruit.com/product/4484
 - Set load/save from published Runner capabilities
 - Set startup configuration through published Runner controls
 - System status display
-- WiFi network selection with password entry for first-time connections
+- WiFi network selection with password entry and failed-credential retry
 - Direct Ethernet rescue setup with a fixed fallback IP on `eth0`
 - Audio device switching
 - JACK restart
@@ -109,7 +109,7 @@ It does not maintain its own set model or restore set/session state from local p
 Set load/save/startup behavior is executed only through Runner-published set and startup controls.
 A curated `NEW SET` action is acceptable when it maps directly to the published set load path using a verified backend template.
 The `SYSTEM -> NETWORK` screen also includes WiFi network selection and a local direct-Ethernet setup action that can assign a predictable fallback IP for headless rescue connections.
-The WiFi chooser uses NetworkManager's `nmcli` when available, connects saved profiles directly, opens an on-device password editor for first-time secured networks, and includes a `RESCAN` row for intentionally refreshing the access-point list.
+The WiFi chooser uses NetworkManager's `nmcli` when available, connects saved profiles directly, opens an on-device password editor for first-time secured networks, and includes a `RESCAN` row for intentionally refreshing the access-point list. If NetworkManager rejects a password, Shadowbox returns directly to password entry for that network. Retrying updates any profile left behind by the failed attempt so the new password is used instead of the stale saved secret.
 
 `SYSTEM -> TRANSPOSE` coordinates the standardized RNBO parameters
 `ChromaticTranspose` and `ScalarTranspose`. Authority is initially
@@ -132,7 +132,9 @@ standalone offsets are saved in `~/rnbo-ui/shadowbox_state.json`.
 transport state and BPM controls. The state row starts or stops musical time
 through `/rnbo/jack/transport/rolling`; the tempo row edits
 `/rnbo/jack/transport/bpm`. These controls do not stop or restart JACK and do
-not add ShadowScore-style player or arrangement state.
+not add ShadowScore-style player or arrangement state. On the touch home
+screen, the transport card also shows the current BPM; tapping that BPM opens
+the same tempo editor and returns to the home screen when editing ends.
 
 Source-aware local OSC may address the Shadowbox listener on port 13333 at
 `/shadowbox/transpose/chromatic` or `/shadowbox/transpose/scalar`. The first
@@ -652,8 +654,9 @@ Notes:
 - `SHADOWBOX_DISPLAY` defaults to `st7789_raw` if unset.
 - `SHADOWBOX_INPUT_KIND=touch_zones` maps top-left to back, top-right to enter, bottom-left to previous, and bottom-right to next.
 - `SHADOWBOX_INPUT_KIND=touch_direct` enables the first-pass direct-touch action model for the 5-inch prototype. It emits semantic actions (`tap_row`, `tap_back`, `tap_button`, `page_up`, `page_down`) and enables the touch layout/hit-target renderer. `waveshare_5inch_dsi` defaults to this input mode unless `SHADOWBOX_INPUT_KIND` is set explicitly.
+- On navigable direct-touch screens below the home screen, the header provides Back on the left and Home on the right. Home immediately clears the nested navigation context and returns to the top-level cards.
 - `SHADOWBOX_KEYPAD_DEVICE` enables an auxiliary USB numeric keypad alongside the primary input. Use a stable `/dev/input/by-id/...-event-kbd` path or `auto`. Exclusive capture is enabled by default so keypad input does not reach the Linux console; set `SHADOWBOX_KEYPAD_EXCLUSIVE=0` only for diagnostics.
-- On the home screen, keypad `Enter` starts the global Runner transport and `0` stops it when transport controls are available. The fourth home card provides the same state-aware `PLAY` / `STOP` action by touch or encoder.
+- On the home screen, keypad `Enter` starts the global Runner transport and `0` stops it when transport controls are available. The fourth home card provides the same state-aware `PLAY` / `STOP` action by touch or encoder, and its BPM label opens the tempo editor directly on touch displays.
 - On the ListSequencer and ListVelSequencer surfaces, keypad digits enter numbers, `+` enters a space, `.` deletes, `Enter` sends, `/` / `*` select the previous / next field, and `Tab` cycles to the next field. ListSequencer also uses `-` to toggle the current sign where supported.
 - In a regular numeric parameter editor, keypad digits start a typed value, `.` enters a decimal point, `+` or Backspace deletes, `-` toggles the sign when the parameter range permits negative values, and `Enter` commits the range-clamped value. Keypad input is ignored by non-numeric editors and other Shadowbox screens.
 - `SHADOWBOX_BRICK_PANEL_FPS` is a legacy fallback for `SHADOWBOX_TURBO_FPS`.

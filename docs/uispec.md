@@ -153,6 +153,7 @@ Back Behavior:
 Navigation rules:
 - List and menu screens should prefer visible `..` navigation
 - Long press should always return to the previous context
+- Navigable direct-touch headers below the home screen provide Back on the left and Home on the right; Home clears the nested navigation context and returns directly to the top-level cards
 - In deferred modal editors, long press cancels uncommitted edits
 - In live modal editors, long press exits without reverting already committed changes
 - In list screens, long press is a shortcut for back and does not replace `..`
@@ -450,6 +451,7 @@ Initial system areas:
 
 Rules:
 - The home screen presents `SETS`, `INSTANCES`, `SYSTEM`, and a state-aware global transport action card; the last card reads `PLAY` when stopped and `STOP` when running
+- When global transport is available, the touch home card shows the current BPM in a separate target; selecting it opens the shared tempo editor and returns to the home screen on exit
 - On the home screen only, numeric-keypad `Enter` explicitly starts transport and `0` explicitly stops it; these are not toggle commands
 - System must remain clearly separate from per-instance editing and routing
 - Per-instance structure, lifecycle, parameters, instance presets, and routing remain OSCQuery/published-command driven
@@ -463,6 +465,7 @@ Rules:
 - designated transpose MIDI input is a sidecar control path centered on MIDI note 60 and must not relay normal performance MIDI
 - `NETWORK` may include a local `DIRECT ETHERNET SETUP` action that manages a fixed fallback address on `eth0` for headless recovery
 - Direct Ethernet setup must be tightly scoped: touch only the configured Ethernet interface and only the configured fallback subnet
+- A rejected secured-WiFi connection must return to password entry for the same network; retrying must update a profile created by the failed attempt instead of reusing its stale secret
 - `HDMI` must appear only on the supported DSI build, change only the fixed mirror setting, and require a full reboot before the new setting takes effect
 - `REBOOT` must use a dedicated confirmation screen whose initial selection cancels the action
 - `UPDATE` may check the checkout's configured upstream branch and run only a fast-forward update path; dirty or diverged local checkouts must not be applied from the unit UI

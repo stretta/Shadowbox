@@ -259,6 +259,12 @@ System controls coordinate Runner-wide or host-level behavior. They are not
 instance surfaces and do not change the contract of ordinary parameter,
 routing, or performance-MIDI paths.
 
+On direct-touch displays, navigable screens below the home screen have Back at
+the left of the header and a Home icon at the right. Back returns one context;
+Home clears the nested navigation state and returns directly to the four
+top-level cards. Transient status screens that do not accept navigation omit
+these controls.
+
 6a. Chromatic and scalar transpose
 
 An RNBO instance participates in ensemble transpose by publishing either or
@@ -331,9 +337,21 @@ controls:
 Selecting `STATE` toggles the published rolling value. Selecting `TEMPO` opens
 an editor constrained to `20.0..300.0 BPM` with one-BPM encoder steps. These
 actions control musical transport only; they do not stop or restart JACK and
-do not introduce ShadowScore player or arrangement state.
+do not introduce ShadowScore player or arrangement state. The touch home
+screen also displays the current BPM inside the `PLAY` / `STOP` card. Tapping
+the BPM opens the same tempo editor; confirming or backing out returns to the
+home screen rather than the System transport list.
 
-6c. HDMI mirror and reboot
+6c. Network credential retry
+
+`SYSTEM -> NETWORK` connects saved NetworkManager profiles directly and opens
+the on-device password editor for a secured network that needs credentials.
+If NetworkManager rejects a password, Shadowbox reopens the editor for the
+same SSID and preserves the error for correction. A retry updates a wireless
+profile that the failed attempt may have created before bringing it up, so
+NetworkManager does not silently reuse the rejected secret.
+
+6d. HDMI mirror and reboot
 
 On the Waveshare 5-inch DSI build, `SYSTEM -> HDMI` switches the persistent
 HDMI mirror setting between `ENABLED` and `DISABLED`. Disabled is the default
