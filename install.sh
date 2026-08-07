@@ -98,8 +98,12 @@ FONT_SOURCE_DIR="${REPO_DIR}/assets/fonts"
 FONT_INSTALL_DIR="/usr/local/share/fonts/shadowbox/ibm-plex"
 DIRECT_ETHERNET_HELPER="${REPO_DIR}/tools/direct_ethernet.sh"
 WIFI_NETWORK_HELPER="${REPO_DIR}/tools/wifi_network.sh"
+HDMI_MIRROR_HELPER="${REPO_DIR}/tools/hdmi_mirror_config.py"
+SYSTEM_POWER_HELPER="${REPO_DIR}/tools/system_power.py"
 DIRECT_ETHERNET_SUDOERS_PATH="/etc/sudoers.d/shadowbox-direct-ethernet"
 WIFI_NETWORK_SUDOERS_PATH="/etc/sudoers.d/shadowbox-wifi-network"
+HDMI_MIRROR_SUDOERS_PATH="/etc/sudoers.d/shadowbox-hdmi-mirror"
+SYSTEM_POWER_SUDOERS_PATH="/etc/sudoers.d/shadowbox-system-power"
 
 case "${DISPLAY_KIND}" in
     waveshare_5inch_dsi)
@@ -332,6 +336,15 @@ fi
 if ! grep -q '^SHADOWBOX_WIFI_NETWORK_HELPER=' "${TMP_ENV}"; then
     printf 'SHADOWBOX_WIFI_NETWORK_HELPER=%s\n' "${WIFI_NETWORK_HELPER}" >> "${TMP_ENV}"
 fi
+if ! grep -q '^SHADOWBOX_HDMI_MIRROR_HELPER=' "${TMP_ENV}"; then
+    printf 'SHADOWBOX_HDMI_MIRROR_HELPER=%s\n' "${HDMI_MIRROR_HELPER}" >> "${TMP_ENV}"
+fi
+if ! grep -q '^SHADOWBOX_SYSTEM_POWER_HELPER=' "${TMP_ENV}"; then
+    printf 'SHADOWBOX_SYSTEM_POWER_HELPER=%s\n' "${SYSTEM_POWER_HELPER}" >> "${TMP_ENV}"
+fi
+if [[ "${DISPLAY_KIND}" == "waveshare_5inch_dsi" ]] && ! grep -q '^SHADOWBOX_DSI_HDMI_MIRROR=' "${TMP_ENV}"; then
+    printf 'SHADOWBOX_DSI_HDMI_MIRROR=0\n' >> "${TMP_ENV}"
+fi
 
 sudo install -m 0644 "${TMP_ENV}" "${DEFAULT_ENV_PATH}"
 rm -f "${TMP_ENV}"
@@ -356,6 +369,26 @@ ${RUN_USER} ALL=(root) NOPASSWD: ${WIFI_NETWORK_HELPER}
 EOF
 sudo visudo -cf "${TMP_SUDOERS}"
 sudo install -m 0440 "${TMP_SUDOERS}" "${WIFI_NETWORK_SUDOERS_PATH}"
+rm -f "${TMP_SUDOERS}"
+
+echo "Configuring HDMI mirror helper..."
+chmod 0755 "${HDMI_MIRROR_HELPER}"
+TMP_SUDOERS="$(mktemp)"
+cat > "${TMP_SUDOERS}" <<EOF
+${RUN_USER} ALL=(root) NOPASSWD: ${HDMI_MIRROR_HELPER} enable, ${HDMI_MIRROR_HELPER} disable, ${HDMI_MIRROR_HELPER} status
+EOF
+sudo visudo -cf "${TMP_SUDOERS}"
+sudo install -m 0440 "${TMP_SUDOERS}" "${HDMI_MIRROR_SUDOERS_PATH}"
+rm -f "${TMP_SUDOERS}"
+
+echo "Configuring system power helper..."
+chmod 0755 "${SYSTEM_POWER_HELPER}"
+TMP_SUDOERS="$(mktemp)"
+cat > "${TMP_SUDOERS}" <<EOF
+${RUN_USER} ALL=(root) NOPASSWD: ${SYSTEM_POWER_HELPER} reboot
+EOF
+sudo visudo -cf "${TMP_SUDOERS}"
+sudo install -m 0440 "${TMP_SUDOERS}" "${SYSTEM_POWER_SUDOERS_PATH}"
 rm -f "${TMP_SUDOERS}"
 
 echo "Installing systemd service..."

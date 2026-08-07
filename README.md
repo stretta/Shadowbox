@@ -97,6 +97,8 @@ https://www.adafruit.com/product/4484
 - Direct Ethernet rescue setup with a fixed fallback IP on `eth0`
 - Audio device switching
 - JACK restart
+- Guarded full-system reboot
+- Optional HDMI mirroring on the Waveshare 5-inch DSI display
 - Global RNBO Runner transport start/stop and tempo control
 - Standalone chromatic/scalar transpose coordination across compatible RNBO instances
 - Designated ALSA MIDI note controllers with middle C as neutral transpose
@@ -444,6 +446,13 @@ hardware-scaled mirror:
 SHADOWBOX_DSI_HDMI_MIRROR=1
 ```
 
+On the Waveshare 5-inch DSI build, the same persistent setting is available at
+`SYSTEM -> HDMI`. New installations default to `DISABLED`, so the mirror adds
+no rendering or KMS-helper overhead during ordinary touchscreen use. After
+changing the setting, select the `REBOOT REQUIRED` row or use
+`SYSTEM -> REBOOT`; the confirmation screen defaults to Cancel. HDMI should be
+connected before the reboot.
+
 Connect HDMI before starting Shadowbox. The backend fills the shared HDMI
 framebuffer, then configures the DSI KMS plane to scale that full frame back to
 800x480. HDMI receives a complete 720p or 1080p Shadowbox image while the DSI
@@ -636,7 +645,7 @@ Common `/etc/default/shadowbox` settings:
 - Generic ST7789 backends (`st7789`, `st7789_raw`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_ST7789_SPI_BUS`, `SHADOWBOX_ST7789_SPI_CS`, `SHADOWBOX_ST7789_DC`, `SHADOWBOX_ST7789_RST`, `SHADOWBOX_ST7789_BACKLIGHT`, `SHADOWBOX_ST7789_SPI_SPEED_HZ`, `SHADOWBOX_ST7789_ROTATION`, `SHADOWBOX_ST7789_WIDTH`, `SHADOWBOX_ST7789_HEIGHT`, `SHADOWBOX_ST7789_OFFSET_LEFT`, `SHADOWBOX_ST7789_OFFSET_TOP`, `SHADOWBOX_ST7789_INVERT`, `SHADOWBOX_LOGICAL_WIDTH`, `SHADOWBOX_LOGICAL_HEIGHT`
 - Waveshare 1.44-inch LCD HAT backend (`st7735s_hat`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_ST7735_SPI_BUS`, `SHADOWBOX_ST7735_SPI_CS`, `SHADOWBOX_ST7735_DC`, `SHADOWBOX_ST7735_RST`, `SHADOWBOX_ST7735_BACKLIGHT`, `SHADOWBOX_ST7735_SPI_SPEED_HZ`, `SHADOWBOX_ST7735_WIDTH`, `SHADOWBOX_ST7735_HEIGHT`, `SHADOWBOX_ST7735_OFFSET_LEFT`, `SHADOWBOX_ST7735_OFFSET_TOP`, `SHADOWBOX_ST7735_INVERT`, `SHADOWBOX_LOGICAL_WIDTH`, `SHADOWBOX_LOGICAL_HEIGHT`
 - Waveshare 2-inch backend (`waveshare_2inch`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_WAVESHARE_SPI_BUS`, `SHADOWBOX_WAVESHARE_SPI_CS`, `SHADOWBOX_WAVESHARE_DC`, `SHADOWBOX_WAVESHARE_RST`, `SHADOWBOX_WAVESHARE_BACKLIGHT`, `SHADOWBOX_WAVESHARE_SPI_SPEED_HZ`, `SHADOWBOX_LOGICAL_WIDTH`, `SHADOWBOX_LOGICAL_HEIGHT`
-- Waveshare 5-inch DSI backend (`waveshare_5inch_dsi`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_DSI_FRAMEBUFFER`, `SHADOWBOX_DSI_WIDTH`, `SHADOWBOX_DSI_HEIGHT`, `SHADOWBOX_DSI_PIXEL_FORMAT`, `SHADOWBOX_DSI_BACKLIGHT_PATH`, `SHADOWBOX_DSI_HDMI_MIRROR`, `SHADOWBOX_DSI_KMS_CONNECTOR`, `SHADOWBOX_KMS_HELPER_PYTHON`, `SHADOWBOX_LOGICAL_WIDTH`, `SHADOWBOX_LOGICAL_HEIGHT`
+- Waveshare 5-inch DSI backend (`waveshare_5inch_dsi`): `SHADOWBOX_DISPLAY`, `SHADOWBOX_DSI_FRAMEBUFFER`, `SHADOWBOX_DSI_WIDTH`, `SHADOWBOX_DSI_HEIGHT`, `SHADOWBOX_DSI_PIXEL_FORMAT`, `SHADOWBOX_DSI_BACKLIGHT_PATH`, `SHADOWBOX_DSI_HDMI_MIRROR`, `SHADOWBOX_DSI_KMS_CONNECTOR`, `SHADOWBOX_KMS_HELPER_PYTHON`, `SHADOWBOX_HDMI_MIRROR_HELPER`, `SHADOWBOX_SYSTEM_POWER_HELPER`, `SHADOWBOX_LOGICAL_WIDTH`, `SHADOWBOX_LOGICAL_HEIGHT`
 
 Notes:
 

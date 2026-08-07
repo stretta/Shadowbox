@@ -98,7 +98,9 @@ AUDIO
 TRANSPORT
 STARTUP
 NETWORK
+HDMI
 UPDATE
+REBOOT
 ABOUT
 MAINT
 
@@ -440,7 +442,9 @@ Initial system areas:
 - set startup configuration when Runner publishes startup load/save controls
 - standalone chromatic/scalar transpose coordination and designated MIDI controller selection
 - network status, WiFi network selection, and direct Ethernet rescue setup
+- persistent HDMI mirror enable/disable on the Waveshare 5-inch DSI build
 - software update status and a fast-forward update action for git checkouts
+- guarded full-system reboot, with Cancel selected by default
 - about screen
 - maintenance actions
 
@@ -459,6 +463,8 @@ Rules:
 - designated transpose MIDI input is a sidecar control path centered on MIDI note 60 and must not relay normal performance MIDI
 - `NETWORK` may include a local `DIRECT ETHERNET SETUP` action that manages a fixed fallback address on `eth0` for headless recovery
 - Direct Ethernet setup must be tightly scoped: touch only the configured Ethernet interface and only the configured fallback subnet
+- `HDMI` must appear only on the supported DSI build, change only the fixed mirror setting, and require a full reboot before the new setting takes effect
+- `REBOOT` must use a dedicated confirmation screen whose initial selection cancels the action
 - `UPDATE` may check the checkout's configured upstream branch and run only a fast-forward update path; dirty or diverged local checkouts must not be applied from the unit UI
 
 Live runtime authority:

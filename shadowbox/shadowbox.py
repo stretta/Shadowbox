@@ -66,6 +66,8 @@ OSC_LISTEN_PORT = 13333
 POST_LOAD_VIEW_DEFAULT = "instance"
 DIRECT_ETHERNET_HELPER_DEFAULT = str(Path(__file__).resolve().parent.parent / "tools" / "direct_ethernet.sh")
 WIFI_NETWORK_HELPER_DEFAULT = str(Path(__file__).resolve().parent.parent / "tools" / "wifi_network.sh")
+HDMI_MIRROR_HELPER_DEFAULT = str(Path(__file__).resolve().parent.parent / "tools" / "hdmi_mirror_config.py")
+SYSTEM_POWER_HELPER_DEFAULT = str(Path(__file__).resolve().parent.parent / "tools" / "system_power.py")
 
 
 def _env_float(name: str, default: float) -> float:
@@ -148,12 +150,24 @@ def _is_tft_display(display) -> bool:
     )
 
 
+def _is_five_inch_dsi_display(display) -> bool:
+    return type(display).__module__.startswith("shadowbox.display.waveshare_5inch_dsi")
+
+
 def _direct_ethernet_helper_path() -> str:
     return _env_text("SHADOWBOX_DIRECT_ETHERNET_HELPER", DIRECT_ETHERNET_HELPER_DEFAULT)
 
 
 def _wifi_network_helper_path() -> str:
     return _env_text("SHADOWBOX_WIFI_NETWORK_HELPER", WIFI_NETWORK_HELPER_DEFAULT)
+
+
+def _hdmi_mirror_helper_path() -> str:
+    return _env_text("SHADOWBOX_HDMI_MIRROR_HELPER", HDMI_MIRROR_HELPER_DEFAULT)
+
+
+def _system_power_helper_path() -> str:
+    return _env_text("SHADOWBOX_SYSTEM_POWER_HELPER", SYSTEM_POWER_HELPER_DEFAULT)
 
 
 def _short_error_text(message: str, limit: int = 48) -> str:
@@ -227,6 +241,39 @@ def _run_wifi_network_helper(command: str, ssid: str = "", password: str = "") -
     if "password" in lowered and "sudo" in lowered:
         return False, "sudo not configured"
     return False, _short_error_text(detail)
+
+
+def _run_fixed_privileged_helper(helper_path: str, command: str, *, timeout: float = 5.0) -> tuple[bool, str]:
+    if not helper_path or not os.path.exists(helper_path):
+        return False, "helper missing"
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", helper_path, command],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except FileNotFoundError:
+        return False, "sudo unavailable"
+    except subprocess.TimeoutExpired:
+        return False, "helper timeout"
+    except Exception as exc:
+        return False, _short_error_text(str(exc))
+    if result.returncode == 0:
+        return True, ""
+    detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
+    if "password" in detail.lower() and "sudo" in detail.lower():
+        return False, "sudo not configured"
+    return False, _short_error_text(detail)
+
+
+def _run_hdmi_mirror_helper(enabled: bool) -> tuple[bool, str]:
+    return _run_fixed_privileged_helper(_hdmi_mirror_helper_path(), "enable" if enabled else "disable")
+
+
+def _run_system_reboot_helper() -> tuple[bool, str]:
+    return _run_fixed_privileged_helper(_system_power_helper_path(), "reboot")
 
 
 class RunnerOSCListener:
@@ -749,7 +796,11 @@ def main():
     rnbo = RNBOClient()
     osc_listener = RunnerOSCListener()
     encoder = EncoderInput()
-    ui = ShadowboxUI(rnbo=rnbo)
+    ui = ShadowboxUI(
+        rnbo=rnbo,
+        hdmi_mirror_available=_is_five_inch_dsi_display(display),
+        hdmi_mirror_enabled=_env_bool("SHADOWBOX_DSI_HDMI_MIRROR", False),
+    )
     transpose_midi = AlsaMidiControllerMonitor()
     scheduler = RenderScheduler(mode=os.environ.get("SHADOWBOX_RENDER_SCHEDULER", "dirty").strip().lower())
     renderer.set_touch_mode(should_enable_touch_layout(encoder.input_kind))
@@ -1311,6 +1362,19 @@ def main():
                     jack_restart_context = {"started_at": monotonic(), "expected_card": ""}
                     rnbo.restart_jack(ui.state.system.get("maint", {}).get("jack_restart_path", ""))
                     discovery.request("runner", "jack restart", delay=0.6)
+
+                elif action.kind == "set_hdmi_mirror":
+                    enabled = bool(action.value)
+                    ok, error = _run_hdmi_mirror_helper(enabled)
+                    ui.finish_hdmi_mirror_change(enabled, error="" if ok else error)
+
+                elif action.kind == "reboot_system":
+                    ok, error = _run_system_reboot_helper()
+                    if not ok:
+                        ui.set_busy(False)
+                        ui.set_status_message(error or "reboot failed", frames=90)
+                        ui.state.ui_mode = "SYSTEM_REBOOT_CONFIRM"
+                        ui.state.reboot_confirm_cursor = 0
 
                 elif action.kind == "refresh_snapshot":
                     ui.set_busy(True, "refresh")

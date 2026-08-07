@@ -427,6 +427,62 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(ui.state.ui_mode, "SOFTWARE_UPDATE")
         self.assertEqual(ui.state.software_update_cursor, ui.software_update_check_cursor)
 
+    def test_hdmi_menu_is_only_available_on_supported_display(self) -> None:
+        self.assertNotIn("HDMI", ShadowboxUI().system_menu_items)
+        self.assertIn("HDMI", ShadowboxUI(hdmi_mirror_available=True).system_menu_items)
+
+    def test_hdmi_setting_queues_persistent_change_and_marks_reboot_required(self) -> None:
+        ui = ShadowboxUI(hdmi_mirror_available=True, hdmi_mirror_enabled=False)
+        ui.state.ui_mode = "SYSTEM_MENU"
+        ui.state.system_cursor = ui.system_menu_items.index("HDMI") + 1
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+        self.assertEqual(ui.state.ui_mode, "SYSTEM_HDMI_MIRROR")
+
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+        action = next(action for action in ui.pop_actions() if action.kind != "save_state")
+        self.assertEqual((action.kind, action.value), ("set_hdmi_mirror", True))
+
+        ui.finish_hdmi_mirror_change(True)
+        self.assertTrue(ui.state.hdmi_mirror_enabled)
+        self.assertTrue(ui.state.hdmi_mirror_restart_required)
+        self.assertTrue(ui.hdmi_mirror_rows[0].toggle)
+        self.assertTrue(ui.hdmi_mirror_rows[0].toggle_on)
+        self.assertEqual(ui.hdmi_mirror_rows[1].value, "REBOOT REQUIRED")
+
+    def test_hdmi_reboot_required_row_opens_safe_confirmation(self) -> None:
+        ui = ShadowboxUI(hdmi_mirror_available=True, hdmi_mirror_enabled=False)
+        ui.finish_hdmi_mirror_change(True)
+        ui.state.ui_mode = "SYSTEM_HDMI_MIRROR"
+        ui.state.hdmi_mirror_cursor = 2
+
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        self.assertEqual(ui.state.ui_mode, "SYSTEM_REBOOT_CONFIRM")
+        self.assertEqual(ui.state.reboot_confirm_cursor, 0)
+
+    def test_reboot_confirmation_defaults_to_cancel(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.ui_mode = "SYSTEM_MENU"
+        ui.state.system_cursor = ui.system_menu_items.index("REBOOT") + 1
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        self.assertEqual(ui.state.ui_mode, "SYSTEM_REBOOT_CONFIRM")
+        self.assertEqual(ui.state.reboot_confirm_cursor, 0)
+
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+        self.assertEqual(ui.state.ui_mode, "SYSTEM_MENU")
+        self.assertEqual([action for action in ui.pop_actions() if action.kind != "save_state"], [])
+
+    def test_confirmed_reboot_queues_system_action(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.ui_mode = "SYSTEM_REBOOT_CONFIRM"
+        ui.state.reboot_confirm_cursor = 1
+
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        self.assertEqual(ui.pop_actions()[0].kind, "reboot_system")
+        self.assertTrue(ui.state.busy)
+
     def test_update_check_action_is_queued(self) -> None:
         ui = ShadowboxUI()
         ui.state.ui_mode = "SOFTWARE_UPDATE"

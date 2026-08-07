@@ -333,6 +333,20 @@ an editor constrained to `20.0..300.0 BPM` with one-BPM encoder steps. These
 actions control musical transport only; they do not stop or restart JACK and
 do not introduce ShadowScore player or arrangement state.
 
+6c. HDMI mirror and reboot
+
+On the Waveshare 5-inch DSI build, `SYSTEM -> HDMI` switches the persistent
+HDMI mirror setting between `ENABLED` and `DISABLED`. Disabled is the default
+for new installations and avoids the mirror's rendering and KMS-helper CPU
+cost during normal touchscreen use. A changed setting is labeled
+`REBOOT REQUIRED`; selecting that row opens the same confirmation used by
+`SYSTEM -> REBOOT`.
+
+The reboot confirmation always opens on `..` (Cancel). Move explicitly to
+`REBOOT` and select it to restart the Pi. Connect the projector, switcher, or
+capture device before rebooting when enabling the mirror, because the output
+mode is established during startup.
+
 7. RNBO authoring guidelines
 
 For metadata-driven UI integration, the RNBO side should follow these rules:

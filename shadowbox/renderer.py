@@ -4866,6 +4866,8 @@ class ShadowboxRenderer:
             "SYSTEM_AUDIO_RESTART": "AUDIO",
             "SYSTEM_TRANSPORT": "TRANSPORT",
             "SYSTEM_TRANSPORT_TEMPO_EDIT": "TEMPO",
+            "SYSTEM_HDMI_MIRROR": "HDMI MIRROR",
+            "SYSTEM_REBOOT_CONFIRM": "REBOOT",
             "SYSTEM_TRANSPOSE": "TRANSPOSE",
             "SYSTEM_TRANSPOSE_CONTROLLER": "MIDI CONTROLLER",
             "SYSTEM_TRANSPOSE_ROLE": "MIDI FUNCTION",
@@ -5018,6 +5020,10 @@ class ShadowboxRenderer:
             self.draw_system_audio_restart(ui)
         elif state.ui_mode == "SYSTEM_TRANSPORT":
             self.draw_selectable_value_rows(ui.transport_rows, state.transport_cursor)
+        elif state.ui_mode == "SYSTEM_HDMI_MIRROR":
+            self.draw_selectable_value_rows(ui.hdmi_mirror_rows, state.hdmi_mirror_cursor)
+        elif state.ui_mode == "SYSTEM_REBOOT_CONFIRM":
+            self.draw_string_list(["..", "REBOOT"], state.reboot_confirm_cursor, action_indices={1})
         elif state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT":
             self.draw_edit(ui, ui.transport_tempo_edit_param, state)
         elif state.ui_mode == "SYSTEM_TRANSPOSE":

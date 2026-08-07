@@ -155,6 +155,8 @@ class UIState:
     wifi_network_cursor: int = 0
     system_audio_cursor: int = 0
     transport_cursor: int = 0
+    hdmi_mirror_cursor: int = 0
+    reboot_confirm_cursor: int = 0
     transpose_cursor: int = 0
     transpose_controller_cursor: int = 0
     transpose_role_cursor: int = 0
@@ -216,6 +218,9 @@ class UIState:
     status_message: str = ""
     status_frames: int = 0
     software_update: dict = field(default_factory=dict)
+    hdmi_mirror_enabled: bool = False
+    hdmi_mirror_restart_required: bool = False
+    hdmi_mirror_error_message: str = ""
 
     busy: bool = False
     busy_reason: str = ""
@@ -564,11 +569,14 @@ class ValueRow:
 
 
 class ShadowboxUI:
-    def __init__(self, rnbo=None):
+    def __init__(self, rnbo=None, *, hdmi_mirror_available: bool = False, hdmi_mirror_enabled: bool = False):
         self.rnbo = rnbo
         self.render_revision = 0
         self.last_render_reason = "startup"
         self.state = UIState()
+        self.hdmi_mirror_available = bool(hdmi_mirror_available)
+        self._startup_hdmi_mirror_enabled = bool(hdmi_mirror_enabled)
+        self.state.hdmi_mirror_enabled = bool(hdmi_mirror_enabled)
         self._actions: list[UIAction] = []
         self._saved_state_cache = load_state_file()
         self._edit_original_value: Any = None
@@ -674,6 +682,8 @@ class ShadowboxUI:
         self.state.wifi_network_cursor = self.wifi_network_initial_cursor()
         self.state.system_audio_cursor = 1
         self.state.transport_cursor = 1
+        self.state.hdmi_mirror_cursor = 1
+        self.state.reboot_confirm_cursor = 0
         self.state.transpose_cursor = 2
         self.state.transpose_controller_cursor = 0
         self.state.transpose_role_cursor = 0
@@ -713,6 +723,7 @@ class ShadowboxUI:
         self.state.name_overwrite_cursor = 1
         self.state.name_error_message = ""
         self.state.network_error_message = ""
+        self.state.hdmi_mirror_error_message = ""
         self.state.status_message = ""
         self.state.status_frames = 0
         self._edit_original_value = None
@@ -1080,10 +1091,42 @@ class ShadowboxUI:
             items.append("TRANSPORT")
         if self.graph_startup_menu_items:
             items.append("STARTUP")
-        items.extend(["TRANSPOSE", "NETWORK", "UPDATE", "ABOUT"])
+        items.extend(["TRANSPOSE", "NETWORK"])
+        if self.hdmi_mirror_available:
+            items.append("HDMI")
+        items.extend(["UPDATE", "REBOOT", "ABOUT"])
         if self.maint_menu_items:
             items.append("MAINT")
         return items
+
+    @property
+    def hdmi_mirror_rows(self) -> list[ValueRow]:
+        if self.state.hdmi_mirror_error_message:
+            apply_text = "SAVE FAILED"
+        elif self.state.hdmi_mirror_restart_required:
+            apply_text = "REBOOT REQUIRED"
+        else:
+            apply_text = "CURRENT"
+        return [
+            ValueRow(
+                "mirror",
+                "ENABLED" if self.state.hdmi_mirror_enabled else "DISABLED",
+                current=self.state.hdmi_mirror_enabled,
+                toggle=True,
+                toggle_on=self.state.hdmi_mirror_enabled,
+            ),
+            ValueRow("apply", apply_text),
+        ]
+
+    def finish_hdmi_mirror_change(self, enabled: bool, *, error: str = "") -> None:
+        message = str(error or "").strip()
+        self.state.hdmi_mirror_error_message = message
+        if message:
+            self.set_status_message(message, frames=60)
+            return
+        self.state.hdmi_mirror_enabled = bool(enabled)
+        self.state.hdmi_mirror_restart_required = bool(enabled) != self._startup_hdmi_mirror_enabled
+        self.set_status_message("restart required" if self.state.hdmi_mirror_restart_required else "setting restored", frames=60)
 
     @property
     def transport_available(self) -> bool:
@@ -3812,6 +3855,12 @@ class ShadowboxUI:
         if mode == "SYSTEM_TRANSPORT":
             scroll_cursor("transport_cursor", len(self.transport_rows), first_index=1)
             return
+        if mode == "SYSTEM_HDMI_MIRROR":
+            scroll_cursor("hdmi_mirror_cursor", len(self.hdmi_mirror_rows), first_index=1)
+            return
+        if mode == "SYSTEM_REBOOT_CONFIRM":
+            scroll_cursor("reboot_confirm_cursor", 1)
+            return
         if mode == "SYSTEM_AUDIO":
             scroll_cursor("system_audio_cursor", len(SYSTEM_AUDIO_ITEMS))
             return
@@ -4013,6 +4062,12 @@ class ShadowboxUI:
             if self.transport_rows:
                 self.state.transport_cursor = max(1, min(row_index, len(self.transport_rows)))
                 handled = True
+        elif mode == "SYSTEM_HDMI_MIRROR":
+            if self.hdmi_mirror_rows:
+                self.state.hdmi_mirror_cursor = max(1, min(row_index, len(self.hdmi_mirror_rows)))
+                handled = True
+        elif mode == "SYSTEM_REBOOT_CONFIRM":
+            handled = self._set_touch_cursor("reboot_confirm_cursor", row_index, 2)
         elif mode == "SYSTEM_TRANSPOSE":
             if self.transpose_rows:
                 self.state.transpose_cursor = max(1, min(row_index, len(self.transpose_rows)))
@@ -4169,6 +4224,10 @@ class ShadowboxUI:
             self.state.system_cursor = self._cycle(self.state.system_cursor, len(self.system_menu_items) + 1, step)
         elif self.state.ui_mode == "SYSTEM_TRANSPORT":
             self.state.transport_cursor = self._cycle_one_based(self.state.transport_cursor, len(self.transport_rows), step)
+        elif self.state.ui_mode == "SYSTEM_HDMI_MIRROR":
+            self.state.hdmi_mirror_cursor = self._cycle_one_based(self.state.hdmi_mirror_cursor, len(self.hdmi_mirror_rows), step)
+        elif self.state.ui_mode == "SYSTEM_REBOOT_CONFIRM":
+            self.state.reboot_confirm_cursor = self._cycle(self.state.reboot_confirm_cursor, 2, step)
         elif self.state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT":
             current = self.state.edit_value
             if not isinstance(current, (int, float)) or isinstance(current, bool):
@@ -4676,12 +4735,18 @@ class ShadowboxUI:
                 elif choice == "NETWORK":
                     self.state.ui_mode = "NETWORK"
                     self.state.network_cursor = 1 if self.network_value_rows else 0
+                elif choice == "HDMI":
+                    self.state.ui_mode = "SYSTEM_HDMI_MIRROR"
+                    self.state.hdmi_mirror_cursor = 1
                 elif choice == "TRANSPOSE":
                     self.state.ui_mode = "SYSTEM_TRANSPOSE"
                     self.state.transpose_cursor = 2
                 elif choice == "UPDATE":
                     self.state.ui_mode = "SOFTWARE_UPDATE"
                     self.state.software_update_cursor = self.software_update_check_cursor
+                elif choice == "REBOOT":
+                    self.state.ui_mode = "SYSTEM_REBOOT_CONFIRM"
+                    self.state.reboot_confirm_cursor = 0
                 elif choice == "MAINT":
                     self.state.ui_mode = "MAINT"
                     self.state.maint_cursor = 1 if self.maint_menu_items else 0
@@ -4702,6 +4767,22 @@ class ShadowboxUI:
         elif self.state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT":
             self.state.ui_mode = "SYSTEM_TRANSPORT"
             self.state.edit_value = None
+
+        elif self.state.ui_mode == "SYSTEM_HDMI_MIRROR":
+            if self.state.hdmi_mirror_cursor == 1:
+                self.state.hdmi_mirror_error_message = ""
+                self.queue_action(UIAction(kind="set_hdmi_mirror", value=not self.state.hdmi_mirror_enabled))
+            elif self.state.hdmi_mirror_cursor == 2 and self.state.hdmi_mirror_restart_required:
+                self.state.ui_mode = "SYSTEM_REBOOT_CONFIRM"
+                self.state.reboot_confirm_cursor = 0
+
+        elif self.state.ui_mode == "SYSTEM_REBOOT_CONFIRM":
+            if self.state.reboot_confirm_cursor == 0:
+                self.state.ui_mode = "SYSTEM_MENU"
+            else:
+                self.set_busy(True, "reboot")
+                self.set_status_message("rebooting")
+                self.queue_action(UIAction(kind="reboot_system"))
 
         elif self.state.ui_mode == "SYSTEM_TRANSPOSE":
             row = self.transpose_rows[self.state.transpose_cursor - 1] if 0 < self.state.transpose_cursor <= len(self.transpose_rows) else None
@@ -5020,7 +5101,7 @@ class ShadowboxUI:
             self.state.ui_mode = "TOP"
         elif self.state.ui_mode == "REMOVE_INSTANCE_CONFIRM":
             self._cancel_remove_instance_confirm()
-        elif self.state.ui_mode in ("STATUS", "NETWORK", "SOFTWARE_UPDATE", "ABOUT", "MAINT", "SYSTEM_TRANSPOSE", "SYSTEM_TRANSPORT"):
+        elif self.state.ui_mode in ("STATUS", "NETWORK", "SOFTWARE_UPDATE", "ABOUT", "MAINT", "SYSTEM_TRANSPOSE", "SYSTEM_TRANSPORT", "SYSTEM_HDMI_MIRROR", "SYSTEM_REBOOT_CONFIRM"):
             self._about_press_count = 0
             self.state.ui_mode = "SYSTEM_MENU"
         elif self.state.ui_mode in {"SYSTEM_TRANSPOSE_CONTROLLER", "SYSTEM_TRANSPOSE_ROLE", "SYSTEM_TRANSPOSE_AUTHORITY", "SYSTEM_TRANSPOSE_EDIT"}:
