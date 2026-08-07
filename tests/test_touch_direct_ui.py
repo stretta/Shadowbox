@@ -384,6 +384,46 @@ class TouchDirectUITests(unittest.TestCase):
         self.assertEqual([(action.path, action.value) for action in actions], [("/rnbo/jack/transport/rolling", True)])
         self.assertEqual(ui.top_level_items[-1], "STOP")
 
+    def test_home_transport_tempo_sublabel_opens_existing_editor(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.system = {
+            "transport": {
+                "rolling_path": "/rnbo/jack/transport/rolling",
+                "rolling": False,
+                "bpm_path": "/rnbo/jack/transport/bpm",
+                "bpm": 90.0,
+            }
+        }
+
+        renderer, display = _render_touch_layout(ui)
+
+        self.assertEqual(ui.home_transport_tempo_label, "90 BPM")
+        self.assertTrue(any(op[0] == "text" and op[1] == "90 BPM" for op in display.ops))
+        self.assertEqual(
+            _touch_action_for_target(renderer, kind="home_tempo", button_id="home_tempo"),
+            TouchAction("tap_button", button_id="home_tempo"),
+        )
+
+        ui.handle_event(UIEvent(kind="tap_button", button_id="home_tempo"))
+
+        self.assertEqual(ui.state.ui_mode, "SYSTEM_TRANSPORT_TEMPO_EDIT")
+        self.assertEqual(ui.state.edit_value, 90.0)
+        self.assertEqual(ui.pop_actions(), [])
+
+        ui.handle_event(UIEvent(kind="tap_back"))
+
+        self.assertEqual(ui.state.ui_mode, "TOP")
+        self.assertIsNone(ui.state.edit_value)
+
+    def test_home_transport_hides_tempo_sublabel_when_unavailable(self) -> None:
+        ui = ShadowboxUI()
+
+        renderer, display = _render_touch_layout(ui)
+
+        self.assertEqual(ui.home_transport_tempo_label, "")
+        self.assertFalse(any(target.kind == "home_tempo" for target in renderer.touch_layout.targets))
+        self.assertFalse(any(op[0] == "text" and str(op[1]).endswith("BPM") for op in display.ops))
+
     def test_home_card_icons_scale_up_on_touch_layout(self) -> None:
         ui = ShadowboxUI()
         display = _FiveInchDisplay()

@@ -4707,6 +4707,7 @@ class ShadowboxRenderer:
         index: int,
         selected: bool,
         label_scale: int | None = None,
+        secondary_label: str = "",
     ) -> None:
         if self.touch_layout_enabled and self.has_color:
             fill = "panel_pressed" if self._touch_pressed(kind="card", index=index) else "panel"
@@ -4774,6 +4775,39 @@ class ShadowboxRenderer:
         else:
             self._text(display_label, text_x, text_y, text_scale, text_weight, on=True)
 
+        if self.touch_layout_enabled and secondary_label:
+            secondary_scale = 2
+            secondary_w, secondary_h = self._measure_text(secondary_label, secondary_scale, "medium")
+            while secondary_scale > 1 and secondary_w > max(1, w - 40):
+                secondary_scale -= 1
+                secondary_w, secondary_h = self._measure_text(secondary_label, secondary_scale, "medium")
+            pill_w = min(w - 24, max(84, secondary_w + 24))
+            pill_h = max(34, secondary_h + 12)
+            pill_x = x + max(0, (w - pill_w) // 2)
+            pill_y = max(icon_y + icon_size + 6, text_y - pill_h - 10)
+            self._record_touch_target(
+                "home_tempo",
+                pill_x,
+                max(y, pill_y - 5),
+                pill_w,
+                min(h, pill_h + 10),
+                action_kind="tap_button",
+                button_id="home_tempo",
+                label=secondary_label,
+            )
+            pressed = self._touch_pressed(kind="home_tempo", button_id="home_tempo")
+            if self.has_color:
+                fill = "panel_pressed" if pressed else "panel_alt"
+                self._rounded_theme(pill_x, pill_y, pill_w, pill_h, pill_h // 2, fill, True)
+                secondary_x = pill_x + max(0, (pill_w - secondary_w) // 2)
+                secondary_y = pill_y + max(0, (pill_h - secondary_h) // 2)
+                self._text_theme(secondary_label, secondary_x, secondary_y, "muted", secondary_scale, "medium")
+            else:
+                self.display.rect(pill_x, pill_y, pill_w, pill_h, True, pressed)
+                secondary_x = pill_x + max(0, (pill_w - secondary_w) // 2)
+                secondary_y = pill_y + max(0, (pill_h - secondary_h) // 2)
+                self._text(secondary_label, secondary_x, secondary_y, secondary_scale, "medium", on=not pressed)
+
     def draw_top_menu_tft(self, items: list[str], selected_idx: int) -> None:
         total = len(items)
         if total <= 0:
@@ -4817,7 +4851,20 @@ class ShadowboxRenderer:
                 )
                 if self._touch_pressed(kind="card", index=idx) and not self.has_color:
                     self.display.rect(x + 2, start_y + 2, max(1, card_w - 4), max(1, card_h - 4), True, True)
-            self._draw_tft_home_card(x, start_y, card_w, card_h, str(label), idx, idx == selected_idx, label_scale)
+            secondary_label = ""
+            if idx == 3 and str(label) in {"PLAY", "STOP"} and self._ui is not None:
+                secondary_label = str(getattr(self._ui, "home_transport_tempo_label", "") or "")
+            self._draw_tft_home_card(
+                x,
+                start_y,
+                card_w,
+                card_h,
+                str(label),
+                idx,
+                idx == selected_idx,
+                label_scale,
+                secondary_label,
+            )
 
     def draw(self, ui, touch_state: TouchSample | None = None) -> None:
         state = ui.state

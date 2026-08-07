@@ -1940,6 +1940,9 @@ class InstanceActionTests(unittest.TestCase):
         actions = [action for action in ui.pop_actions() if action.kind == "set_transport"]
         self.assertEqual([(action.path, action.value) for action in actions], [("/rnbo/jack/transport/bpm", 91.0)])
 
+        ui.handle_event(type("Evt", (), {"kind": "long_press"})())
+        self.assertEqual(ui.state.ui_mode, "SYSTEM_TRANSPORT")
+
     def test_home_transport_card_toggles_global_runner_state(self) -> None:
         ui = ShadowboxUI()
         ui.state.system = {

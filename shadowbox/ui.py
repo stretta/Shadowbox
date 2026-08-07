@@ -170,6 +170,7 @@ class UIState:
     active_instance_id: str = ""
     active_transport: str = "audio"
     active_routing_direction: str = "inputs"
+    transport_tempo_return_mode: str = "SYSTEM_TRANSPORT"
     patcher_picker_context: str = "add"
     pending_remove_instance_id: str = ""
     remove_instance_origin: str = ""
@@ -1053,6 +1054,17 @@ class ShadowboxUI:
         return "TRANSPORT"
 
     @property
+    def home_transport_tempo_label(self) -> str:
+        if not self.transport_available:
+            return ""
+        bpm = self.state.system.get("transport", {}).get("bpm")
+        if not isinstance(bpm, (int, float)) or isinstance(bpm, bool):
+            return ""
+        value = float(bpm)
+        bpm_text = f"{value:.0f}" if value.is_integer() else f"{value:.1f}"
+        return f"{bpm_text} BPM"
+
+    @property
     def instance_menu_items(self) -> list[str]:
         items = []
         if self.available_instance_surface is not None:
@@ -1189,6 +1201,28 @@ class ShadowboxUI:
         self.queue_action(UIAction(kind="set_transport", path=path, value=rolling))
         self.request_render("transport")
         return True
+
+    def _begin_transport_tempo_edit(self) -> bool:
+        transport = self.state.system.get("transport", {})
+        if not isinstance(transport, dict) or not transport.get("bpm_path"):
+            return False
+        return_mode = self.state.ui_mode
+        self.state.transport_tempo_return_mode = (
+            return_mode if return_mode in {"TOP", "SYSTEM_TRANSPORT"} else "SYSTEM_TRANSPORT"
+        )
+        bpm = transport.get("bpm")
+        self.state.edit_value = (
+            float(bpm) if isinstance(bpm, (int, float)) and not isinstance(bpm, bool) else 120.0
+        )
+        self.state.edit_numeric_draft = ""
+        self.state.ui_mode = "SYSTEM_TRANSPORT_TEMPO_EDIT"
+        return True
+
+    def _exit_transport_tempo_edit(self) -> None:
+        return_mode = self.state.transport_tempo_return_mode
+        self.state.ui_mode = return_mode if return_mode in {"TOP", "SYSTEM_TRANSPORT"} else "SYSTEM_TRANSPORT"
+        self.state.edit_value = None
+        self.state.edit_numeric_draft = ""
 
     @property
     def transpose_controller_display(self) -> str:
@@ -3622,6 +3656,10 @@ class ShadowboxUI:
     def _handle_tap_button(self, button_id: str) -> None:
         button = re.sub(r"\s+", "_", str(button_id or "").strip().lower())
 
+        if self.state.ui_mode == "TOP" and button == "home_tempo":
+            self._begin_transport_tempo_edit()
+            return
+
         if self.state.ui_mode == "EDIT":
             if button == "learn":
                 param = self.selected_param
@@ -4759,14 +4797,10 @@ class ShadowboxUI:
             if self.state.transport_cursor == 1 and transport.get("rolling_path"):
                 self._set_transport_rolling(not bool(transport.get("rolling")))
             elif self.state.transport_cursor == 2 and transport.get("bpm_path"):
-                bpm = transport.get("bpm")
-                self.state.edit_value = float(bpm) if isinstance(bpm, (int, float)) and not isinstance(bpm, bool) else 120.0
-                self.state.edit_numeric_draft = ""
-                self.state.ui_mode = "SYSTEM_TRANSPORT_TEMPO_EDIT"
+                self._begin_transport_tempo_edit()
 
         elif self.state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT":
-            self.state.ui_mode = "SYSTEM_TRANSPORT"
-            self.state.edit_value = None
+            self._exit_transport_tempo_edit()
 
         elif self.state.ui_mode == "SYSTEM_HDMI_MIRROR":
             if self.state.hdmi_mirror_cursor == 1:
@@ -5109,8 +5143,7 @@ class ShadowboxUI:
             self.state.edit_value = None
             self.state.transpose_edit_role = ""
         elif self.state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT":
-            self.state.ui_mode = "SYSTEM_TRANSPORT"
-            self.state.edit_value = None
+            self._exit_transport_tempo_edit()
         elif self.state.ui_mode in ("SYSTEM_AUDIO_DEVICE", "SYSTEM_AUDIO_RATE", "SYSTEM_AUDIO_BUFFER"):
             self.state.ui_mode = "SYSTEM_AUDIO"
         elif self.state.ui_mode == "SYSTEM_AUDIO":
