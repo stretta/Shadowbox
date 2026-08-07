@@ -35,6 +35,8 @@ from shadowbox.ui import (
     display_as_int,
     display_precision,
     edit_as_int,
+    inline_toggle_is_on,
+    is_inline_toggle_param,
     rnbo_integer_step_grid,
 )
 from shadowbox.version import SHADOWBOX_BUILD_INFO, SHADOWBOX_VERSION
@@ -1337,6 +1339,39 @@ class ShadowboxRenderer:
         if show_chevron:
             self._draw_touch_row_chevron(content_left, row_top, row_w, row_h, scale)
 
+    def _draw_touch_toggle_row(
+        self,
+        content_left: int,
+        row_top: int,
+        row_w: int,
+        row_h: int,
+        row_center_y: int,
+        label: str,
+        enabled: bool,
+        *,
+        text_weight: str = "regular",
+    ) -> None:
+        scale = self._touch_menu_scale()
+        switch_w = 76
+        switch_h = 38
+        switch_x = content_left + max(16, row_w - switch_w - 22)
+        switch_y = row_center_y - (switch_h // 2)
+        label_x = content_left + 16
+        label_w = max(1, switch_x - label_x - 24)
+        fitted_label = self._truncate_to_width(label, label_w, scale, text_weight)
+        text_y = row_center_y - (self._line_height(scale, text_weight) // 2)
+        self._text_theme(fitted_label, label_x, text_y, "text", scale, text_weight)
+
+        track_color = "accent" if enabled else "panel_alt"
+        border_color = "accent" if enabled else "line"
+        self._rounded_theme(switch_x, switch_y, switch_w, switch_h, switch_h // 2, track_color, fill=True)
+        self._rounded_theme(switch_x, switch_y, switch_w, switch_h, switch_h // 2, border_color, fill=False)
+
+        knob_size = switch_h - 8
+        knob_x = switch_x + switch_w - knob_size - 4 if enabled else switch_x + 4
+        knob_y = switch_y + 4
+        self._rounded_theme(knob_x, knob_y, knob_size, knob_size, knob_size // 2, "text", fill=True)
+
     def draw_selectable_value_rows(self, rows: list[ValueRow], selected_idx: int) -> None:
         if not rows:
             self.draw_string_list(["no instances"], 0)
@@ -1434,17 +1469,28 @@ class ShadowboxRenderer:
                 if self.touch_layout_enabled and self.has_color:
                     row_w = max(1, content_right - content_left)
                     label = self._menu_label(str(row.label))
-                    value = str(row.value)
-                    self._draw_touch_label_value_row(
-                        content_left,
-                        row_top,
-                        row_w,
-                        row_h,
-                        y,
-                        label,
-                        value,
-                        text_weight=text_weight,
-                    )
+                    if row.toggle:
+                        self._draw_touch_toggle_row(
+                            content_left,
+                            row_top,
+                            row_w,
+                            row_h,
+                            y,
+                            label,
+                            row.toggle_on,
+                            text_weight=text_weight,
+                        )
+                    else:
+                        self._draw_touch_label_value_row(
+                            content_left,
+                            row_top,
+                            row_w,
+                            row_h,
+                            y,
+                            label,
+                            str(row.value),
+                            text_weight=text_weight,
+                        )
                 else:
                     self._text(line, 6, y, weight=text_weight)
 
@@ -1494,15 +1540,18 @@ class ShadowboxRenderer:
             indices = list(range(total))
             selected_row = selected_idx
         else:
-            half = visible // 2
-            start = max(0, min(selected_idx - half, total - visible))
+            if self.touch_layout_enabled:
+                start = min((selected_idx // visible) * visible, max(0, total - visible))
+            else:
+                half = visible // 2
+                start = max(0, min(selected_idx - half, total - visible))
             indices = list(range(start, start + visible))
             selected_row = selected_idx - start
 
         if touch_layout is not None:
             content_left, content_right, content_top, content_bottom, row_h, _gap, _rows = touch_layout
-            page_count = max(1, (max(0, total - 1) + visible - 1) // max(1, visible))
-            current_page = (max(0, selected_idx - 1) // max(1, visible)) + 1
+            page_count = max(1, (total + visible - 1) // max(1, visible))
+            current_page = (selected_idx // max(1, visible)) + 1
             self._draw_touch_page_rail(content_top, content_bottom, current_page, page_count, visible)
         else:
             content_left, content_right, content_top, content_bottom, row_h = 0, self.display.width, panel_y, panel_h, 0
@@ -1569,17 +1618,29 @@ class ShadowboxRenderer:
                     self._draw_full_tft_row(y, ">" if selected else " ", left, right, selected)
                 else:
                     if self.touch_layout_enabled and self.has_color:
-                        self._draw_touch_label_value_row(
-                            content_left,
-                            row_top,
-                            row_w,
-                            row_h,
-                            y,
-                            full_left,
-                            full_right,
-                            text_weight="regular",
-                            value_prefix=midi_marker,
-                        )
+                        if is_inline_toggle_param(param):
+                            self._draw_touch_toggle_row(
+                                content_left,
+                                row_top,
+                                row_w,
+                                row_h,
+                                y,
+                                full_left,
+                                inline_toggle_is_on(param),
+                                text_weight="regular",
+                            )
+                        else:
+                            self._draw_touch_label_value_row(
+                                content_left,
+                                row_top,
+                                row_w,
+                                row_h,
+                                y,
+                                full_left,
+                                full_right,
+                                text_weight="regular",
+                                value_prefix=midi_marker,
+                            )
                     else:
                         self._text(row, 6, y)
 

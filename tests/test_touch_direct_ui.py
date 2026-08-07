@@ -308,6 +308,27 @@ class TouchDirectUITests(unittest.TestCase):
         self.assertEqual(ui.state.ui_mode, "PARAM_LIST")
         self.assertEqual(ui.selected_param.get("value"), 1)
 
+    def test_tap_row_toggles_off_on_enum_directly(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.ui_mode = "PARAM_LIST"
+        ui.state.instances = [
+            {
+                "id": "1",
+                "params": [
+                    {"name": "clock", "value": "Off", "path": "/params/clock", "vals": ["Off", "On"]},
+                ],
+            }
+        ]
+        ui.state.active_instance_id = "1"
+        ui.state.param_cursor = 1
+
+        ui.handle_event(UIEvent(kind="tap_row", index=1))
+
+        self.assertEqual(ui.state.ui_mode, "PARAM_LIST")
+        self.assertEqual(ui.selected_param.get("value"), "On")
+        writes = [action for action in ui.pop_actions() if action.kind == "set_param"]
+        self.assertEqual([(action.path, action.value) for action in writes], [("/params/clock", "On")])
+
     def test_tap_menu_rows_transition_into_nested_views(self) -> None:
         ui = ShadowboxUI()
         ui.state.ui_mode = "INSTANCE_MENU"
@@ -1327,6 +1348,83 @@ class TouchDirectUITests(unittest.TestCase):
         self.assertGreater(value[2], gain[2])
         self.assertGreaterEqual(len(chevrons), 2)
         self.assertGreater(chevrons[0][2], value[2])
+
+    def test_parameter_list_touch_rows_render_bool_and_off_on_enums_as_switches(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.ui_mode = "PARAM_LIST"
+        ui.state.instances = [
+            {
+                "id": "1",
+                "params": [
+                    {"name": "enabled", "value": 0, "path": "/params/enabled", "metadata": {"bool": True}},
+                    {"name": "clock", "value": "On", "path": "/params/clock", "vals": ["Off", "On"]},
+                ],
+            }
+        ]
+        ui.state.active_instance_id = "1"
+
+        display = _ColorFiveInchDisplay()
+        renderer = create_renderer(display)
+        renderer.set_touch_mode(True)
+        renderer.draw(ui, touch_state=SimpleNamespace(pressed=False, normalized_x=0.0, normalized_y=0.0))
+
+        tracks = [
+            op
+            for op in display.ops
+            if op[0] == "rounded_rect_color" and op[3:5] == (76, 38) and op[7] is True
+        ]
+        knobs = [
+            op
+            for op in display.ops
+            if op[0] == "rounded_rect_color" and op[3:5] == (30, 30) and op[7] is True
+        ]
+        self.assertEqual(len(tracks), 2)
+        self.assertEqual(len(knobs), 2)
+        self.assertEqual(knobs[0][1], tracks[0][1] + 4)
+        self.assertEqual(knobs[1][1], tracks[1][1] + 42)
+        self.assertNotIn(">", [op[1] for op in display.ops if op[0] == "text_color"])
+
+    def test_first_direct_toggle_keeps_parameter_rows_on_the_same_touch_page(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.ui_mode = "PARAM_LIST"
+        params = [
+            {"name": f"param {idx}", "value": idx, "path": f"/params/{idx}"}
+            for idx in range(8)
+        ]
+        params[3] = {
+            "name": "clock",
+            "value": "Off",
+            "path": "/params/clock",
+            "vals": ["Off", "On"],
+        }
+        ui.state.instances = [{"id": "1", "params": params}]
+        ui.state.active_instance_id = "1"
+        ui.state.param_cursor = 1
+
+        before_display = _ColorFiveInchDisplay()
+        before_renderer = create_renderer(before_display)
+        before_renderer.set_touch_mode(True)
+        before_renderer.draw(ui, touch_state=SimpleNamespace(pressed=False, normalized_x=0.0, normalized_y=0.0))
+        before_rows = [
+            (target.label, target.y)
+            for target in before_renderer.touch_layout.targets
+            if target.kind == "row"
+        ]
+
+        ui.handle_event(UIEvent(kind="tap_row", index=4))
+
+        after_display = _ColorFiveInchDisplay()
+        after_renderer = create_renderer(after_display)
+        after_renderer.set_touch_mode(True)
+        after_renderer.draw(ui, touch_state=SimpleNamespace(pressed=False, normalized_x=0.0, normalized_y=0.0))
+        after_rows = [
+            (target.label, target.y)
+            for target in after_renderer.touch_layout.targets
+            if target.kind == "row"
+        ]
+
+        self.assertEqual(ui.selected_param.get("value"), "On")
+        self.assertEqual(after_rows, before_rows)
 
     def test_parameter_list_touch_rows_show_midi_mapping_marker(self) -> None:
         ui = ShadowboxUI()

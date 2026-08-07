@@ -270,7 +270,7 @@ Metadata behavior rules:
 - Boolean hints in metadata explicitly opt a parameter into the bool editor
 - `ui_role` helps runtime state lookups match a published state value to a UI-specific role such as a custom editor feed
 - `label` overrides the displayed name for published routing inputs/outputs without changing their control path
-- If metadata is absent or malformed, Shadowbox does not infer bool or integer intent from range or transport type; it falls back to numeric behavior, except that RNBO enum parameters still use the enum selector
+- If metadata is absent or malformed, Shadowbox does not infer bool or integer intent from range or transport type; it falls back to numeric behavior, except for explicitly published RNBO enum value lists
 - Shadowbox can read metadata either from the parameter's `meta` node or from direct scalar child nodes published into the OSCQuery tree, such as `editor`, `display_name`, or `ui_role`
 
 Editor behavior:
@@ -279,8 +279,9 @@ Editor behavior:
 - Long press in a deferred editor cancels and restores the original value
 - Some custom editors may commit changes immediately during editing
 - Long press in a live editor exits the editor and does not revert already committed changes
-- Boolean parameters can toggle directly from the parameter list when explicitly marked as bool; they stay opt-in via metadata and do not need the deeper edit screen in the first pass
-- Enum parameters use a list selector when RNBO publishes an explicit enum value list
+- Boolean parameters toggle directly from the parameter list when explicitly marked as bool and render as inline switches on the touch UI
+- An enum whose complete advertised value list is exactly `Off` and `On` also renders and behaves as an inline switch; Shadowbox sends the original advertised string value
+- All other enum parameters use a list selector when RNBO publishes an explicit enum value list; arbitrary two-choice enums are not inferred to be booleans
 - TTID uses a specialized editor only when the parameter metadata explicitly includes `editor: "ttid"`
 - `step16` uses a specialized live editor when the parameter metadata explicitly includes `editor: "step16"`; its default runtime state key is the one-based `current_stage` outport and may be overridden with `playhead_state` for legacy or custom zero-based feeds
 - Numeric parameters may be presented as integer-style controls only when metadata such as `display_as: "int"` or `edit_as: "int"` is present, even if RNBO Runner publishes the raw value as float-like

@@ -87,7 +87,7 @@ The current Organ export on `wren` publishes continuous `-96..0 dB` tonewheel
 controls. The Organ surface maps `-96 dB` to the top/off position and `0 dB`
 to the bottom/full-on position in canonical Hammond footage order.
 
-If metadata is missing or malformed, Shadowbox falls back to numeric behavior. The only non-metadata exception is enums published explicitly by RNBO as a value list.
+If metadata is missing or malformed, Shadowbox falls back to numeric behavior. The only non-metadata exception is enums published explicitly by RNBO as a value list. An enum whose complete advertised choices are exactly `Off` and `On` is shown as an inline switch in the parameter browser and toggles without opening the enum chooser. Shadowbox preserves and sends the original advertised strings. Other enums, including arbitrary two-choice enums, continue to use the chooser.
 
 In practice, the metadata must appear in the published OSCQuery tree so that `rnbo.py` can parse it from the parameter's `meta` node. Shadowbox also accepts direct scalar child nodes for hints that RNBO exports separately instead of bundling them into `meta`, including `editor`, `display_name`, `ui_role`, and RNBO's native `steps` value. For `steps`, Shadowbox uses RNBO's endpoint-inclusive interval `(max - min) / (steps - 1)` for encoder and touch editing. Native stepped parameters advance one adjacent step per encoder detent without continuous-control acceleration, and grids with integral minima and intervals are displayed without decimal places.
 

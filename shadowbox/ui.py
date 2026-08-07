@@ -387,6 +387,46 @@ def is_boolish(param: dict) -> bool:
     return False
 
 
+def off_on_enum_values(param: dict) -> tuple[Any, Any] | None:
+    vals = param.get("vals")
+    if not isinstance(vals, list) or len(vals) != 2:
+        return None
+
+    normalized: dict[str, Any] = {}
+    for value in vals:
+        if not isinstance(value, str):
+            return None
+        key = value.strip().casefold()
+        if key not in {"off", "on"} or key in normalized:
+            return None
+        normalized[key] = value
+
+    if set(normalized) != {"off", "on"}:
+        return None
+    return normalized["off"], normalized["on"]
+
+
+def is_inline_toggle_param(param: dict) -> bool:
+    return is_boolish(param) or off_on_enum_values(param) is not None
+
+
+def inline_toggle_is_on(param: dict) -> bool:
+    values = off_on_enum_values(param)
+    if values is not None:
+        _off_value, on_value = values
+        current = param.get("value")
+        return isinstance(current, str) and current.strip().casefold() == str(on_value).strip().casefold()
+    return bool(normalize_current_value_for_edit(param))
+
+
+def toggled_inline_param_value(param: dict) -> Any:
+    values = off_on_enum_values(param)
+    if values is not None:
+        off_value, on_value = values
+        return off_value if inline_toggle_is_on(param) else on_value
+    return 0 if inline_toggle_is_on(param) else 1
+
+
 def numeric_step(param: dict) -> float:
     pmin = param.get("min")
     pmax = param.get("max")
@@ -491,7 +531,7 @@ def is_discrete_param(param: dict) -> bool:
 
 
 def is_enum_param(param: dict) -> bool:
-    return (not is_boolish(param)) and isinstance(param.get("vals"), list) and len(param.get("vals")) > 0
+    return (not is_inline_toggle_param(param)) and isinstance(param.get("vals"), list) and len(param.get("vals")) > 0
 
 
 @dataclass
@@ -519,6 +559,8 @@ class ValueRow:
     value: Any
     current: bool = False
     emphasis: str = ""
+    toggle: bool = False
+    toggle_on: bool = False
 
 
 class ShadowboxUI:
@@ -567,9 +609,8 @@ class ShadowboxUI:
         self._last_float_edit_detent_at = now
         return delta * multiplier
 
-    def _toggle_bool_param(self, param: dict) -> None:
-        current_value = normalize_current_value_for_edit(param)
-        toggled_value = 0 if bool(current_value) else 1
+    def _toggle_inline_param(self, param: dict) -> None:
+        toggled_value = toggled_inline_param_value(param)
         param["value"] = toggled_value
         self.state.edit_value = toggled_value
         self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=toggled_value))
@@ -1548,7 +1589,13 @@ class ShadowboxUI:
     @property
     def network_value_rows(self) -> list[ValueRow]:
         rows = [
-            ValueRow("setup", self.network_setup_action_label, current=self.network_direct_setup_active),
+            ValueRow(
+                "setup",
+                self.network_setup_action_label,
+                current=self.network_direct_setup_active,
+                toggle=self.network_direct_setup_available,
+                toggle_on=self.network_direct_setup_active,
+            ),
             ValueRow("state", self.network_setup_state_text, current=self.network_direct_setup_active or bool(self.state.network_error_message)),
             ValueRow("wired", "LINK" if self.network_wired_link else "DOWN", current=self.network_direct_setup_ready),
             ValueRow("eth ip", self.network_wired_ip_address),
@@ -4501,8 +4548,8 @@ class ShadowboxUI:
             else:
                 param = self.selected_param
                 if param:
-                    if is_boolish(param):
-                        self._toggle_bool_param(param)
+                    if is_inline_toggle_param(param):
+                        self._toggle_inline_param(param)
                         self._edit_original_value = None
                     elif is_ttid_param(param):
                         self._edit_original_value = param.get("value")

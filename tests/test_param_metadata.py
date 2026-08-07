@@ -28,8 +28,11 @@ from shadowbox.ui import (
     ShadowboxUI,
     apply_edit_delta,
     edit_as_int,
+    inline_toggle_is_on,
     is_boolish,
+    is_inline_toggle_param,
     normalize_current_value_for_edit,
+    off_on_enum_values,
     numeric_step,
     quantize_edit_value,
     rnbo_integer_step_grid,
@@ -374,6 +377,42 @@ class ParamMetadataTests(unittest.TestCase):
         self.assertIn("set_param", queued_kinds)
         self.assertIn("save_state", queued_kinds)
 
+    def test_off_on_enum_params_toggle_directly_using_advertised_strings(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.ui_mode = "PARAM_LIST"
+        ui.state.instances = [
+            {
+                "id": "1",
+                "params": [
+                    {"name": "clock", "value": "Off", "path": "/params/clock", "vals": ["Off", "On"]},
+                ],
+            }
+        ]
+        ui.state.active_instance_id = "1"
+        ui.state.param_cursor = 1
+
+        ui.handle_event(UIEvent(kind="short_press"))
+
+        self.assertEqual(ui.state.ui_mode, "PARAM_LIST")
+        self.assertEqual(ui.selected_param.get("value"), "On")
+        writes = [action for action in ui.pop_actions() if action.kind == "set_param"]
+        self.assertEqual([(action.path, action.value) for action in writes], [("/params/clock", "On")])
+
+        ui.handle_event(UIEvent(kind="short_press"))
+
+        self.assertEqual(ui.selected_param.get("value"), "Off")
+        writes = [action for action in ui.pop_actions() if action.kind == "set_param"]
+        self.assertEqual([(action.path, action.value) for action in writes], [("/params/clock", "Off")])
+
+    def test_off_on_enum_detection_is_exact_but_order_and_case_independent(self) -> None:
+        param = {"value": "ON", "vals": ["ON", "OFF"]}
+
+        self.assertEqual(off_on_enum_values(param), ("OFF", "ON"))
+        self.assertTrue(is_inline_toggle_param(param))
+        self.assertTrue(inline_toggle_is_on(param))
+        self.assertFalse(is_inline_toggle_param({"value": "A", "vals": ["A", "B"]}))
+        self.assertFalse(is_inline_toggle_param({"value": 1, "vals": [0, 1]}))
+
     def test_enum_params_still_open_the_enum_list(self) -> None:
         ui = ShadowboxUI()
         ui.state.ui_mode = "PARAM_LIST"
@@ -381,7 +420,7 @@ class ParamMetadataTests(unittest.TestCase):
             {
                 "id": "1",
                 "params": [
-                    {"name": "mode", "value": "A", "path": "/params/mode", "vals": ["A", "B", "C"]},
+                    {"name": "mode", "value": "A", "path": "/params/mode", "vals": ["A", "B"]},
                 ],
             }
         ]

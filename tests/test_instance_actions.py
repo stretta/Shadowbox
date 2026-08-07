@@ -363,6 +363,8 @@ class InstanceActionTests(unittest.TestCase):
                 ("osc", RNBO_PORT, False),
             ],
         )
+        self.assertTrue(ui.network_value_rows[0].toggle)
+        self.assertFalse(ui.network_value_rows[0].toggle_on)
         self.assertEqual(ui.network_ip_address, "169.254.12.34")
 
     def test_network_rows_show_active_direct_setup_state(self) -> None:
@@ -380,6 +382,8 @@ class InstanceActionTests(unittest.TestCase):
                 ("eth ip", "10.42.0.1", False),
             ],
         )
+        self.assertTrue(ui.network_value_rows[0].toggle)
+        self.assertTrue(ui.network_value_rows[0].toggle_on)
         self.assertEqual(ui.network_ip_address, "10.42.0.1")
 
     def test_network_press_queues_enable_direct_ethernet(self) -> None:
