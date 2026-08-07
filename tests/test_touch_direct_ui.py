@@ -147,6 +147,21 @@ class TouchDirectUITests(unittest.TestCase):
 
         self.assertEqual(ui.state.ui_mode, "GRAPH_SET_LIST")
 
+    def test_tap_home_returns_directly_to_top_screen(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.ui_mode = "SYSTEM_TRANSPOSE_EDIT"
+        ui.state.top_index = 2
+        ui.state.edit_value = 7
+        ui.state.transpose_edit_role = "chromatic"
+
+        ui.handle_event(UIEvent(kind="tap_button", button_id="home"))
+
+        self.assertEqual(ui.state.ui_mode, "TOP")
+        self.assertEqual(ui.state.top_index, 0)
+        self.assertIsNone(ui.state.edit_value)
+        self.assertEqual(ui.state.transpose_edit_role, "")
+        self.assertEqual([action.kind for action in ui.pop_actions()], ["save_state"])
+
     def test_page_down_moves_by_discrete_page(self) -> None:
         ui = ShadowboxUI()
         ui.state.ui_mode = "PARAM_LIST"
@@ -1344,6 +1359,10 @@ class TouchDirectUITests(unittest.TestCase):
 
         self.assertEqual(_touch_action_for_target(renderer, kind="row", index=1), TouchAction("tap_row", index=1))
         self.assertEqual(_touch_action_for_target(renderer, kind="back_button", button_id="back"), TouchAction("tap_back", button_id="back"))
+        self.assertEqual(
+            _touch_action_for_target(renderer, kind="home_button", button_id="home"),
+            TouchAction("tap_button", button_id="home"),
+        )
         self.assertEqual(
             _touch_action_for_target(renderer, kind="page_up", button_id="page_up"),
             TouchAction("page_up", button_id="page_up", page_size=4),

@@ -4685,6 +4685,26 @@ class ShadowboxRenderer:
         for dx, dy, w, h in teeth:
             self.display.rect(x + (dx * s), y + (dy * s), w * s, h * s, on, True)
 
+    def _draw_home_icon(self, x: int, y: int, scale: int = 1, color: str = "text") -> None:
+        """Draw the supplied SVG home silhouette as a small pixel icon."""
+        s = max(1, int(scale))
+
+        def fill(dx: int, dy: int, w: int, h: int) -> None:
+            if self.has_color:
+                self._fill_theme(x + (dx * s), y + (dy * s), w * s, h * s, color)
+            else:
+                self.display.rect(x + (dx * s), y + (dy * s), w * s, h * s, True, True)
+
+        # Rasterized from assets/icons/home-1-svgrepo-com.svg's 16x16 path.
+        for row, (left, width) in enumerate(((7, 2), (6, 4), (5, 6), (4, 8), (3, 10), (2, 12), (1, 14), (0, 16))):
+            fill(left, row, width, 1)
+        fill(11, 1, 3, 4)
+        fill(1, 8, 14, 2)
+        fill(1, 10, 3, 5)
+        fill(7, 10, 2, 5)
+        fill(12, 10, 3, 5)
+        fill(9, 13, 6, 2)
+
     def _draw_transport_action_icon(self, x: int, y: int, action: str, on: bool = True, scale: int = 1) -> None:
         s = max(1, int(scale))
         if str(action).upper() == "STOP":
@@ -4938,6 +4958,7 @@ class ShadowboxRenderer:
         elif state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT":
             header = self.edit_header_title(ui.transport_tempo_edit_param)
         self._show_back_button = self.touch_layout_enabled and state.ui_mode not in {"TOP", "SYSTEM_AUDIO_RESTART"}
+        self._show_home_button = self._show_back_button
         if not (self.touch_layout_enabled and state.ui_mode == "TOP"):
             self.draw_header(
                 header,
@@ -5110,9 +5131,11 @@ class TftShadowboxRenderer(ShadowboxRenderer):
         text_scale = 2 if self.is_full_tft else 1
         text_weight = "semibold" if self.is_full_tft else "regular"
         show_back_button = show_back_button or bool(getattr(self, "_show_back_button", False))
+        show_home_button = bool(getattr(self, "_show_home_button", False))
         title = title if title == "SHADOWBOX" else self._menu_label(title)
         back_w = 112 if (self.touch_layout_enabled and show_back_button) else 0
-        fitted = self._truncate_to_width(title, self.display.width - (pad_x * 2) - 20 - back_w, text_scale, text_weight)
+        home_w = 72 if (self.touch_layout_enabled and show_home_button) else 0
+        fitted = self._truncate_to_width(title, self.display.width - (pad_x * 2) - 20 - back_w - home_w, text_scale, text_weight)
         _, text_h = self._measure_text(fitted, text_scale, text_weight)
         text_y = max(1, (banner_h - text_h) // 2)
         if self.is_five_inch_touch and self.has_color:
@@ -5120,7 +5143,8 @@ class TftShadowboxRenderer(ShadowboxRenderer):
             text_scale = self._touch_menu_scale()
             text_weight = "regular"
             back_w = 96 if (self.touch_layout_enabled and show_back_button) else 0
-            fitted = self._truncate_to_width(title, self.display.width - (pad_x * 2) - back_w - 48, text_scale, text_weight)
+            home_w = 96 if (self.touch_layout_enabled and show_home_button) else 0
+            fitted = self._truncate_to_width(title, self.display.width - (pad_x * 2) - back_w - home_w - 48, text_scale, text_weight)
             _, text_h = self._measure_text(fitted, text_scale, text_weight)
             text_y = max(2, (banner_h - text_h) // 2)
             self._fill_theme(0, 0, self.display.width, banner_h, "panel")
@@ -5130,6 +5154,14 @@ class TftShadowboxRenderer(ShadowboxRenderer):
                 self._text_theme("<", 30, max(1, (banner_h - self._measure_text("<", text_scale, "regular")[1]) // 2), "text", text_scale, "regular")
             else:
                 self._record_touch_target("header", 0, 0, self.display.width, banner_h)
+            if self.touch_layout_enabled and show_home_button:
+                home_x = self.display.width - home_w
+                self._record_touch_target("home_button", home_x, 0, home_w, banner_h, action_kind="tap_button", button_id="home", label="Home")
+                icon_scale = 2
+                icon_x = home_x + ((home_w - (16 * icon_scale)) // 2)
+                icon_y = max(0, (banner_h - (15 * icon_scale)) // 2)
+                icon_color = "accent" if self._touch_pressed(kind="home_button", button_id="home") else "text"
+                self._draw_home_icon(icon_x, icon_y, icon_scale, icon_color)
             title_x = 88 if (self.touch_layout_enabled and show_back_button) else pad_x
             self._text_theme(fitted, title_x, text_y, "text", text_scale, text_weight)
             if busy:
@@ -5146,6 +5178,13 @@ class TftShadowboxRenderer(ShadowboxRenderer):
             self._text("<", arrow_x, arrow_y, text_scale, text_weight, on=False)
         else:
             self._record_touch_target("header", 0, 0, self.display.width, banner_h)
+        if self.touch_layout_enabled and show_home_button:
+            home_x = self.display.width - home_w
+            self._record_touch_target("home_button", home_x, 0, home_w, banner_h, action_kind="tap_button", button_id="home", label="Home")
+            icon_scale = 1 if banner_h < 48 else 2
+            icon_x = home_x + ((home_w - (16 * icon_scale)) // 2)
+            icon_y = max(0, (banner_h - (15 * icon_scale)) // 2)
+            self._draw_home_icon(icon_x, icon_y, icon_scale)
         self._text(fitted, pad_x, text_y, text_scale, text_weight, on=False)
         if busy:
             spinner_scale = 2 if self.is_full_tft else 1

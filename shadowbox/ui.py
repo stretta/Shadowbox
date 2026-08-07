@@ -702,6 +702,7 @@ class ShadowboxUI:
         self.state.remove_instance_origin = ""
         self.state.midi_learn_instance_id = ""
         self.state.midi_learn_param_path = ""
+        self.state.transpose_edit_role = ""
         self.state.edit_value = None
         self.state.edit_numeric_draft = ""
         self.state.edit_ttid_mode = "keyboard"
@@ -3655,6 +3656,12 @@ class ShadowboxUI:
 
     def _handle_tap_button(self, button_id: str) -> None:
         button = re.sub(r"\s+", "_", str(button_id or "").strip().lower())
+
+        if button == "home":
+            self.reset_to_top()
+            self.state.activity_ticks += 1
+            self.queue_action(UIAction(kind="save_state"))
+            return
 
         if self.state.ui_mode == "TOP" and button == "home_tempo":
             self._begin_transport_tempo_edit()
