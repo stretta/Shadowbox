@@ -3056,7 +3056,6 @@ class ShadowboxUI:
             "NAME_INLINE_EDITOR",
             "NAME_OVERWRITE_CONFIRM",
             "NAME_ERROR",
-            "INSTANCE_LIST",
             "PATCHER_PICKER",
             "INSTANCE_MENU",
             "REMOVE_INSTANCE_PICKER",

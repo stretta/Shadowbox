@@ -1162,6 +1162,16 @@ class InstanceActionTests(unittest.TestCase):
         )
         self.assertEqual(renderer.last_selected_idx, 1)
 
+    def test_instance_inventory_refreshes_while_action_flows_remain_protected(self) -> None:
+        ui = ShadowboxUI()
+
+        ui.state.ui_mode = "INSTANCE_LIST"
+        self.assertFalse(ui.should_pause_refresh())
+
+        for mode in ("INSTANCE_MENU", "PATCHER_PICKER", "REMOVE_INSTANCE_CONFIRM", "GRAPH_MENU", "EDIT"):
+            ui.state.ui_mode = mode
+            self.assertTrue(ui.should_pause_refresh(), mode)
+
     def test_graph_menu_shows_new_graph_when_published_as_loadable_set(self) -> None:
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_new_graph_set())

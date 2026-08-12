@@ -2,7 +2,7 @@ import time
 import unittest
 from types import SimpleNamespace
 
-from shadowbox.discovery import DiscoveryCoordinator, DiscoveryResult, NetworkOperationCoordinator
+from shadowbox.discovery import DiscoveryCoordinator, DiscoveryResult, NetworkOperationCoordinator, PeriodicRefreshGate
 from shadowbox.performance import PerformanceProbe
 from shadowbox.render_scheduler import RenderScheduler
 
@@ -79,6 +79,30 @@ class DiscoveryCoordinatorTests(unittest.TestCase):
         coordinator.request("runner", "first")
         coordinator.request("runner", "second")
         self.assertTrue(coordinator.is_stale(DiscoveryResult("runner", "first", 1)))
+
+
+class PeriodicRefreshGateTests(unittest.TestCase):
+    def test_periodic_refresh_runs_immediately_when_unprotected(self):
+        gate = PeriodicRefreshGate()
+
+        self.assertTrue(gate.periodic_due(paused=False))
+        self.assertFalse(gate.deferred)
+
+    def test_skipped_refresh_runs_on_exit_from_protected_mode(self):
+        gate = PeriodicRefreshGate()
+
+        self.assertFalse(gate.periodic_due(paused=True))
+        self.assertTrue(gate.deferred)
+        self.assertFalse(gate.mode_changed(paused=True))
+        self.assertTrue(gate.mode_changed(paused=False))
+        self.assertFalse(gate.mode_changed(paused=False))
+
+    def test_new_periodic_refresh_clears_an_old_deferred_request(self):
+        gate = PeriodicRefreshGate()
+        gate.periodic_due(paused=True)
+
+        self.assertTrue(gate.periodic_due(paused=False))
+        self.assertFalse(gate.mode_changed(paused=False))
 
 
 class NetworkOperationCoordinatorTests(unittest.TestCase):

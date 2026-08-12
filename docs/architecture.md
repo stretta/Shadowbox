@@ -113,7 +113,7 @@ Design rules:
 - A designated ALSA MIDI note controller is observed beside the performance path and never becomes an inline MIDI relay
 - Global transport is exposed only when Runner publishes both `/rnbo/jack/transport/rolling` and `/rnbo/jack/transport/bpm`; it controls musical transport without restarting JACK
 - `SYSTEM` may include a narrow, explicitly documented set of host-level status or maintenance features outside OSCQuery when they are not owned by an instance
-- Modal selection and edit screens should pause background refresh so discovery does not fight the user
+- Read-only live inventory screens should accept background refreshes; workflows with provisional input, destructive confirmation, or active assignments should defer refresh and catch up immediately after exit
 - Parameter editors remain selected from explicit parameter metadata; instance surfaces are selected only from the canonical export name plus successful runtime binding resolution
 - Instance surfaces may bind parameters, OSC message inports, and outport state as distinct roles; list-valued controls must remain OSC inports rather than being represented as parameters
 - Active surface bindings are re-resolved after discovery snapshots and store stable names/paths rather than depending on old parameter dictionaries

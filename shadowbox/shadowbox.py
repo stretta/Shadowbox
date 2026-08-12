@@ -14,7 +14,7 @@ from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import ThreadingOSCUDPServer
 
 from shadowbox.display import load_display_from_env
-from shadowbox.discovery import DiscoveryCoordinator, NetworkOperationCoordinator
+from shadowbox.discovery import DiscoveryCoordinator, NetworkOperationCoordinator, PeriodicRefreshGate
 from shadowbox.encoder import EncoderInput
 from shadowbox.midi_mappings import apply_midi_profile_to_instance, save_instance_midi_profile
 from shadowbox.rnbo import RNBOClient
@@ -977,6 +977,7 @@ def main():
             is_dimmed = False
 
     discovery = DiscoveryCoordinator(rnbo, metrics=perf)
+    periodic_refresh = PeriodicRefreshGate()
     discovery.start()
     network_operations = NetworkOperationCoordinator(rnbo, _run_direct_ethernet_helper, _run_wifi_network_helper)
     network_operations.start()
@@ -1490,12 +1491,14 @@ def main():
             # Periodic discovery refresh
             if (now - last_refresh) >= REFRESH_SECONDS:
                 last_refresh = now
-                if not ui.should_pause_refresh():
+                if periodic_refresh.periodic_due(paused=ui.should_pause_refresh()):
                     discovery.request("runner", "periodic")
 
             if ui.state.ui_mode != previous_mode:
                 previous_mode = ui.state.ui_mode
                 scheduler.request("mode")
+                if periodic_refresh.mode_changed(paused=ui.should_pause_refresh()):
+                    discovery.request("runner", "deferred periodic")
                 if previous_mode == "NETWORK":
                     discovery.request("network_status", "network screen")
                 elif previous_mode == "WIFI_NETWORKS":

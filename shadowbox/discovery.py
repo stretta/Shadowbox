@@ -20,6 +20,26 @@ class DiscoveryResult:
     duration: float = 0.0
 
 
+class PeriodicRefreshGate:
+    """Defers periodic Runner refreshes while the active UI mode is protected."""
+
+    def __init__(self) -> None:
+        self.deferred = False
+
+    def periodic_due(self, *, paused: bool) -> bool:
+        if paused:
+            self.deferred = True
+            return False
+        self.deferred = False
+        return True
+
+    def mode_changed(self, *, paused: bool) -> bool:
+        if paused or not self.deferred:
+            return False
+        self.deferred = False
+        return True
+
+
 class DiscoveryCoordinator:
     """Serial background coordinator with typed coalescing and generations."""
 
