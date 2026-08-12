@@ -124,6 +124,17 @@ class NetworkOperationCoordinatorTests(unittest.TestCase):
 
 
 class RenderSchedulerTests(unittest.TestCase):
+    def test_redundant_busy_state_does_not_request_another_render(self):
+        from shadowbox.ui import ShadowboxUI
+
+        ui = ShadowboxUI()
+        self.assertFalse(ui.set_busy(False))
+        self.assertEqual(ui.render_revision, 0)
+        self.assertTrue(ui.set_busy(True, "refresh"))
+        self.assertEqual(ui.render_revision, 1)
+        self.assertFalse(ui.set_busy(True, "refresh"))
+        self.assertEqual(ui.render_revision, 1)
+
     def test_static_screen_renders_only_when_dirty(self):
         clock = _Clock()
         scheduler = RenderScheduler(clock=clock)

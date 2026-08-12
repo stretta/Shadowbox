@@ -734,12 +734,17 @@ class ShadowboxUI:
         self._reset_float_edit_acceleration()
         self.brick_panel.reset()
 
-    def set_busy(self, busy: bool, reason: str = "") -> None:
-        self.state.busy = busy
-        self.state.busy_reason = reason
+    def set_busy(self, busy: bool, reason: str = "") -> bool:
+        next_busy = bool(busy)
+        next_reason = str(reason) if next_busy else ""
+        if self.state.busy == next_busy and self.state.busy_reason == next_reason:
+            return False
+        self.state.busy = next_busy
+        self.state.busy_reason = next_reason
         if busy:
             self.state.activity_ticks += 1
         self.request_render("busy")
+        return True
 
     def begin_audio_restart(self, device_name: str = "", return_mode: str = "SYSTEM_AUDIO_DEVICE") -> None:
         self.state.audio_restart_device = str(device_name or "").strip()
@@ -782,19 +787,30 @@ class ShadowboxUI:
         self.state.activity_ticks += 1
         self.request_render("software_update")
 
-    def apply_runner_snapshot(self, snapshot) -> None:
+    def apply_runner_snapshot(self, snapshot) -> bool:
         current_id = str(self.state.active_instance_id)
         current_param_path = self.selected_param.get("path") if self.selected_param else ""
         pending_add_instance_count = self.state.pending_add_instance_count
+        instance_list_before = self._instance_list_render_signature() if self.state.ui_mode == "INSTANCE_LIST" else None
+        cached_network = self.state.system.get("network", {}) if isinstance(self.state.system, dict) else {}
+        next_system = dict(snapshot.system)
+        if cached_network:
+            next_system["network"] = cached_network
+
+        if (
+            self.state.instances == snapshot.instances
+            and self.state.patchers == snapshot.patchers
+            and self.state.add_instance_path == snapshot.add_instance_path
+            and self.state.remove_instance_path == snapshot.remove_instance_path
+            and self.state.system == next_system
+        ):
+            return False
 
         self.state.instances = snapshot.instances
         self.state.patchers = snapshot.patchers
         self.state.add_instance_path = snapshot.add_instance_path
         self.state.remove_instance_path = snapshot.remove_instance_path
-        cached_network = self.state.system.get("network", {}) if isinstance(self.state.system, dict) else {}
-        self.state.system = dict(snapshot.system)
-        if cached_network:
-            self.state.system["network"] = cached_network
+        self.state.system = next_system
         self._sync_audio_index()
         self._cleanup_current_presets()
 
@@ -882,7 +898,10 @@ class ShadowboxUI:
                 self.state.edit_value = normalize_step16_mask(self.state.edit_value)
             else:
                 self.state.edit_value = normalize_current_value_for_edit(self.selected_param)
+        if instance_list_before is not None and instance_list_before == self._instance_list_render_signature():
+            return False
         self.request_render("runner_snapshot")
+        return True
 
     def apply_network_snapshot(self, network: dict) -> None:
         system = dict(self.state.system or {})
@@ -1050,6 +1069,14 @@ class ShadowboxUI:
             for instance_id, preset_name in self.state.current_presets.items()
             if instance_id in valid_ids and preset_name
         }
+
+    def _instance_list_render_signature(self) -> tuple:
+        return (
+            tuple((str(item.get("id", "")), str(item.get("label", ""))) for item in self.state.instances),
+            str(self.state.active_instance_id),
+            bool(self.state.add_instance_path),
+            bool(self.state.remove_instance_path),
+        )
 
     @property
     def top_level_items(self) -> list[str]:

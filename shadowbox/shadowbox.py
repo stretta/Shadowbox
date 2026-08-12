@@ -1126,7 +1126,6 @@ def main():
                     result.kind != "runner" and ui.state.busy_reason == "network"
                 ):
                     ui.set_busy(False)
-                scheduler.request("discovery")
 
             for result in network_operations.drain():
                 ui.apply_network_snapshot(result.network)

@@ -1172,6 +1172,59 @@ class InstanceActionTests(unittest.TestCase):
             ui.state.ui_mode = mode
             self.assertTrue(ui.should_pause_refresh(), mode)
 
+    def test_identical_runner_snapshot_does_not_request_another_render(self) -> None:
+        ui = ShadowboxUI()
+        snapshot = self._snapshot_with_sets()
+        self.assertTrue(ui.apply_runner_snapshot(snapshot))
+        ui.render_revision = 0
+
+        self.assertFalse(ui.apply_runner_snapshot(self._snapshot_with_sets()))
+
+        self.assertEqual(ui.render_revision, 0)
+
+    def test_changed_runner_snapshot_still_requests_a_render(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_sets())
+        ui.render_revision = 0
+        changed = self._snapshot_with_sets()
+        changed.system["sets"]["dirty"] = False
+
+        self.assertTrue(ui.apply_runner_snapshot(changed))
+
+        self.assertEqual(ui.render_revision, 1)
+        self.assertEqual(ui.last_render_reason, "runner_snapshot")
+
+    def test_live_state_churn_updates_cache_without_redrawing_instance_inventory(self) -> None:
+        ui = ShadowboxUI()
+        snapshot = self._snapshot_with_preset_capabilities()
+        snapshot.instances[0]["state"] = [
+            {"name": "note", "path": "/rnbo/inst/1/messages/out/note", "value": [60.0], "metadata": {}}
+        ]
+        ui.apply_runner_snapshot(snapshot)
+        ui.state.ui_mode = "INSTANCE_LIST"
+        ui.render_revision = 0
+        changed = self._snapshot_with_preset_capabilities()
+        changed.instances[0]["state"] = [
+            {"name": "note", "path": "/rnbo/inst/1/messages/out/note", "value": [64.0], "metadata": {}}
+        ]
+
+        self.assertFalse(ui.apply_runner_snapshot(changed))
+
+        self.assertEqual(ui.state.instances[0]["state"][0]["value"], [64.0])
+        self.assertEqual(ui.render_revision, 0)
+
+    def test_instance_inventory_change_still_redraws_instance_list(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_preset_capabilities())
+        ui.state.ui_mode = "INSTANCE_LIST"
+        ui.render_revision = 0
+        changed = self._snapshot_with_preset_capabilities()
+        changed.instances[0]["label"] = "Renamed instance"
+
+        self.assertTrue(ui.apply_runner_snapshot(changed))
+
+        self.assertEqual(ui.render_revision, 1)
+
     def test_graph_menu_shows_new_graph_when_published_as_loadable_set(self) -> None:
         ui = ShadowboxUI()
         ui.apply_runner_snapshot(self._snapshot_with_new_graph_set())
