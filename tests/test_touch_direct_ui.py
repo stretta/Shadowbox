@@ -1919,6 +1919,7 @@ class TouchDirectUITests(unittest.TestCase):
                 pass
 
         ui = ShadowboxUI()
+        ui.state.touch_feedback_enabled = True
         ui.state.ui_mode = "PARAM_LIST"
         ui.state.instances = [
             {
@@ -2046,6 +2047,84 @@ class TouchDirectUITests(unittest.TestCase):
         self.assertTrue(title_ops)
         self.assertEqual(title_ops[0][5], 3)
         self.assertEqual(title_ops[0][6], "semibold")
+
+    def test_touch_contact_draws_press_rings_and_short_release_bloom(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.touch_feedback_enabled = True
+        display = _ColorFiveInchDisplay()
+        renderer = create_renderer(display)
+        renderer.set_touch_mode(True)
+        now = [1.0]
+        renderer._clock = lambda: now[0]
+
+        renderer.draw(
+            ui,
+            touch_state=SimpleNamespace(pressed=True, normalized_x=0.5, normalized_y=0.5),
+        )
+        accent = (21, 193, 129)
+        accent_soft = (65, 116, 96)
+        press_rings = [
+            op
+            for op in display.ops
+            if op[0] == "rounded_rect_color"
+            and op[5] in {18, 25}
+            and op[6] in {accent, accent_soft}
+            and op[7] is False
+        ]
+        self.assertEqual(len(press_rings), 2)
+
+        now[0] = 1.02
+        renderer.draw(
+            ui,
+            touch_state=SimpleNamespace(pressed=False, released=True, normalized_x=0.5, normalized_y=0.5),
+        )
+        self.assertFalse(renderer.touch_feedback_due(1.04))
+        self.assertTrue(renderer.touch_feedback_due(1.06))
+
+        now[0] = 1.12
+        renderer.draw(
+            ui,
+            touch_state=SimpleNamespace(pressed=False, normalized_x=0.5, normalized_y=0.5),
+        )
+        release_rings = [
+            op
+            for op in display.ops
+            if op[0] == "rounded_rect_color"
+            and op[5] > 25
+            and op[6] == accent_soft
+            and op[7] is False
+        ]
+        self.assertTrue(release_rings)
+
+        now[0] = 1.21
+        renderer.draw(
+            ui,
+            touch_state=SimpleNamespace(pressed=False, normalized_x=0.5, normalized_y=0.5),
+        )
+        self.assertFalse(renderer.touch_feedback_due(1.25))
+
+    def test_touch_contact_effect_draws_nothing_when_disabled(self) -> None:
+        ui = ShadowboxUI()
+        display = _ColorFiveInchDisplay()
+        renderer = create_renderer(display)
+        renderer.set_touch_mode(True)
+
+        renderer.draw(
+            ui,
+            touch_state=SimpleNamespace(pressed=True, normalized_x=0.5, normalized_y=0.5),
+        )
+
+        accent_colors = {(21, 193, 129), (65, 116, 96)}
+        contact_rings = [
+            op
+            for op in display.ops
+            if op[0] == "rounded_rect_color"
+            and op[5] in {18, 25}
+            and op[6] in accent_colors
+            and op[7] is False
+        ]
+        self.assertEqual(contact_rings, [])
+        self.assertFalse(renderer.touch_feedback_due())
 
 
 if __name__ == "__main__":

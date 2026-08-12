@@ -7,6 +7,7 @@ Hardware UI for RNBO Runner
 from __future__ import annotations
 
 import re
+from time import monotonic
 from typing import Any
 
 from shadowbox.editors.pitch_display import normalize_pitch_to_midi_note
@@ -50,6 +51,8 @@ from shadowbox.version import SHADOWBOX_BUILD_INFO, SHADOWBOX_VERSION
 
 STEP16_ENABLED_FILL_LEVEL = int(round(255 * 0.7))
 TOUCH_VALUE_BAR_HORIZONTAL_INSET = 10
+TOUCH_FEEDBACK_FADE_SECONDS = 0.18
+TOUCH_FEEDBACK_FRAME_SECONDS = 1.0 / 30.0
 
 FIVE_INCH_THEME = {
     "bg": (15, 18, 18),
@@ -182,6 +185,12 @@ class ShadowboxRenderer:
         self.touch_layout: TouchLayout | None = None
         self._touch_state: TouchSample | None = None
         self._touch_mode = False
+        self._touch_was_pressed = False
+        self._touch_feedback_point: tuple[int, int] | None = None
+        self._touch_feedback_released_at: float | None = None
+        self._touch_feedback_last_frame = float("-inf")
+        self._touch_feedback_enabled = False
+        self._clock = monotonic
         self._scope_points_cache_key = None
         self._scope_points_cache: list[tuple[int, int]] = []
 
@@ -468,6 +477,57 @@ class ShadowboxRenderer:
     def set_touch_state(self, touch_state: TouchSample | None) -> None:
         self._touch_state = touch_state
 
+    def touch_feedback_due(self, now: float | None = None) -> bool:
+        if not self._touch_feedback_enabled or self._touch_feedback_released_at is None:
+            return False
+        now = self._clock() if now is None else now
+        return now - self._touch_feedback_last_frame >= TOUCH_FEEDBACK_FRAME_SECONDS
+
+    def _update_touch_feedback(self, touch_state: TouchSample | None, now: float) -> None:
+        if not self._touch_feedback_enabled:
+            self._touch_was_pressed = False
+            self._touch_feedback_point = None
+            self._touch_feedback_released_at = None
+            return
+        pressed = bool(touch_state is not None and getattr(touch_state, "pressed", False))
+        released = bool(touch_state is not None and getattr(touch_state, "released", False))
+        if touch_state is not None and (pressed or released or self._touch_was_pressed):
+            nx = max(0.0, min(1.0, float(getattr(touch_state, "normalized_x", 0.0))))
+            ny = max(0.0, min(1.0, float(getattr(touch_state, "normalized_y", 0.0))))
+            self._touch_feedback_point = (
+                int(round(nx * max(0, self.display.width - 1))),
+                int(round(ny * max(0, self.display.height - 1))),
+            )
+        if pressed:
+            self._touch_feedback_released_at = None
+        elif released or self._touch_was_pressed:
+            self._touch_feedback_released_at = now
+        self._touch_was_pressed = pressed
+
+    def _draw_touch_feedback(self, now: float) -> None:
+        if not (self.touch_layout_enabled and self.has_color and self._touch_feedback_point):
+            self._touch_feedback_released_at = None
+            return
+
+        x, y = self._touch_feedback_point
+        if self._touch_was_pressed:
+            rings = ((18, "accent"), (25, "accent_soft"))
+        elif self._touch_feedback_released_at is not None:
+            age = max(0.0, now - self._touch_feedback_released_at)
+            if age >= TOUCH_FEEDBACK_FADE_SECONDS:
+                self._touch_feedback_released_at = None
+                return
+            progress = age / TOUCH_FEEDBACK_FADE_SECONDS
+            radius = int(round(22 + (18 * progress)))
+            rings = ((radius, "accent_soft"),)
+        else:
+            return
+
+        for radius, color in rings:
+            diameter = radius * 2
+            self._rounded_theme(x - radius, y - radius, diameter, diameter, radius, color, False)
+        self._touch_feedback_last_frame = now
+
     @property
     def header_height(self) -> int:
         if self.is_five_inch_touch:
@@ -739,7 +799,7 @@ class ShadowboxRenderer:
         )
 
     def _touch_pressed(self, *, kind: str | None = None, index: int | None = None, button_id: str = "") -> bool:
-        if not self.touch_layout_enabled:
+        if not self.touch_layout_enabled or not self._touch_feedback_enabled:
             return False
         touch_state = self._touch_state
         if touch_state is None or not touch_state.pressed:
@@ -5021,6 +5081,9 @@ class ShadowboxRenderer:
         state = ui.state
         self._ui = ui
         self._touch_state = touch_state
+        self._touch_feedback_enabled = bool(getattr(state, "touch_feedback_enabled", False))
+        feedback_now = self._clock()
+        self._update_touch_feedback(touch_state, feedback_now)
         self._begin_touch_layout(state.ui_mode)
         self.display.clear()
 
@@ -5064,7 +5127,7 @@ class ShadowboxRenderer:
             "SYSTEM_AUDIO_RESTART": "AUDIO",
             "SYSTEM_TRANSPORT": "TRANSPORT",
             "SYSTEM_TRANSPORT_TEMPO_EDIT": "TEMPO",
-            "SYSTEM_HDMI_MIRROR": "HDMI MIRROR",
+            "SYSTEM_HDMI_MIRROR": "HDMI",
             "SYSTEM_REBOOT_CONFIRM": "REBOOT",
             "SYSTEM_TRANSPOSE": "TRANSPOSE",
             "SYSTEM_TRANSPOSE_CONTROLLER": "MIDI CONTROLLER",
@@ -5248,6 +5311,7 @@ class ShadowboxRenderer:
         elif state.ui_mode == "MAINT":
             self.draw_maint(ui)
 
+        self._draw_touch_feedback(feedback_now)
         self.display.show()
 
 

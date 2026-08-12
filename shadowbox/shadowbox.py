@@ -992,8 +992,10 @@ def main():
 
             # Pull pending hardware events
             events = encoder.get_events()
-            if events:
+            touch_visual_changed = encoder.consume_touch_visual_change()
+            if events or touch_visual_changed:
                 mark_activity()
+            if events or (touch_visual_changed and ui.state.touch_feedback_enabled):
                 scheduler.request("input", input_event=True)
                 perf.increment("input_batches")
                 perf.increment("input_events", len(events))
@@ -1518,6 +1520,9 @@ def main():
             if ui.render_revision:
                 scheduler.request(ui.last_render_reason)
                 ui.render_revision = 0
+
+            if renderer.touch_feedback_due(now):
+                scheduler.request("touch_feedback")
 
             if (not is_sleeping) and scheduler.should_render(ui, now):
                 last_frame = now

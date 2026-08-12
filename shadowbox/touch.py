@@ -35,6 +35,7 @@ class TouchSample:
     pressed: bool
     zone: str
     action: str
+    released: bool = False
 
 
 @dataclass(frozen=True)

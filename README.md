@@ -455,6 +455,12 @@ changing the setting, select the `REBOOT REQUIRED` row or use
 `SYSTEM -> REBOOT`; the confirmation screen defaults to Cancel. HDMI should be
 connected before the reboot.
 
+The same screen includes a persistent `TOUCH FEEDBACK` toggle. It defaults to
+`OFF` and takes effect immediately without a reboot. When enabled, touched
+controls depress on contact and a short accent bloom marks release. Because DSI
+and HDMI share the rendered framebuffer, the feedback appears on both outputs;
+touch operation itself is unchanged when the effect is off.
+
 Connect HDMI before starting Shadowbox. The backend fills the shared HDMI
 framebuffer, then configures the DSI KMS plane to scale that full frame back to
 800x480. HDMI receives a complete 720p or 1080p Shadowbox image while the DSI

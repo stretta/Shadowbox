@@ -223,6 +223,7 @@ class UIState:
     hdmi_mirror_enabled: bool = False
     hdmi_mirror_restart_required: bool = False
     hdmi_mirror_error_message: str = ""
+    touch_feedback_enabled: bool = False
 
     busy: bool = False
     busy_reason: str = ""
@@ -629,6 +630,7 @@ class ShadowboxUI:
         saved = self._saved_state_cache
         self.state.top_index = clamp_index(int(saved.get("top_index", 0)), len(self.top_level_items))
         self.state.saved_audio_card = str(saved.get("saved_audio_card", ""))
+        self.state.touch_feedback_enabled = bool(saved.get("touch_feedback_enabled", False))
         transpose = saved.get("transpose_control", {})
         if not isinstance(transpose, dict):
             transpose = {}
@@ -644,6 +646,7 @@ class ShadowboxUI:
             {
                 "top_index": self.state.top_index,
                 "saved_audio_card": self.current_audio_card,
+                "touch_feedback_enabled": self.state.touch_feedback_enabled,
                 "transpose_control": {
                     "version": 1,
                     "authority": normalize_transpose_authority(self.state.transpose_authority),
@@ -1166,6 +1169,13 @@ class ShadowboxUI:
                 current=self.state.hdmi_mirror_enabled,
                 toggle=True,
                 toggle_on=self.state.hdmi_mirror_enabled,
+            ),
+            ValueRow(
+                "touch feedback",
+                "ON" if self.state.touch_feedback_enabled else "OFF",
+                current=self.state.touch_feedback_enabled,
+                toggle=True,
+                toggle_on=self.state.touch_feedback_enabled,
             ),
             ValueRow("apply", apply_text),
         ]
@@ -4886,7 +4896,14 @@ class ShadowboxUI:
             if self.state.hdmi_mirror_cursor == 1:
                 self.state.hdmi_mirror_error_message = ""
                 self.queue_action(UIAction(kind="set_hdmi_mirror", value=not self.state.hdmi_mirror_enabled))
-            elif self.state.hdmi_mirror_cursor == 2 and self.state.hdmi_mirror_restart_required:
+            elif self.state.hdmi_mirror_cursor == 2:
+                self.state.touch_feedback_enabled = not self.state.touch_feedback_enabled
+                self.queue_action(UIAction(kind="save_state"))
+                self.set_status_message(
+                    "touch feedback on" if self.state.touch_feedback_enabled else "touch feedback off",
+                    frames=30,
+                )
+            elif self.state.hdmi_mirror_cursor == 3 and self.state.hdmi_mirror_restart_required:
                 self.state.ui_mode = "SYSTEM_REBOOT_CONFIRM"
                 self.state.reboot_confirm_cursor = 0
 

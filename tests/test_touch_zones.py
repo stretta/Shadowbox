@@ -100,11 +100,17 @@ class _FakeTouchReader:
         self.pressed = False
         self.closed = False
         self.samples = []
+        self.current = types.SimpleNamespace(normalized_x=0.0, normalized_y=0.0, pressed=False)
 
     def read_samples(self):
         samples = self.samples[:]
         self.samples.clear()
+        if samples:
+            self.current = samples[-1]
         return samples
+
+    def current_sample(self):
+        return self.current
 
     def close(self) -> None:
         self.closed = True
@@ -223,6 +229,33 @@ class EncoderTouchZoneTests(unittest.TestCase):
                 ("tap_row", 1, "", None),
             ],
         )
+        self.assertTrue(encoder.consume_touch_visual_change())
+        self.assertFalse(encoder.consume_touch_visual_change())
+        self.assertTrue(encoder.touch_sample().released)
+
+    def test_touch_direct_pressed_row_requests_visual_feedback_without_action(self) -> None:
+        sample_type = types.SimpleNamespace
+        with (
+            mock.patch.dict(os.environ, {"SHADOWBOX_INPUT_KIND": "touch_direct"}, clear=False),
+            mock.patch.object(self.encoder_module, "TouchZoneReader", _FakeTouchReader),
+        ):
+            encoder = self.encoder_module.EncoderInput()
+
+        layout = TouchLayout(800, 480)
+        layout.add_target("row", 0, 80, 700, 80, action_kind="tap_row", index=1)
+        encoder.set_touch_layout(layout)
+        encoder._touch_reader.samples.append(
+            sample_type(normalized_x=0.5, normalized_y=100 / 479, pressed=True)
+        )
+
+        self.assertEqual(encoder.get_events(), [])
+        self.assertTrue(encoder.consume_touch_visual_change())
+
+        encoder._touch_reader.samples.append(
+            sample_type(normalized_x=0.51, normalized_y=101 / 479, pressed=True)
+        )
+        self.assertEqual(encoder.get_events(), [])
+        self.assertFalse(encoder.consume_touch_visual_change())
 
     def test_touch_direct_surface_drag_stays_captured_by_initial_drawbar(self) -> None:
         sample_type = types.SimpleNamespace

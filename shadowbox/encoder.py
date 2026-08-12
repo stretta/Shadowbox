@@ -84,6 +84,9 @@ class EncoderInput:
         self._touch_reader: TouchZoneReader | None = None
         self._touch_layout: TouchLayout | None = None
         self._touch_capture: tuple[str, int | None, str] | None = None
+        self._touch_visual_changed = False
+        self._touch_visual_pressed = False
+        self._touch_visual_release_pending = False
         self._keypad_reader: NumericKeypadReader | None = None
         self._init_keypad_reader()
 
@@ -230,7 +233,16 @@ class EncoderInput:
     def touch_sample(self):
         if self._touch_reader is None:
             return None
-        return self._touch_reader.current_sample()
+        sample = self._touch_reader.current_sample()
+        if self._touch_visual_release_pending:
+            sample.released = True
+            self._touch_visual_release_pending = False
+        return sample
+
+    def consume_touch_visual_change(self) -> bool:
+        changed = self._touch_visual_changed
+        self._touch_visual_changed = False
+        return changed
 
     # --------------------------------------------------------
     # low-level reads
@@ -377,8 +389,14 @@ class EncoderInput:
         if self.input_kind == "touch_direct":
             if self._touch_reader is not None:
                 latest_slider_event: EncoderEvent | None = None
-                for sample in self._touch_reader.read_samples():
+                samples = self._touch_reader.read_samples()
+                for sample in samples:
                     sample_pressed = bool(getattr(sample, "pressed", False))
+                    if sample_pressed != self._touch_visual_pressed:
+                        self._touch_visual_changed = True
+                        if self._touch_visual_pressed and not sample_pressed:
+                            self._touch_visual_release_pending = True
+                        self._touch_visual_pressed = sample_pressed
                     action = None
                     if self._touch_capture is not None and self._touch_layout is not None:
                         capture_kind, capture_index, capture_button = self._touch_capture

@@ -1,6 +1,8 @@
 import sys
+import tempfile
 import types
 import unittest
+from pathlib import Path
 from unittest import mock
 
 
@@ -447,13 +449,42 @@ class InstanceActionTests(unittest.TestCase):
         self.assertTrue(ui.state.hdmi_mirror_restart_required)
         self.assertTrue(ui.hdmi_mirror_rows[0].toggle)
         self.assertTrue(ui.hdmi_mirror_rows[0].toggle_on)
-        self.assertEqual(ui.hdmi_mirror_rows[1].value, "REBOOT REQUIRED")
+        self.assertEqual(ui.hdmi_mirror_rows[1].label, "touch feedback")
+        self.assertEqual(ui.hdmi_mirror_rows[1].value, "OFF")
+        self.assertEqual(ui.hdmi_mirror_rows[2].value, "REBOOT REQUIRED")
+
+    def test_hdmi_touch_feedback_is_optional_immediate_and_defaults_off(self) -> None:
+        ui = ShadowboxUI(hdmi_mirror_available=True)
+        ui.state.ui_mode = "SYSTEM_HDMI_MIRROR"
+        ui.state.hdmi_mirror_cursor = 2
+
+        self.assertFalse(ui.state.touch_feedback_enabled)
+        self.assertEqual(ui.hdmi_mirror_rows[1].value, "OFF")
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        self.assertTrue(ui.state.touch_feedback_enabled)
+        self.assertEqual(ui.hdmi_mirror_rows[1].value, "ON")
+        self.assertTrue(ui.hdmi_mirror_rows[1].toggle_on)
+        self.assertIn("save_state", [action.kind for action in ui.pop_actions()])
+
+    def test_hdmi_touch_feedback_setting_persists(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "state.json"
+            with mock.patch("shadowbox.ui.STATE_PATH", state_path):
+                ui = ShadowboxUI(hdmi_mirror_available=True)
+                ui.state.touch_feedback_enabled = True
+                ui.save_state()
+
+                restored = ShadowboxUI(hdmi_mirror_available=True)
+                restored.restore_from_saved_state()
+
+        self.assertTrue(restored.state.touch_feedback_enabled)
 
     def test_hdmi_reboot_required_row_opens_safe_confirmation(self) -> None:
         ui = ShadowboxUI(hdmi_mirror_available=True, hdmi_mirror_enabled=False)
         ui.finish_hdmi_mirror_change(True)
         ui.state.ui_mode = "SYSTEM_HDMI_MIRROR"
-        ui.state.hdmi_mirror_cursor = 2
+        ui.state.hdmi_mirror_cursor = 3
 
         ui.handle_event(types.SimpleNamespace(kind="short_press"))
 
