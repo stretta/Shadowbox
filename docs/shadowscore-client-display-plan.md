@@ -1,0 +1,76 @@
+# ShadowScore Client Display
+
+## Scope
+
+This project adds a dedicated Shadowbox instance surface for one local
+`ShadowScoreClient` export. It is an instrument display: it explains what the
+client is playing now without becoming an ensemble dashboard or a raw
+diagnostics screen.
+
+Shadowbox owns export recognition, outport binding, local display state, and
+the 800x480 presentation. The first phase does not require ShadowscoreServer.
+Future server context may add player, block, and section labels, but the local
+musical display must continue working when the server is unavailable.
+
+## Local contract
+
+The surface resolves only when the canonical export name is
+`ShadowScoreClient` and exactly one of each required outport is present:
+
+- `current_stage`: the client's current zero-based playback stage.
+- `playback_debug`: the complete chord witness in the form
+  `[30, stage, note_count, pitch, duration, velocity, ...]`.
+- `midi_debug`: the most recently emitted MIDI event in the live Runner form
+  `[pitch, velocity, duration_ms]`.
+- `shadowscore_ack`: transaction lifecycle readback. Current clients may
+  prefix lifecycle opcodes with the receiver opcode `90`, so both
+  `[92, ...]` and `[90, 92, ...]` shapes are accepted.
+
+Bindings use the canonical export name and exact outport leaf names, not the
+mutable instance label or a fixed instance number. Missing or duplicate
+required outports reject the custom surface and leave ordinary instance tools
+available.
+
+## First display
+
+The first 800x480 layout is read-only and gives visual priority to:
+
+1. The current chord as note-name tiles with velocity and stage duration. A
+   rest latches the last non-rest chord in a subdued style instead of erasing
+   it, while a `REST` label and rest-event count prevent it from appearing
+   current.
+2. The current zero-based stage.
+3. A compact recent-event ribbon built from `playback_debug` updates while the
+   surface is open. Chords show density; zero-note events show rests.
+4. A small lifecycle summary (`READY`, `ACTIVE`, `REJECTED`, or `COMMITTED`)
+   and the last actual MIDI triad.
+
+The surface deliberately does not infer future events from the local outport
+snapshots. It also does not claim that the stale value of `midi_debug` denotes
+current sound: the label identifies it as the last emitted MIDI event.
+
+Smaller displays receive a compact textual version of the same current chord,
+stage, and lifecycle state.
+
+## State and refresh rules
+
+- The current values remain Runner/OSCQuery-owned and are refreshed through
+  the existing discovery and OSC listener paths.
+- Recent-event history is transient Shadowbox UI state. It begins with the
+  currently published `playback_debug` value, records distinct subsequent
+  playback updates, and is discarded when the surface closes.
+- The last valid non-rest chord is separately latched for the lifetime of the
+  open surface. Rest events increment a visible count and never replace that
+  useful musical context.
+- The surface is event-driven. It redraws when a bound outport changes and
+  does not add polling or continuous animation.
+- Malformed diagnostic lists render as unavailable instead of being partially
+  interpreted.
+
+## Later phases
+
+Server-enriched context can add assigned player, current block or section,
+section progress, and pending replacement state. A trustworthy long-running
+event history should come from a sequenced collector rather than reconstructing
+chronology from polled OSCQuery snapshots. Those additions are intentionally
+outside the local-first display contract.

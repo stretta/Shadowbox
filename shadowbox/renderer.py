@@ -17,6 +17,13 @@ from shadowbox.rnbo import RNBO_HOST
 from shadowbox.surfaces.list_sequencer import FIELD_KEYS, FIELD_LABELS, FIELD_SHORT_LABELS, SIGNED_FIELD_KEYS
 from shadowbox.surfaces.list_vel_sequencer import ROW_KEYS, ROW_LABELS, mute_is_on
 from shadowbox.surfaces.organ import FOOTAGE_COLORS, FOOTAGES
+from shadowbox.surfaces.shadowscore_client import (
+    ack_label,
+    midi_note_label,
+    parse_current_stage,
+    parse_midi_debug,
+    parse_playback_debug,
+)
 from shadowbox.touch import TouchLayout, TouchSample
 from shadowbox.ui import (
     MenuRow,
@@ -3504,7 +3511,131 @@ class ShadowboxRenderer:
         if key == "list_vel_sequencer":
             self.draw_list_vel_sequencer_surface(ui, state)
             return
+        if key == "shadowscore_client":
+            self.draw_shadowscore_client_surface(ui, state)
+            return
         self.text_center("surface unavailable", self.edit_content_top(8))
+
+    def draw_shadowscore_client_surface(self, ui, state) -> None:
+        stage_item = ui.surface_state_binding("current_stage")
+        playback_item = ui.surface_state_binding("playback_debug")
+        midi_item = ui.surface_state_binding("midi_debug")
+        ack_item = ui.surface_state_binding("shadowscore_ack")
+        stage = parse_current_stage(stage_item.get("value") if stage_item else None)
+        playback = parse_playback_debug(playback_item.get("value") if playback_item else None)
+        midi = parse_midi_debug(midi_item.get("value") if midi_item else None)
+        lifecycle = ack_label(ack_item.get("value") if ack_item else None)
+
+        if not self.is_five_inch_touch:
+            notes = playback.get("notes", []) if playback else []
+            chord = " ".join(midi_note_label(note["pitch"]) for note in notes) or "REST"
+            self.text_center(shorten(chord, self.text_cols), self.edit_content_top(28))
+            self.text_center(f"STAGE {stage if stage is not None else '-'}", self.edit_content_top(28) + 12)
+            self.text_center(lifecycle, self.edit_content_top(28) + 24)
+            return
+
+        width = self.display.width
+        content_y = self.content_top + 8
+        panel_x = 24
+        panel_w = width - 48
+        notes_y = content_y
+        notes_h = 170
+        ribbon_y = notes_y + notes_h + 12
+        ribbon_h = 74
+        status_y = ribbon_y + ribbon_h + 12
+        status_h = max(56, self.display.height - status_y - 12)
+
+        self._rounded_theme(panel_x, notes_y, panel_w, notes_h, 14, "panel", True)
+        self._rounded_theme(panel_x, notes_y, panel_w, notes_h, 14, "line", False)
+        stage_text = f"STAGE {stage}" if stage is not None else "STAGE -"
+        self._text_theme(stage_text, panel_x + 20, notes_y + 16, "muted", 2, "medium")
+
+        current_notes = playback.get("notes", []) if playback else []
+        current_is_rest = playback is not None and not current_notes
+        last_note_event = state.surface_state.get("last_note_event")
+        display_event = playback if current_notes else last_note_event if isinstance(last_note_event, dict) else None
+        notes = display_event.get("notes", []) if isinstance(display_event, dict) else []
+        if current_is_rest and notes:
+            rest_events = max(1, int(state.surface_state.get("rest_events", 1)))
+            last_stage = display_event.get("stage", "-")
+            context_text = f"REST {rest_events}  ·  LAST CHORD STAGE {last_stage}"
+            context_w = self._measure_text(context_text, 1, "medium")[0]
+            self._text_theme(
+                context_text,
+                panel_x + panel_w - 20 - context_w,
+                notes_y + 20,
+                "muted",
+                1,
+                "medium",
+            )
+        if not notes:
+            rest_text = "REST" if current_is_rest else "WAITING FOR PLAYBACK"
+            color = "muted" if playback is not None else "warning"
+            text_w = self._measure_text(rest_text, 4, "semibold")[0]
+            self._text_theme(rest_text, max(panel_x + 20, (width - text_w) // 2), notes_y + 76, color, 4, "semibold")
+        else:
+            visible = notes[:8]
+            gap = 10
+            inner_x = panel_x + 20
+            inner_w = panel_w - 40
+            tile_w = min(116, max(64, (inner_w - gap * (len(visible) - 1)) // len(visible)))
+            total_w = tile_w * len(visible) + gap * (len(visible) - 1)
+            start_x = max(inner_x, panel_x + (panel_w - total_w) // 2)
+            tile_y = notes_y + 46
+            tile_h = 104
+            for index, note in enumerate(visible):
+                x = start_x + index * (tile_w + gap)
+                self._rounded_theme(x, tile_y, tile_w, tile_h, 10, "panel_alt", True)
+                self._rounded_theme(x, tile_y, tile_w, tile_h, 10, "line" if current_is_rest else "accent_soft", False)
+                label = midi_note_label(note["pitch"])
+                label_w = self._measure_text(label, 3, "semibold")[0]
+                self._text_theme(
+                    label,
+                    x + max(6, (tile_w - label_w) // 2),
+                    tile_y + 14,
+                    "muted" if current_is_rest else "text",
+                    3,
+                    "semibold",
+                )
+                velocity_w = max(2, int(round((tile_w - 20) * note["velocity"] / 127)))
+                self._fill_theme(x + 10, tile_y + 62, tile_w - 20, 8, "line")
+                self._fill_theme(x + 10, tile_y + 62, velocity_w, 8, "accent_soft" if current_is_rest else "accent")
+                detail = f"v{note['velocity']}  d{note['duration']}"
+                detail_w = self._measure_text(detail, 1, "medium")[0]
+                self._text_theme(detail, x + max(4, (tile_w - detail_w) // 2), tile_y + 78, "muted", 1, "medium")
+            if len(notes) > len(visible):
+                self._text_theme(f"+{len(notes) - len(visible)}", panel_x + panel_w - 46, notes_y + 18, "accent", 2, "semibold")
+
+        self._rounded_theme(panel_x, ribbon_y, panel_w, ribbon_h, 14, "panel", True)
+        self._rounded_theme(panel_x, ribbon_y, panel_w, ribbon_h, 14, "line", False)
+        self._text_theme("RECENT EVENTS", panel_x + 18, ribbon_y + 12, "muted", 1, "medium")
+        history = state.surface_state.get("playback_events", [])
+        history = history[-13:] if isinstance(history, list) else []
+        cell_gap = 8
+        cell_w = 44
+        history_w = len(history) * cell_w + max(0, len(history) - 1) * cell_gap
+        history_x = panel_x + panel_w - 18 - history_w
+        for index, event in enumerate(history):
+            x = history_x + index * (cell_w + cell_gap)
+            count = max(0, int(event.get("note_count", 0))) if isinstance(event, dict) else 0
+            bar_h = 8 if count == 0 else min(36, 8 + count * 6)
+            y = ribbon_y + ribbon_h - 14 - bar_h
+            self._rounded_theme(x, y, cell_w, bar_h, 5, "line" if count == 0 else "accent", count > 0)
+        if history:
+            marker_x = history_x + (len(history) - 1) * (cell_w + cell_gap) + cell_w // 2
+            self._fill_theme(marker_x - 2, ribbon_y + 8, 4, ribbon_h - 16, "text")
+
+        self._rounded_theme(panel_x, status_y, panel_w, status_h, 14, "panel", True)
+        self._rounded_theme(panel_x, status_y, panel_w, status_h, 14, "line", False)
+        lifecycle_color = "danger" if lifecycle == "REJECTED" else "accent" if lifecycle in {"READY", "ACTIVE"} else "warning"
+        self._text_theme(lifecycle, panel_x + 20, status_y + 17, lifecycle_color, 2, "semibold")
+        if midi is None:
+            midi_text = "LAST MIDI  -"
+        else:
+            duration_ms = int(round(midi["duration_ms"]))
+            midi_text = f"LAST MIDI  {midi_note_label(midi['pitch'])}  v{midi['velocity']}  {duration_ms}ms"
+        midi_w = self._measure_text(midi_text, 2, "medium")[0]
+        self._text_theme(midi_text, panel_x + panel_w - 20 - midi_w, status_y + 17, "midi", 2, "medium")
 
     def draw_list_sequencer_surface(self, ui, state) -> None:
         self._draw_list_surface(

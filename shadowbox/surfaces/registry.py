@@ -7,6 +7,7 @@ from shadowbox.surfaces.base import InstanceSurfaceSpec, ResolvedSurface
 from shadowbox.surfaces.list_sequencer import resolve_list_sequencer_bindings
 from shadowbox.surfaces.list_vel_sequencer import resolve_list_vel_sequencer_bindings
 from shadowbox.surfaces.organ import resolve_organ_bindings
+from shadowbox.surfaces.shadowscore_client import resolve_shadowscore_client_bindings
 from shadowbox.surfaces.time_domain_scope import resolve_time_domain_scope_bindings
 from shadowbox.surfaces.tuner import resolve_tuner_bindings
 
@@ -40,6 +41,13 @@ SURFACE_SPECS = (
         "LIST VEL SEQUENCER",
         frozenset({"ListVelSequencer"}),
         resolve_list_vel_sequencer_bindings,
+        None,
+    ),
+    InstanceSurfaceSpec(
+        "shadowscore_client",
+        "SHADOWSCORE CLIENT",
+        frozenset({"ShadowScoreClient"}),
+        resolve_shadowscore_client_bindings,
         None,
     ),
 )

@@ -12,6 +12,8 @@ The instance-surfaces plan is implemented:
 - Contract-driven 16-stage Analog Sequencer surface
 - OSC-inport-driven ListSequencer surface with ACK readback
 - Eight-row ListVelSequencer surface with pitch-map context and ACK readback
+- Read-only ShadowScoreClient musical playback surface with current chord,
+  zero-based stage, recent-event history, lifecycle state, and last MIDI output
 - Removal of the obsolete Scope and Tuner parameter-editor dispatch routes
 - Automated registry, lifecycle, navigation, touch, rendering, and cadence
   coverage

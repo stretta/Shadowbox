@@ -44,6 +44,7 @@ from shadowbox.surfaces import resolve_instance_surface, surface_spec_for_key
 from shadowbox.surfaces.list_sequencer import FIELD_KEYS, SIGNED_FIELD_KEYS, format_list_value
 from shadowbox.surfaces.list_vel_sequencer import ROW_KEYS, toggled_mute_value
 from shadowbox.surfaces.organ import FOOTAGES
+from shadowbox.surfaces.shadowscore_client import parse_playback_debug
 from shadowbox.transpose_control import (
     ROLE_CHROMATIC,
     ROLE_LABELS,
@@ -867,6 +868,10 @@ class ShadowboxUI:
                     ack = active[1].state.get(f"{key}_ack")
                     if ack is not None and not (isinstance(dirty, dict) and dirty.get(key)):
                         drafts[key] = format_list_value(ack.get("value"))
+            elif self.state.active_surface_key == "shadowscore_client":
+                playback = active[1].state.get("playback_debug")
+                if playback is not None:
+                    self._record_shadowscore_playback_event(playback.get("value"))
         elif self.state.ui_mode == "EDIT" and self.selected_param:
             if current_param_path and self.selected_param.get("path") != current_param_path:
                 self.state.ui_mode = "PARAM_LIST"
@@ -924,6 +929,13 @@ class ShadowboxUI:
                                     if not (isinstance(dirty, dict) and dirty.get(key)):
                                         self._list_surface_drafts()[key] = format_list_value(value)
                                     break
+                    elif (
+                        self.state.active_surface_key == "shadowscore_client"
+                        and self.state.active_instance_id == instance_id
+                    ):
+                        active = self.active_instance_surface
+                        if active is not None and active[1].state.get("playback_debug") is item:
+                            self._record_shadowscore_playback_event(value)
                     if self.state.ui_mode in {"EDIT", "INSTANCE_SURFACE"} and self.state.active_instance_id == instance_id:
                         self.request_render("osc_state")
                     return True
@@ -2241,6 +2253,10 @@ class ShadowboxUI:
             self.state.surface_state.update({"drafts": drafts, "dirty": {}})
             for input_item in resolved.inputs.values():
                 self.queue_action(UIAction(kind="send_osc", path=input_item.get("path"), value=[-999]))
+        elif spec.key == "shadowscore_client":
+            playback = resolved.state.get("playback_debug")
+            self.state.surface_state.update({"playback_events": [], "rest_events": 0})
+            self._record_shadowscore_playback_event(playback.get("value") if playback else None)
         else:
             self.state.edit_value = None
         self.state.ui_mode = "INSTANCE_SURFACE"
@@ -2254,6 +2270,24 @@ class ShadowboxUI:
         self.state.surface_touch_capture = None
         self.state.edit_scope_samples = []
         self.state.edit_value = None
+
+    def _record_shadowscore_playback_event(self, value: Any) -> None:
+        event = parse_playback_debug(value)
+        if event is None:
+            return
+        history = self.state.surface_state.setdefault("playback_events", [])
+        if not isinstance(history, list):
+            history = []
+            self.state.surface_state["playback_events"] = history
+        if history and history[-1] == event:
+            return
+        history.append(event)
+        del history[:-17]
+        if event["note_count"] > 0:
+            self.state.surface_state["last_note_event"] = event
+            self.state.surface_state["rest_events"] = 0
+        else:
+            self.state.surface_state["rest_events"] = int(self.state.surface_state.get("rest_events", 0)) + 1
 
     @property
     def active_presets(self) -> list[dict]:

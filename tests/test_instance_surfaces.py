@@ -17,6 +17,12 @@ from shadowbox.surfaces import resolve_instance_surface
 from shadowbox.surfaces.list_sequencer import FIELD_KEYS
 from shadowbox.surfaces.list_vel_sequencer import ROW_KEYS
 from shadowbox.surfaces.organ import FOOTAGES
+from shadowbox.surfaces.shadowscore_client import (
+    ack_label,
+    midi_note_label,
+    parse_midi_debug,
+    parse_playback_debug,
+)
 from shadowbox.touch import TouchLayout
 from shadowbox.ui import ShadowboxUI, UIEvent
 
@@ -151,6 +157,21 @@ def _list_vel_sequencer_instance():
     }
 
 
+def _shadowscore_client_instance():
+    return {
+        "id": "7",
+        "name": "ShadowScoreClient",
+        "label": "PLAYER THREE",
+        "params": [],
+        "state": [
+            _state("current_stage", [384]),
+            _state("playback_debug", [30, 384, 3, 60, 4, 100, 63, 8, 84, 67, 2, 112]),
+            _state("midi_debug", [67, 112, 256.4102478027344]),
+            _state("shadowscore_ack", [90, 93, 42, 819, 384, 1]),
+        ],
+    }
+
+
 def _snapshot(instances):
     return SimpleNamespace(
         instances=instances,
@@ -231,6 +252,137 @@ class InstanceSurfaceTests(unittest.TestCase):
         self.assertEqual(resolved[1].params["anchor"]["name"], "Tuner")
         self.assertEqual(resolved[1].state["pitch"]["name"], "pitch_name")
         self.assertEqual(resolved[1].state["cents"]["name"], "pitch_cents")
+
+    def test_shadowscore_client_resolves_canonical_export_and_four_outports(self):
+        instance = _shadowscore_client_instance()
+        instance["label"] = "RENAMED PLAYER"
+
+        resolved = resolve_instance_surface(instance)
+
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved[0].key, "shadowscore_client")
+        self.assertEqual(tuple(resolved[1].state), (
+            "current_stage",
+            "playback_debug",
+            "midi_debug",
+            "shadowscore_ack",
+        ))
+
+    def test_shadowscore_client_rejects_missing_or_duplicate_required_outport(self):
+        missing = _shadowscore_client_instance()
+        missing["state"] = [item for item in missing["state"] if item["name"] != "midi_debug"]
+        duplicate = _shadowscore_client_instance()
+        duplicate["state"].append(dict(duplicate["state"][1], path="/rnbo/inst/7/state/playback_debug"))
+
+        self.assertIsNone(resolve_instance_surface(missing))
+        self.assertIsNone(resolve_instance_surface(duplicate))
+
+    def test_shadowscore_client_parses_chord_midi_ack_and_note_names(self):
+        chord = parse_playback_debug([30, 24, 2, 60, 4, 100, 63, 8, 84])
+
+        self.assertEqual(chord, {
+            "stage": 24,
+            "note_count": 2,
+            "notes": [
+                {"pitch": 60, "duration": 4, "velocity": 100},
+                {"pitch": 63, "duration": 8, "velocity": 84},
+            ],
+        })
+        self.assertEqual(
+            parse_midi_debug([79, 64, 256.4102478027344]),
+            {"pitch": 79, "velocity": 64, "duration_ms": 256.4102478027344},
+        )
+        self.assertEqual(ack_label([90, 92, 42, 819, 1]), "READY")
+        self.assertEqual(ack_label([90, 93, 42, 819, 24, 1]), "ACTIVE")
+        self.assertEqual(midi_note_label(60), "C4")
+        self.assertEqual(midi_note_label(63), "Eb4")
+
+    def test_shadowscore_client_rejects_malformed_playback_lists(self):
+        self.assertIsNone(parse_playback_debug([30, 4, 2, 60, 4, 100]))
+        self.assertIsNone(parse_playback_debug([30, -1, 0]))
+        self.assertIsNone(parse_playback_debug([31, 4, 0]))
+        self.assertIsNone(parse_midi_debug([60, 4]))
+
+    def test_shadowscore_client_surface_tracks_distinct_recent_playback_events(self):
+        ui = ShadowboxUI()
+        instance = _shadowscore_client_instance()
+        ui.apply_runner_snapshot(_snapshot([instance]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+
+        ui.handle_event(UIEvent("short_press"))
+
+        self.assertEqual(ui.state.active_surface_key, "shadowscore_client")
+        self.assertEqual([event["stage"] for event in ui.state.surface_state["playback_events"]], [384])
+        playback = next(item for item in instance["state"] if item["name"] == "playback_debug")
+        self.assertTrue(ui.apply_instance_state_update("7", playback["path"], [30, 385, 0]))
+        self.assertTrue(ui.apply_instance_state_update("7", playback["path"], [30, 385, 0]))
+        self.assertEqual([event["stage"] for event in ui.state.surface_state["playback_events"]], [384, 385])
+        self.assertEqual(ui.state.surface_state["last_note_event"]["stage"], 384)
+        self.assertEqual(ui.state.surface_state["rest_events"], 1)
+
+        for stage in range(386, 406):
+            ui.apply_instance_state_update("7", playback["path"], [30, stage, 0])
+        self.assertEqual(len(ui.state.surface_state["playback_events"]), 17)
+        self.assertEqual(ui.state.surface_state["playback_events"][-1]["stage"], 405)
+
+    def test_shadowscore_client_snapshot_refresh_records_new_playback_event(self):
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(_snapshot([_shadowscore_client_instance()]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        refreshed = _shadowscore_client_instance()
+        next(item for item in refreshed["state"] if item["name"] == "playback_debug")["value"] = [30, 385, 0]
+
+        ui.apply_runner_snapshot(_snapshot([refreshed]))
+
+        self.assertEqual([event["stage"] for event in ui.state.surface_state["playback_events"]], [384, 385])
+
+    def test_shadowscore_client_surface_renders_musical_state(self):
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(_snapshot([_shadowscore_client_instance()]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        display = _SurfaceDisplay()
+        renderer = ShadowboxRenderer(display)
+        renderer.set_touch_mode(True)
+
+        renderer.draw(ui)
+
+        text = [op[1] for op in display.ops if op[0] in {"text", "text_color"}]
+        self.assertIn("STAGE 384", text)
+        self.assertIn("C4", text)
+        self.assertIn("Eb4", text)
+        self.assertIn("G4", text)
+        self.assertIn("ACTIVE", text)
+        self.assertIn("LAST MIDI  G4  v112  256ms", text)
+        self.assertIn("RECENT EVENTS", text)
+
+    def test_shadowscore_client_rest_preserves_last_chord_without_claiming_it_is_current(self):
+        ui = ShadowboxUI()
+        instance = _shadowscore_client_instance()
+        ui.apply_runner_snapshot(_snapshot([instance]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        playback = next(item for item in instance["state"] if item["name"] == "playback_debug")
+        stage = next(item for item in instance["state"] if item["name"] == "current_stage")
+        ui.apply_instance_state_update("7", stage["path"], [385])
+        ui.apply_instance_state_update("7", playback["path"], [30, 385, 0])
+        display = _SurfaceDisplay()
+        renderer = ShadowboxRenderer(display)
+        renderer.set_touch_mode(True)
+
+        renderer.draw(ui)
+
+        text = [op[1] for op in display.ops if op[0] in {"text", "text_color"}]
+        self.assertIn("STAGE 385", text)
+        self.assertIn("REST 1  ·  LAST CHORD STAGE 384", text)
+        self.assertIn("C4", text)
+        self.assertIn("Eb4", text)
+        self.assertIn("G4", text)
 
     def test_current_wren_organ_db_contract_resolves_canonically(self):
         resolved = resolve_instance_surface(_live_organ_instance())

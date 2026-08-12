@@ -9,7 +9,7 @@ It provides:
 - Instance browsing
 - Instance lifecycle control
 - Parameter editing
-- Export-specific instance surfaces, including OSC-list editing for ListSequencer and ListVelSequencer
+- Export-specific instance surfaces, including OSC-list editing for ListSequencer and ListVelSequencer and a local ShadowScoreClient playback display
 - Preset loading
 - Audio and MIDI routing
 - Basic system management
@@ -18,7 +18,7 @@ It provides:
 - Display interface for SSD1306, SSD1309, generic ST7789, Waveshare 1.44-inch LCD HAT, Waveshare 2-inch ST7789V, and Waveshare 5-inch DSI hardware
 - Rotary encoder or Waveshare HAT navigation
 - Custom parameter editors for `step16` and TTID metadata
-- Contract-validated instance surfaces for Organ, AnalogSequencer, TimeDomainScope, Tuner, ListSequencer, and ListVelSequencer
+- Contract-validated instance surfaces for Organ, AnalogSequencer, TimeDomainScope, Tuner, ListSequencer, ListVelSequencer, and ShadowScoreClient
 - Optional USB numeric-keypad entry for list-sequencer fields and ordinary numeric parameters
 
 Shadowbox complements the RNBO Runner web interface by providing a minimal physical control surface.
