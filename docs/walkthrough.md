@@ -82,6 +82,7 @@ Current registered instance exports:
 - `Tuner`
 - `ListSequencer`
 - `ListVelSequencer`
+- `ShadowScoreClient`
 
 The current Organ export on `wren` publishes continuous `-96..0 dB` tonewheel
 controls. The Organ surface maps `-96 dB` to the top/off position and `0 dB`
@@ -252,6 +253,25 @@ entry. Digits begin a fresh draft, numpad `.` enters a decimal point, Backspace
 or numpad `+` deletes, numpad `-` toggles the sign when negative values are
 valid, and numpad `Enter` commits the range-clamped value. Encoder or touch
 adjustment cancels an unfinished keypad draft.
+
+5e. ShadowScoreClient instance-surface contract
+
+`ShadowScoreClient` provides a read-only, local-first playback display. The
+surface resolves only when the canonical export publishes exactly one of each
+required outport:
+
+- `current_stage`: current zero-based playback stage
+- `playback_debug`: complete chord witness
+- `midi_debug`: most recently emitted MIDI event
+- `shadowscore_ack`: transaction lifecycle readback
+
+The current chord receives visual priority. A rest retains the last useful
+non-rest chord in subdued styling, labels it as historical context, and keeps
+the live stage and transient recent-event ribbon advancing. The surface does
+not infer future events, require ShadowscoreServer, or treat a stale
+`midi_debug` value as currently sounding MIDI. See
+[shadowscore-client-display-plan.md](./shadowscore-client-display-plan.md) for
+the complete binding and display contract.
 
 6. System control workflows
 

@@ -447,6 +447,7 @@ Initial system areas:
 - standalone chromatic/scalar transpose coordination and designated MIDI controller selection
 - network status, WiFi network selection, and direct Ethernet rescue setup
 - persistent HDMI mirror enable/disable on the Waveshare 5-inch DSI build
+- persistent, opt-in touch feedback on the Waveshare 5-inch DSI build
 - software update status and a fast-forward update action for git checkouts
 - guarded full-system reboot, with Cancel selected by default
 - about screen
@@ -470,6 +471,7 @@ Rules:
 - Direct Ethernet setup must be tightly scoped: touch only the configured Ethernet interface and only the configured fallback subnet
 - A rejected secured-WiFi connection must return to password entry for the same network; retrying must update a profile created by the failed attempt instead of reusing its stale secret
 - `HDMI` must appear only on the supported DSI build, change only the fixed mirror setting, and require a full reboot before the new setting takes effect
+- `TOUCH FEEDBACK` belongs to the DSI `HDMI` screen, defaults to Off, applies immediately without changing release-to-activate touch semantics, and renders only transient control depression and release bloom on the shared DSI/HDMI framebuffer
 - `REBOOT` must use a dedicated confirmation screen whose initial selection cancels the action
 - `UPDATE` may check the checkout's configured upstream branch and run only a fast-forward update path; dirty or diverged local checkouts must not be applied from the unit UI
 

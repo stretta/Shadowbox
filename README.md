@@ -32,7 +32,9 @@ Shadowbox complements the RNBO Runner web interface by providing a minimal physi
 - [docs/architecture.md](./docs/architecture.md): codebase and runtime structure
 - [docs/walkthrough.md](./docs/walkthrough.md): end-to-end RNBO-to-Shadowbox editor flow, including `step16`
 - [docs/wiring.md](./docs/wiring.md): encoder and display wiring reference
+- [docs/ensemble-transpose-controls-plan.md](./docs/ensemble-transpose-controls-plan.md): implemented standalone transpose contract and remaining managed-authority work
 - [docs/instance-surfaces-plan.md](./docs/instance-surfaces-plan.md): implemented instance-surface design and contract record
+- [docs/shadowscore-client-display-plan.md](./docs/shadowscore-client-display-plan.md): local ShadowScoreClient playback-display contract
 - [docs/ui-performance-plan.md](./docs/ui-performance-plan.md): implemented responsiveness architecture and remaining hardware validation checklist
 
 ---
@@ -325,7 +327,8 @@ After cloning, you typically have two options:
   continue with the virtual environment steps below.
 - For a normal device install that should set up dependencies, hardware
   interfaces, and the systemd service for you, skip ahead to step 11 and run
-  `./install.sh`.
+  `./install.sh --display DISPLAY_BACKEND` with the backend for the attached
+  display.
 
 ---
 
@@ -549,15 +552,16 @@ The current control input should update the display test UI.
 From the repository root:
 
 ```
-./install.sh
+./install.sh --display ssd1306
 ```
 
 Do not run the installer with `sudo`. Run it as your normal user from the
 repository root and let it prompt for `sudo` only when needed.
 
 The installer checks the display backend to decide whether I2C or SPI setup is
-needed. For TFT and DSI builds, pass the display backend so the installer can
-choose the right hardware setup and persist it for future boots:
+needed. Always pass the backend for the attached display so the installer can
+choose the right hardware setup and persist it for future boots. The example
+above is for the typical SSD1306 OLED build. For a raw ST7789 TFT build:
 
 ```
 ./install.sh --display st7789_raw
@@ -1101,7 +1105,9 @@ shadowbox/
 │   └── fonts/
 ├── docs/
 │   ├── architecture.md
+│   ├── ensemble-transpose-controls-plan.md
 │   ├── instance-surfaces-plan.md
+│   ├── shadowscore-client-display-plan.md
 │   ├── ui-performance-plan.md
 │   ├── uispec.md
 │   ├── walkthrough.md

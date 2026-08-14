@@ -282,6 +282,22 @@ def _list_vel_sequencer_ui() -> ShadowboxUI:
     return _surface_ui(instance, focus=3)
 
 
+def _shadowscore_client_ui() -> ShadowboxUI:
+    instance = {
+        "id": "7",
+        "name": "ShadowScoreClient",
+        "label": "Player Three",
+        "params": [],
+        "state": [
+            _state("current_stage", [384]),
+            _state("playback_debug", [30, 384, 3, 60, 4, 100, 63, 8, 84, 67, 2, 112]),
+            _state("midi_debug", [67, 112, 256.4102478027344]),
+            _state("shadowscore_ack", [90, 93, 42, 819, 384, 1]),
+        ],
+    }
+    return _surface_ui(instance)
+
+
 SCREENSHOTS = (
     ScreenshotSpec("ttid", "TTID", "parameter editor", "Pitch-class set keyboard and scale controls.", _ttid_ui),
     ScreenshotSpec("step16", "Step 16", "parameter editor", "Sixteen-step trigger-pattern editor.", _step16_ui),
@@ -291,6 +307,7 @@ SCREENSHOTS = (
     ScreenshotSpec("tuner", "Tuner", "instance surface", "Pitch and cents display.", _tuner_ui),
     ScreenshotSpec("list-sequencer", "List Sequencer", "instance surface", "Seven list fields with direct-entry keypad.", _list_sequencer_ui),
     ScreenshotSpec("list-vel-sequencer", "List Velocity Sequencer", "instance surface", "Eight velocity rows with pitch context.", _list_vel_sequencer_ui),
+    ScreenshotSpec("shadowscore-client", "ShadowScore Client", "instance surface", "Local playback chord, stage, history, and lifecycle display.", _shadowscore_client_ui),
 )
 
 

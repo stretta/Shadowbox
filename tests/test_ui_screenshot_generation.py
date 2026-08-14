@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from shadowbox.surfaces.registry import SURFACE_SPECS
+
 
 MODULE_PATH = Path(__file__).resolve().parent.parent / "tools" / "generate_ui_screenshots.py"
 
@@ -23,9 +25,19 @@ class UIScreenshotGenerationTests(unittest.TestCase):
 
             manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
             expected = {entry["file"] for entry in manifest["screenshots"]}
+            expected_surfaces = {
+                f"{spec.key.replace('_', '-')}.png"
+                for spec in SURFACE_SPECS
+            }
+            documented_surfaces = {
+                entry["file"]
+                for entry in manifest["screenshots"]
+                if entry["category"] == "instance surface"
+            }
             pngs = sorted(output.glob("*.png"))
 
             self.assertEqual({path.name for path in pngs}, expected)
+            self.assertEqual(documented_surfaces, expected_surfaces)
             for path in pngs:
                 data = path.read_bytes()
                 self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")

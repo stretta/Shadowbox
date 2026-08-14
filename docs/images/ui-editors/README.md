@@ -30,5 +30,6 @@ including Pillow. Use `--output PATH` to write a copy somewhere else.
 | Tuner | [tuner.png](tuner.png) |
 | List Sequencer | [list-sequencer.png](list-sequencer.png) |
 | List Velocity Sequencer | [list-vel-sequencer.png](list-vel-sequencer.png) |
+| ShadowScore Client | [shadowscore-client.png](shadowscore-client.png) |
 
 `manifest.json` provides the same inventory in machine-readable form.

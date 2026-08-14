@@ -63,6 +63,14 @@
       "description": "Eight velocity rows with pitch context.",
       "width": 800,
       "height": 480
+    },
+    {
+      "file": "shadowscore-client.png",
+      "title": "ShadowScore Client",
+      "category": "instance surface",
+      "description": "Local playback chord, stage, history, and lifecycle display.",
+      "width": 800,
+      "height": 480
     }
   ]
 }
