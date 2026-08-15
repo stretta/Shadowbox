@@ -23,6 +23,7 @@ from shadowbox.software_update import (
     start_shadowscore_update_install,
     start_software_update_install,
 )
+from shadowbox.shadowscore_transport import notify_shadowscore_transport_async
 from shadowbox.ui import ShadowboxUI
 from shadowbox.renderer import create_renderer, should_enable_touch_layout
 from shadowbox.performance import PerformanceProbe, Timer
@@ -1167,6 +1168,7 @@ def main():
                 elif action.kind == "set_transport":
                     if action.path is not None:
                         rnbo.send_value(action.path, action.value)
+                        notify_shadowscore_transport_async(bool(action.value))
                         discovery.request("runner", "transport", delay=0.15)
 
                 elif action.kind == "set_transpose":

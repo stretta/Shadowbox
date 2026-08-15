@@ -134,7 +134,12 @@ standalone offsets are saved in `~/rnbo-ui/shadowbox_state.json`.
 transport state and BPM controls. The state row starts or stops musical time
 through `/rnbo/jack/transport/rolling`; the tempo row edits
 `/rnbo/jack/transport/bpm`. These controls do not stop or restart JACK and do
-not add ShadowScore-style player or arrangement state. On the touch home
+not rewrite ShadowScore player payloads. Every local Play/Stop surface also
+sends a non-blocking transport intent to the current ShadowScore coordinator,
+allowing its arrangement to follow the hardware action immediately. The local
+Runner write remains independent if ShadowScore is unavailable; its live stage
+readback provides execution verification and lost-message recovery rather than
+being the normal handoff trigger. On the touch home
 screen, the transport card also shows the current BPM; tapping that BPM opens
 the same tempo editor and returns to the home screen when editing ends.
 
