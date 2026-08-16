@@ -44,7 +44,7 @@ from shadowbox.surfaces import resolve_instance_surface, surface_spec_for_key
 from shadowbox.surfaces.list_sequencer import FIELD_KEYS, SIGNED_FIELD_KEYS, format_list_value
 from shadowbox.surfaces.list_vel_sequencer import ROW_KEYS, toggled_mute_value
 from shadowbox.surfaces.organ import FOOTAGES
-from shadowbox.surfaces.shadowscore_client import parse_playback_debug
+from shadowbox.surfaces.shadowscore_client import parse_playback_debug, parse_shadowscore_ack
 from shadowbox.transpose_control import (
     ROLE_CHROMATIC,
     ROLE_LABELS,
@@ -891,6 +891,9 @@ class ShadowboxUI:
                 playback = active[1].state.get("playback_debug")
                 if playback is not None:
                     self._record_shadowscore_playback_event(playback.get("value"))
+                ack = active[1].state.get("shadowscore_ack")
+                if ack is not None:
+                    self._record_shadowscore_ack(ack.get("value"))
         elif self.state.ui_mode == "EDIT" and self.selected_param:
             if current_param_path and self.selected_param.get("path") != current_param_path:
                 self.state.ui_mode = "PARAM_LIST"
@@ -958,6 +961,8 @@ class ShadowboxUI:
                         active = self.active_instance_surface
                         if active is not None and active[1].state.get("playback_debug") is item:
                             self._record_shadowscore_playback_event(value)
+                        elif active is not None and active[1].state.get("shadowscore_ack") is item:
+                            self._record_shadowscore_ack(value)
                     if self.state.ui_mode in {"EDIT", "INSTANCE_SURFACE"} and self.state.active_instance_id == instance_id:
                         self.request_render("osc_state")
                     return True
@@ -2294,6 +2299,8 @@ class ShadowboxUI:
             playback = resolved.state.get("playback_debug")
             self.state.surface_state.update({"playback_events": [], "rest_events": 0})
             self._record_shadowscore_playback_event(playback.get("value") if playback else None)
+            ack = resolved.state.get("shadowscore_ack")
+            self._record_shadowscore_ack(ack.get("value") if ack else None)
         else:
             self.state.edit_value = None
         self.state.ui_mode = "INSTANCE_SURFACE"
@@ -2325,6 +2332,19 @@ class ShadowboxUI:
             self.state.surface_state["rest_events"] = 0
         else:
             self.state.surface_state["rest_events"] = int(self.state.surface_state.get("rest_events", 0)) + 1
+
+    def _record_shadowscore_ack(self, value: Any) -> None:
+        status = parse_shadowscore_ack(value)
+        if status is None:
+            return
+        previous = self.state.surface_state.get("transfer_status")
+        if (
+            status.get("expected") is None
+            and isinstance(previous, dict)
+            and previous.get("transaction_id") == status.get("transaction_id")
+        ):
+            status["expected"] = previous.get("expected")
+        self.state.surface_state["transfer_status"] = status
 
     @property
     def active_presets(self) -> list[dict]:

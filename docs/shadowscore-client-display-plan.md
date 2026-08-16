@@ -74,3 +74,26 @@ section progress, and pending replacement state. A trustworthy long-running
 event history should come from a sequenced collector rather than reconstructing
 chronology from polled OSCQuery snapshots. Those additions are intentionally
 outside the local-first display contract.
+
+## Transfer feedback checkpoint
+
+The local-first surface now expands `shadowscore_ack` into structured transfer
+feedback while the surface is open. It remains event-driven and does not depend
+on ShadowscoreServer availability.
+
+- `BEGIN_REPLACE` records the transaction id and expected row count.
+- Subsequent `NOTE` acknowledgements retain that total and display live
+  `RECEIVING current/expected` progress.
+- Rejections display the protocol reason (`NOTE COUNT`, `ROW ORDER`, `ROW
+  RANGE`, `STALE TRANSACTION`, `PROTOCOL`, or `CHECKSUM`) and the retained row
+  count.
+- Current and legacy compact READY shapes both render as READY rather than
+  falling back to WAITING.
+- The 800x480 status panel shows the transaction id beneath the lifecycle line;
+  compact displays receive a shortened lifecycle/progress line.
+- READY and ACTIVE remain separate states. Receiving or rejected data is never
+  presented as playable.
+
+Server-level retry attempt numbers and coordinator decisions remain a possible
+later enrichment. The local RNBO acknowledgement stays the authoritative
+client-side witness.

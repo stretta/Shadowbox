@@ -22,6 +22,8 @@ from shadowbox.surfaces.shadowscore_client import (
     midi_note_label,
     parse_midi_debug,
     parse_playback_debug,
+    parse_shadowscore_ack,
+    transfer_status_label,
 )
 from shadowbox.touch import TouchLayout
 from shadowbox.ui import ShadowboxUI, UIEvent
@@ -294,6 +296,19 @@ class InstanceSurfaceTests(unittest.TestCase):
         )
         self.assertEqual(ack_label([90, 92, 42, 819, 1]), "READY")
         self.assertEqual(ack_label([90, 93, 42, 819, 24, 1]), "ACTIVE")
+        self.assertEqual(parse_shadowscore_ack([90, 1, 43, 60, 1617, 4]), {
+            "opcode": 1,
+            "transaction_id": 43,
+            "phase": "receiving",
+            "received": 0,
+            "expected": 60,
+            "pattern_length": 1617,
+            "stages_per_beat": 4,
+        })
+        self.assertEqual(
+            transfer_status_label(parse_shadowscore_ack([90, 91, 43, 5, 10, 0])),
+            "REJECTED ROW ORDER 10",
+        )
         self.assertEqual(midi_note_label(60), "C4")
         self.assertEqual(midi_note_label(63), "Eb4")
 
@@ -338,6 +353,28 @@ class InstanceSurfaceTests(unittest.TestCase):
         ui.apply_runner_snapshot(_snapshot([refreshed]))
 
         self.assertEqual([event["stage"] for event in ui.state.surface_state["playback_events"]], [384, 385])
+
+    def test_shadowscore_client_surface_tracks_transaction_progress(self):
+        ui = ShadowboxUI()
+        instance = _shadowscore_client_instance()
+        ui.apply_runner_snapshot(_snapshot([instance]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        ack = next(item for item in instance["state"] if item["name"] == "shadowscore_ack")
+
+        self.assertTrue(ui.apply_instance_state_update("7", ack["path"], [90, 1, 43, 60, 1617, 4]))
+        self.assertTrue(ui.apply_instance_state_update("7", ack["path"], [90, 20, 43, 9, 10, 1]))
+
+        self.assertEqual(ui.state.surface_state["transfer_status"]["received"], 10)
+        self.assertEqual(ui.state.surface_state["transfer_status"]["expected"], 60)
+        display = _SurfaceDisplay()
+        renderer = ShadowboxRenderer(display)
+        renderer.set_touch_mode(True)
+        renderer.draw(ui)
+        text = [op[1] for op in display.ops if op[0] in {"text", "text_color"}]
+        self.assertIn("RECEIVING 10/60", text)
+        self.assertIn("TXN 43", text)
 
     def test_shadowscore_client_surface_renders_musical_state(self):
         ui = ShadowboxUI()

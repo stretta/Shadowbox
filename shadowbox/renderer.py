@@ -19,11 +19,12 @@ from shadowbox.surfaces.list_sequencer import FIELD_KEYS, FIELD_LABELS, FIELD_SH
 from shadowbox.surfaces.list_vel_sequencer import ROW_KEYS, ROW_LABELS, mute_is_on
 from shadowbox.surfaces.organ import FOOTAGE_COLORS, FOOTAGES
 from shadowbox.surfaces.shadowscore_client import (
-    ack_label,
     midi_note_label,
     parse_current_stage,
     parse_midi_debug,
     parse_playback_debug,
+    parse_shadowscore_ack,
+    transfer_status_label,
 )
 from shadowbox.touch import TouchLayout, TouchSample
 from shadowbox.ui import (
@@ -3584,14 +3585,17 @@ class ShadowboxRenderer:
         stage = parse_current_stage(stage_item.get("value") if stage_item else None)
         playback = parse_playback_debug(playback_item.get("value") if playback_item else None)
         midi = parse_midi_debug(midi_item.get("value") if midi_item else None)
-        lifecycle = ack_label(ack_item.get("value") if ack_item else None)
+        transfer_status = state.surface_state.get("transfer_status")
+        if not isinstance(transfer_status, dict):
+            transfer_status = parse_shadowscore_ack(ack_item.get("value") if ack_item else None)
+        lifecycle = transfer_status_label(transfer_status)
 
         if not self.is_five_inch_touch:
             notes = playback.get("notes", []) if playback else []
             chord = " ".join(midi_note_label(note["pitch"]) for note in notes) or "REST"
             self.text_center(shorten(chord, self.text_cols), self.edit_content_top(28))
             self.text_center(f"STAGE {stage if stage is not None else '-'}", self.edit_content_top(28) + 12)
-            self.text_center(lifecycle, self.edit_content_top(28) + 24)
+            self.text_center(shorten(lifecycle, self.text_cols), self.edit_content_top(28) + 24)
             return
 
         width = self.display.width
@@ -3687,8 +3691,11 @@ class ShadowboxRenderer:
 
         self._rounded_theme(panel_x, status_y, panel_w, status_h, 14, "panel", True)
         self._rounded_theme(panel_x, status_y, panel_w, status_h, 14, "line", False)
-        lifecycle_color = "danger" if lifecycle == "REJECTED" else "accent" if lifecycle in {"READY", "ACTIVE"} else "warning"
+        lifecycle_color = "danger" if lifecycle.startswith("REJECTED") else "accent" if lifecycle.startswith(("READY", "ACTIVE")) else "warning"
         self._text_theme(lifecycle, panel_x + 20, status_y + 17, lifecycle_color, 2, "semibold")
+        transaction_id = transfer_status.get("transaction_id") if isinstance(transfer_status, dict) else None
+        if transaction_id is not None:
+            self._text_theme(f"TXN {transaction_id}", panel_x + 20, status_y + 49, "muted", 1, "medium")
         if midi is None:
             midi_text = "LAST MIDI  -"
         else:
