@@ -442,7 +442,7 @@ Unlike instance browsing and editing, `SYSTEM` may include a tightly scoped set 
 Initial system areas:
 - status
 - audio device selection
-- global RNBO Runner transport start/stop and tempo when the Runner publishes both controls
+- acknowledged ShadowscoreServer transport with explicit local RNBO Runner fallback
 - set startup configuration when Runner publishes startup load/save controls
 - standalone chromatic/scalar transpose coordination and designated MIDI controller selection
 - network status, WiFi network selection, and direct Ethernet rescue setup
@@ -454,14 +454,15 @@ Initial system areas:
 - maintenance actions
 
 Rules:
-- The home screen presents `SETS`, `INSTANCES`, `SYSTEM`, and a state-aware global transport action card; the last card reads `PLAY` when stopped and `STOP` when running
-- When global transport is available, the touch home card shows the current BPM in a separate target; selecting it opens the shared tempo editor and returns to the home screen on exit
+- The home screen presents `SETS`, `INSTANCES`, `SYSTEM`, and a state-aware global transport action card; the last card reads `PLAY` when stopped, `STOP` when running, or `STARTING` / `STOPPING` while a server command awaits acknowledgement
+- In server mode the touch home card shows BPM, active section, and concise sync health; in fallback mode it shows BPM and `LOCAL`. Selecting the context pill opens the shared tempo editor and returns to the home screen on exit
 - On the home screen only, numeric-keypad `Enter` explicitly starts transport and `0` explicitly stops it; these are not toggle commands
 - System must remain clearly separate from per-instance editing and routing
 - Per-instance structure, lifecycle, parameters, instance presets, and routing remain OSCQuery/published-command driven
 - Non-OSCQuery `SYSTEM` entries must be explicitly chosen product features, not a generic escape hatch for backend gaps
 - Host-derived `SYSTEM` data should stay read-only unless there is a deliberately integrated control path for that feature
-- `TRANSPORT` is a Runner-global control surface, not an instance parameter editor: it writes only the published `/rnbo/jack/transport/rolling` and `/rnbo/jack/transport/bpm` paths
+- `TRANSPORT` is a global control surface, not an instance parameter editor. It uses the canonical ShadowscoreServer object when connected and otherwise writes only the published Runner `/rnbo/jack/transport/rolling` and `/rnbo/jack/transport/bpm` paths
+- Server mode exposes active section, bars/beats/ticks position, sync health, Previous/Next Section, Return to Start, and capability-gated Re-sync; UI state follows acknowledged objects and rejects older revisions
 - `TRANSPORT` must not start/stop JACK, restart the audio engine, or recreate ShadowScore arrangement/player controls
 - `STARTUP` must invoke only the startup configuration controls published by Runner; Shadowbox must not maintain a competing startup-set preference
 - `TRANSPOSE` must begin unconfigured on installations without saved authority; only explicit `LOCAL` authority may retain and fan out canonical device-local offsets

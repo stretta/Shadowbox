@@ -412,8 +412,8 @@ class TouchDirectUITests(unittest.TestCase):
 
         renderer, display = _render_touch_layout(ui)
 
-        self.assertEqual(ui.home_transport_tempo_label, "90 BPM")
-        self.assertTrue(any(op[0] == "text" and op[1] == "90 BPM" for op in display.ops))
+        self.assertEqual(ui.home_transport_tempo_label, "90 BPM · LOCAL")
+        self.assertTrue(any(op[0] == "text" and op[1] == "90 BPM · LOCAL" for op in display.ops))
         self.assertEqual(
             _touch_action_for_target(renderer, kind="home_tempo", button_id="home_tempo"),
             TouchAction("tap_button", button_id="home_tempo"),

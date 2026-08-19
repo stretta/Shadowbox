@@ -172,6 +172,11 @@ class UIState:
     active_transport: str = "audio"
     active_routing_direction: str = "inputs"
     transport_tempo_return_mode: str = "SYSTEM_TRANSPORT"
+    shadowscore_transport: dict[str, Any] = field(default_factory=dict)
+    shadowscore_transport_connected: bool = False
+    shadowscore_transport_base_url: str = ""
+    shadowscore_transport_error: str = ""
+    shadowscore_transport_pending: str = ""
     patcher_picker_context: str = "add"
     pending_remove_instance_id: str = ""
     remove_instance_origin: str = ""
@@ -1094,7 +1099,12 @@ class ShadowboxUI:
     def home_transport_label(self) -> str:
         if not self.transport_available:
             return "TRANSPORT"
-        rolling = self.state.system.get("transport", {}).get("rolling")
+        pending = self.state.shadowscore_transport_pending
+        if pending == "play":
+            return "STARTING"
+        if pending == "stop":
+            return "STOPPING"
+        rolling = self.transport_rolling
         if rolling is True:
             return "STOP"
         if rolling is False:
@@ -1105,12 +1115,17 @@ class ShadowboxUI:
     def home_transport_tempo_label(self) -> str:
         if not self.transport_available:
             return ""
-        bpm = self.state.system.get("transport", {}).get("bpm")
+        bpm = self.transport_bpm
         if not isinstance(bpm, (int, float)) or isinstance(bpm, bool):
             return ""
         value = float(bpm)
         bpm_text = f"{value:.0f}" if value.is_integer() else f"{value:.1f}"
-        return f"{bpm_text} BPM"
+        if not self.server_transport_available:
+            return f"{bpm_text} BPM · LOCAL"
+        section = str(self.state.shadowscore_transport.get("active_section") or "-")
+        sync = self.state.shadowscore_transport.get("sync", {})
+        sync_state = str(sync.get("state") or "?").upper() if isinstance(sync, dict) else "?"
+        return f"{bpm_text} BPM · {section} · {sync_state}"
 
     @property
     def instance_menu_items(self) -> list[str]:
@@ -1197,19 +1212,61 @@ class ShadowboxUI:
 
     @property
     def transport_available(self) -> bool:
+        if self.server_transport_available:
+            return True
         transport = self.state.system.get("transport", {})
         return bool(transport.get("rolling_path") and transport.get("bpm_path"))
 
     @property
+    def server_transport_available(self) -> bool:
+        return self.state.shadowscore_transport_connected and bool(self.state.shadowscore_transport)
+
+    @property
+    def transport_rolling(self) -> bool | None:
+        if self.server_transport_available:
+            value = self.state.shadowscore_transport.get("is_playing")
+            return value if isinstance(value, bool) else None
+        return self.state.system.get("transport", {}).get("rolling")
+
+    @property
+    def transport_bpm(self) -> float | None:
+        if self.server_transport_available:
+            value = self.state.shadowscore_transport.get("tempo")
+        else:
+            value = self.state.system.get("transport", {}).get("bpm")
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+    @property
+    def transport_authority_label(self) -> str:
+        return "SHADOWSCORE" if self.server_transport_available else "LOCAL"
+
+    @property
     def transport_rows(self) -> list[ValueRow]:
-        transport = self.state.system.get("transport", {})
-        rolling = transport.get("rolling")
-        bpm = transport.get("bpm")
+        rolling = self.transport_rolling
+        bpm = self.transport_bpm
         bpm_text = f"{float(bpm):.1f} BPM" if isinstance(bpm, (int, float)) and not isinstance(bpm, bool) else "-"
-        return [
-            ValueRow("state", "RUNNING" if rolling is True else "STOPPED" if rolling is False else "UNKNOWN", current=rolling is True),
+        pending = self.state.shadowscore_transport_pending
+        state_text = "STARTING" if pending == "play" else "STOPPING" if pending == "stop" else "RUNNING" if rolling is True else "STOPPED" if rolling is False else "UNKNOWN"
+        rows = [
+            ValueRow("state", f"{state_text} · {self.transport_authority_label}", current=rolling is True),
             ValueRow("tempo", bpm_text),
         ]
+        if not self.server_transport_available:
+            return rows
+        transport = self.state.shadowscore_transport
+        sync = transport.get("sync", {}) if isinstance(transport.get("sync"), dict) else {}
+        rows.extend([
+            ValueRow("section", str(transport.get("active_section") or "-")),
+            ValueRow("position", str(transport.get("position_bbt") or "-")),
+            ValueRow("sync", str(sync.get("state") or "uncertain").upper()),
+            ValueRow("previous", "SECTION"),
+            ValueRow("next", "SECTION"),
+            ValueRow("return", "TO START"),
+        ])
+        capabilities = transport.get("capabilities", {}) if isinstance(transport.get("capabilities"), dict) else {}
+        if capabilities.get("can_re_sync") is True:
+            rows.append(ValueRow("re-sync", "RECOMMENDED" if sync.get("re_sync_recommended") else "AVAILABLE"))
+        return rows
 
     @property
     def transport_tempo_edit_param(self) -> dict:
@@ -1217,7 +1274,7 @@ class ShadowboxUI:
         return {
             "name": "Tempo",
             "path": transport.get("bpm_path", ""),
-            "value": transport.get("bpm"),
+            "value": self.transport_bpm,
             "min": 20.0,
             "max": 300.0,
             "metadata": {"display_precision": 1, "edit_step": 1.0},
@@ -1245,6 +1302,13 @@ class ShadowboxUI:
         return True
 
     def _set_transport_rolling(self, rolling: bool) -> bool:
+        if self.state.shadowscore_transport_pending:
+            return False
+        if self.server_transport_available:
+            operation = "play" if bool(rolling) else "stop"
+            if self.transport_rolling is bool(rolling):
+                return False
+            return self._queue_transport_command(operation)
         transport = self.state.system.get("transport", {})
         path = transport.get("rolling_path") if isinstance(transport, dict) else ""
         if not path:
@@ -1257,20 +1321,92 @@ class ShadowboxUI:
         self.request_render("transport")
         return True
 
+    def _queue_transport_command(self, operation: str, args: dict[str, Any] | None = None) -> bool:
+        if not self.server_transport_available or self.state.shadowscore_transport_pending:
+            return False
+        operation = str(operation)
+        self.state.shadowscore_transport_pending = operation
+        self.state.shadowscore_transport_error = ""
+        self.queue_action(UIAction(kind="transport_command", value={"operation": operation, "args": dict(args or {})}))
+        self.request_render("transport_command")
+        return True
+
+    def apply_shadowscore_transport_snapshot(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        base_url: str = "",
+        operation: str = "",
+    ) -> bool:
+        if not isinstance(snapshot, dict):
+            return False
+        current_revision = int(self.state.shadowscore_transport.get("revision", 0) or 0)
+        next_revision = int(snapshot.get("revision", 0) or 0)
+        if next_revision and current_revision and next_revision < current_revision:
+            return False
+        changed = self.state.shadowscore_transport != snapshot or not self.state.shadowscore_transport_connected
+        self.state.shadowscore_transport = dict(snapshot)
+        self.state.shadowscore_transport_connected = True
+        if base_url:
+            self.state.shadowscore_transport_base_url = str(base_url)
+        self.state.shadowscore_transport_error = ""
+        if operation and self.state.shadowscore_transport_pending == operation:
+            self.state.shadowscore_transport_pending = ""
+            changed = True
+        if self.state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT" and self.transport_bpm is not None:
+            self.state.edit_value = self.transport_bpm
+        if changed:
+            self.request_render("shadowscore_transport")
+        return changed
+
+    def apply_shadowscore_transport_connection(self, connected: bool, *, base_url: str = "", error: str = "") -> bool:
+        connected = bool(connected)
+        changed = self.state.shadowscore_transport_connected != connected
+        self.state.shadowscore_transport_connected = connected
+        if base_url:
+            self.state.shadowscore_transport_base_url = str(base_url)
+        if error:
+            self.state.shadowscore_transport_error = str(error)
+        if changed:
+            self.request_render("shadowscore_transport_connection")
+        return changed
+
+    def apply_shadowscore_transport_command_error(self, operation: str, error: str) -> None:
+        if self.state.shadowscore_transport_pending == str(operation):
+            self.state.shadowscore_transport_pending = ""
+        self.state.shadowscore_transport_error = str(error or "transport command failed")
+        self.set_status_message(self.state.shadowscore_transport_error, frames=90)
+        self.request_render("shadowscore_transport_error")
+
     def _begin_transport_tempo_edit(self) -> bool:
         transport = self.state.system.get("transport", {})
-        if not isinstance(transport, dict) or not transport.get("bpm_path"):
+        if not self.server_transport_available and (not isinstance(transport, dict) or not transport.get("bpm_path")):
             return False
         return_mode = self.state.ui_mode
         self.state.transport_tempo_return_mode = (
             return_mode if return_mode in {"TOP", "SYSTEM_TRANSPORT"} else "SYSTEM_TRANSPORT"
         )
-        bpm = transport.get("bpm")
+        bpm = self.transport_bpm
         self.state.edit_value = (
             float(bpm) if isinstance(bpm, (int, float)) and not isinstance(bpm, bool) else 120.0
         )
         self.state.edit_numeric_draft = ""
         self.state.ui_mode = "SYSTEM_TRANSPORT_TEMPO_EDIT"
+        return True
+
+    def _set_transport_tempo(self, value: float) -> bool:
+        value = float(value)
+        if self.state.shadowscore_transport_pending:
+            return False
+        if self.server_transport_available:
+            return self._queue_transport_command("set_tempo", {"bpm": value})
+        transport = self.state.system.get("transport", {})
+        path = transport.get("bpm_path") if isinstance(transport, dict) else ""
+        if not path:
+            return False
+        transport["bpm"] = value
+        self.queue_action(UIAction(kind="set_transport", path=path, value=value))
+        self.request_render("transport_tempo")
         return True
 
     def _exit_transport_tempo_edit(self) -> None:
@@ -3268,8 +3404,7 @@ class ShadowboxUI:
         elif self.state.ui_mode == "SYSTEM_TRANSPOSE_EDIT":
             self.set_transpose_value(self.state.transpose_edit_role, value, "Touchscreen")
         elif self.state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT":
-            self.state.system["transport"]["bpm"] = value
-            self.queue_action(UIAction(kind="set_transport", path=param.get("path"), value=value))
+            self._set_transport_tempo(value)
         elif not is_discrete_param(param):
             self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
         if not pressed:
@@ -4379,11 +4514,10 @@ class ShadowboxUI:
         elif self.state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT":
             current = self.state.edit_value
             if not isinstance(current, (int, float)) or isinstance(current, bool):
-                current = self.state.system.get("transport", {}).get("bpm", 120.0)
+                current = self.transport_bpm if self.transport_bpm is not None else 120.0
             value = quantize_edit_value(self.transport_tempo_edit_param, float(current) + step)
             self.state.edit_value = value
-            self.state.system["transport"]["bpm"] = value
-            self.queue_action(UIAction(kind="set_transport", path=self.transport_tempo_edit_param.get("path"), value=value))
+            self._set_transport_tempo(value)
         elif self.state.ui_mode == "SYSTEM_TRANSPOSE":
             self.state.transpose_cursor = self._cycle_one_based(self.state.transpose_cursor, len(self.transpose_rows), step)
         elif self.state.ui_mode == "SYSTEM_TRANSPOSE_CONTROLLER":
@@ -4903,11 +5037,20 @@ class ShadowboxUI:
                     self.state.ui_mode = choice
 
         elif self.state.ui_mode == "SYSTEM_TRANSPORT":
-            transport = self.state.system.get("transport", {})
-            if self.state.transport_cursor == 1 and transport.get("rolling_path"):
-                self._set_transport_rolling(not bool(transport.get("rolling")))
-            elif self.state.transport_cursor == 2 and transport.get("bpm_path"):
+            selected = self.transport_rows[self.state.transport_cursor - 1] if 0 < self.state.transport_cursor <= len(self.transport_rows) else None
+            label = selected.label if selected is not None else ""
+            if label == "state":
+                self._set_transport_rolling(not bool(self.transport_rolling))
+            elif label == "tempo":
                 self._begin_transport_tempo_edit()
+            elif label == "previous":
+                self._queue_transport_command("previous_section")
+            elif label == "next":
+                self._queue_transport_command("next_section")
+            elif label == "return":
+                self._queue_transport_command("return_to_start")
+            elif label == "re-sync":
+                self._queue_transport_command("re_sync")
 
         elif self.state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT":
             self._exit_transport_tempo_edit()

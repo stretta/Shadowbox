@@ -111,7 +111,8 @@ Design rules:
 - Standardized transpose coordination is system-scoped: exact-name `ChromaticTranspose` and `ScalarTranspose` targets may share a canonical value only under explicit standalone authority
 - Existing installations begin with transpose authority unconfigured; network presence or absence never implies an authority transition
 - A designated ALSA MIDI note controller is observed beside the performance path and never becomes an inline MIDI relay
-- Global transport is exposed only when Runner publishes both `/rnbo/jack/transport/rolling` and `/rnbo/jack/transport/bpm`; it controls musical transport without restarting JACK
+- A background ShadowScore transport observer consumes the canonical revisioned SSE object, while a separate command worker posts acknowledged operations without blocking input or rendering
+- Canonical server transport is preferred when connected; Runner `/rnbo/jack/transport/rolling` and `/rnbo/jack/transport/bpm` remain an explicitly labeled local fallback
 - `SYSTEM` may include a narrow, explicitly documented set of host-level status or maintenance features outside OSCQuery when they are not owned by an instance
 - Read-only live inventory screens should accept background refreshes; workflows with provisional input, destructive confirmation, or active assignments should defer refresh and catch up immediately after exit
 - Parameter editors remain selected from explicit parameter metadata; instance surfaces are selected only from the canonical export name plus successful runtime binding resolution

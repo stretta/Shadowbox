@@ -67,13 +67,20 @@ stage, and lifecycle state.
 - Malformed diagnostic lists render as unavailable instead of being partially
   interpreted.
 
-## Later phases
+## Server context
 
-Server-enriched context can add assigned player, current block or section,
-section progress, and pending replacement state. A trustworthy long-running
-event history should come from a sequenced collector rather than reconstructing
-chronology from polled OSCQuery snapshots. Those additions are intentionally
-outside the local-first display contract.
+The canonical transport client adds a restrained context line containing the
+server's acknowledged play/stop state, active section, and sync health. This
+does not turn the surface into an ensemble dashboard: the local chord, stage,
+MIDI, and transaction lifecycle remain primary, and the surface falls back to
+an explicit `LOCAL · SERVER DISCONNECTED` label.
+
+Assigned-player detail, section progress, pending replacement state, and a
+trustworthy long-running event history remain later work. Event history should
+come from a sequenced collector rather than reconstructing chronology from
+polled OSCQuery snapshots. See
+[shadowscore-transport-client-plan.md](./shadowscore-transport-client-plan.md)
+for transport authority and control behavior.
 
 ## Transfer feedback checkpoint
 

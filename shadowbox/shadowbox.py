@@ -24,6 +24,7 @@ from shadowbox.software_update import (
     start_software_update_install,
 )
 from shadowbox.shadowscore_transport import notify_shadowscore_transport_async
+from shadowbox.shadowscore_transport_client import ShadowScoreTransportCoordinator
 from shadowbox.ui import ShadowboxUI
 from shadowbox.renderer import create_renderer, should_enable_touch_layout
 from shadowbox.performance import PerformanceProbe, Timer
@@ -982,6 +983,8 @@ def main():
     discovery.start()
     network_operations = NetworkOperationCoordinator(rnbo, _run_direct_ethernet_helper, _run_wifi_network_helper)
     network_operations.start()
+    shadowscore_transport = ShadowScoreTransportCoordinator()
+    shadowscore_transport.start()
     previous_mode = ui.state.ui_mode
     lifecycle_context: dict[str, dict] = {}
     jack_restart_context: dict[str, object] = {}
@@ -1145,6 +1148,20 @@ def main():
                 ui.set_busy(False)
                 scheduler.request("network_operation")
 
+            for result in shadowscore_transport.drain():
+                if result.kind == "connection":
+                    ui.apply_shadowscore_transport_connection(True, base_url=result.base_url)
+                elif result.kind in {"snapshot", "command"} and result.snapshot is not None:
+                    ui.apply_shadowscore_transport_snapshot(
+                        result.snapshot,
+                        base_url=result.base_url,
+                        operation=result.operation,
+                    )
+                elif result.kind == "command_error":
+                    ui.apply_shadowscore_transport_command_error(result.operation, result.error)
+                elif result.kind == "disconnected":
+                    ui.apply_shadowscore_transport_connection(False, base_url=result.base_url, error=result.error)
+
             while True:
                 try:
                     ui.set_software_update_status(update_status_queue.get_nowait())
@@ -1168,8 +1185,16 @@ def main():
                 elif action.kind == "set_transport":
                     if action.path is not None:
                         rnbo.send_value(action.path, action.value)
-                        notify_shadowscore_transport_async(bool(action.value))
+                        if _transport_event_key(action.path, ui.state.system) == "rolling":
+                            notify_shadowscore_transport_async(bool(action.value))
                         discovery.request("runner", "transport", delay=0.15)
+
+                elif action.kind == "transport_command":
+                    command = action.value if isinstance(action.value, dict) else {}
+                    shadowscore_transport.request(
+                        str(command.get("operation", "")),
+                        command.get("args") if isinstance(command.get("args"), dict) else {},
+                    )
 
                 elif action.kind == "set_transpose":
                     if action.path is not None and ui.state.transpose_authority == "standalone":
@@ -1555,6 +1580,7 @@ def main():
     finally:
         discovery.stop()
         network_operations.stop()
+        shadowscore_transport.stop()
         transpose_midi.stop()
         try:
             rnbo.send_value("/rnbo/listeners/del", osc_listener.listener_spec)

@@ -3703,6 +3703,18 @@ class ShadowboxRenderer:
             midi_text = f"LAST MIDI  {midi_note_label(midi['pitch'])}  v{midi['velocity']}  {duration_ms}ms"
         midi_w = self._measure_text(midi_text, 2, "medium")[0]
         self._text_theme(midi_text, panel_x + panel_w - 20 - midi_w, status_y + 17, "midi", 2, "medium")
+        if ui.server_transport_available:
+            transport = state.shadowscore_transport
+            sync = transport.get("sync", {}) if isinstance(transport.get("sync"), dict) else {}
+            server_context = "SERVER {state} · {section} · {sync}".format(
+                state="PLAY" if transport.get("is_playing") is True else "STOP",
+                section=str(transport.get("active_section") or "-"),
+                sync=str(sync.get("state") or "?").upper(),
+            )
+        else:
+            server_context = "LOCAL · SERVER DISCONNECTED"
+        context_w = self._measure_text(server_context, 1, "medium")[0]
+        self._text_theme(server_context, panel_x + panel_w - 20 - context_w, status_y + 52, "muted", 1, "medium")
 
     def draw_list_sequencer_surface(self, ui, state) -> None:
         self._draw_list_surface(
@@ -5070,7 +5082,7 @@ class ShadowboxRenderer:
                 if self._touch_pressed(kind="card", index=idx) and not self.has_color:
                     self.display.rect(x + 2, start_y + 2, max(1, card_w - 4), max(1, card_h - 4), True, True)
             secondary_label = ""
-            if idx == 3 and str(label) in {"PLAY", "STOP"} and self._ui is not None:
+            if idx == 3 and str(label) in {"PLAY", "STOP", "STARTING", "STOPPING"} and self._ui is not None:
                 secondary_label = str(getattr(self._ui, "home_transport_tempo_label", "") or "")
             self._draw_tft_home_card(
                 x,

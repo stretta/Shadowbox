@@ -35,6 +35,7 @@ Shadowbox complements the RNBO Runner web interface by providing a minimal physi
 - [docs/ensemble-transpose-controls-plan.md](./docs/ensemble-transpose-controls-plan.md): implemented standalone transpose contract and remaining managed-authority work
 - [docs/instance-surfaces-plan.md](./docs/instance-surfaces-plan.md): implemented instance-surface design and contract record
 - [docs/shadowscore-client-display-plan.md](./docs/shadowscore-client-display-plan.md): local ShadowScoreClient playback-display contract
+- [docs/shadowscore-transport-client-plan.md](./docs/shadowscore-transport-client-plan.md): authoritative ShadowscoreServer transport-client contract and migration checkpoints
 - [docs/ui-performance-plan.md](./docs/ui-performance-plan.md): implemented responsiveness architecture and remaining hardware validation checklist
 
 ---
@@ -130,18 +131,22 @@ is a sidecar control input; ordinary performance MIDI is not relayed through
 Shadowbox and gains no additional processing latency. Controller identity and
 standalone offsets are saved in `~/rnbo-ui/shadowbox_state.json`.
 
-`SYSTEM -> TRANSPORT` appears when OSCQuery publishes both the global Runner
-transport state and BPM controls. The state row starts or stops musical time
-through `/rnbo/jack/transport/rolling`; the tempo row edits
-`/rnbo/jack/transport/bpm`. These controls do not stop or restart JACK and do
-not rewrite ShadowScore player payloads. Every local Play/Stop surface also
-sends a non-blocking transport intent to the current ShadowScore coordinator,
-allowing its arrangement to follow the hardware action immediately. The local
-Runner write remains independent if ShadowScore is unavailable; its live stage
-readback provides execution verification and lost-message recovery rather than
-being the normal handoff trigger. On the touch home
-screen, the transport card also shows the current BPM; tapping that BPM opens
-the same tempo editor and returns to the home screen when editing ends.
+`SYSTEM -> TRANSPORT` uses ShadowscoreServer's canonical transport object when
+it is reachable. Play, Stop, and Tempo are acknowledged server operations; the
+screen also exposes active section, bars/beats/ticks, sync health,
+Previous/Next Section, Return to Start, and capability-gated Re-sync. The home
+card shows pending `STARTING` / `STOPPING` state until the server acknowledges
+the operation, then follows the revisioned server object rather than assuming
+that a button press succeeded.
+
+When the canonical object is unavailable, Shadowbox retains the published
+Runner `/rnbo/jack/transport/rolling` and `/rnbo/jack/transport/bpm` controls
+and labels them `LOCAL`. A local Play/Stop also sends the legacy non-blocking
+hardware intent to a compatible ShadowScore coordinator. Shadowbox never sends
+that legacy intent in addition to a canonical command. Local stage and
+playback readback remain execution witnesses, not audible-output proof. On the
+touch home screen, tapping the BPM/context pill opens the same tempo editor and
+returns to the home screen when editing ends.
 
 Source-aware local OSC may address the Shadowbox listener on port 13333 at
 `/shadowbox/transpose/chromatic` or `/shadowbox/transpose/scalar`. The first
@@ -654,7 +659,7 @@ Display selection is controlled through environment variables. The service reads
 
 Common `/etc/default/shadowbox` settings:
 
-- General UI/runtime: `SHADOWBOX_POST_LOAD_VIEW`, `SHADOWBOX_TURBO_FPS`, `SHADOWBOX_BRICK_PANEL_FPS`, `SHADOWBOX_RENDER_SCHEDULER`, `SHADOWBOX_PERF_LOG`, `SHADOWBOX_AUDIO_DEVICE_PRIORITY`, `SHADOWBOX_UPDATE_CHECK_ON_STARTUP`
+- General UI/runtime: `SHADOWBOX_POST_LOAD_VIEW`, `SHADOWBOX_TURBO_FPS`, `SHADOWBOX_BRICK_PANEL_FPS`, `SHADOWBOX_RENDER_SCHEDULER`, `SHADOWBOX_PERF_LOG`, `SHADOWBOX_AUDIO_DEVICE_PRIORITY`, `SHADOWBOX_UPDATE_CHECK_ON_STARTUP`, `SHADOWBOX_SHADOWSCORE_URL`
 - Direct Ethernet rescue: `SHADOWBOX_DIRECT_ETHERNET_HELPER`, `SHADOWBOX_DIRECT_ETHERNET_IFACE`, `SHADOWBOX_DIRECT_ETHERNET_CIDR`
 - Idle/backlight: `SHADOWBOX_DIM_TIMEOUT`, `SHADOWBOX_SLEEP_TIMEOUT`, `SHADOWBOX_BRIGHTNESS_NORMAL`, `SHADOWBOX_BRIGHTNESS_DIM`
 - Encoder/buttons/touch/keypad: `SHADOWBOX_INPUT_KIND`, `SHADOWBOX_ENCODER_CLK`, `SHADOWBOX_ENCODER_DT`, `SHADOWBOX_ENCODER_SW`, `SHADOWBOX_BACK_BUTTON_PIN`, `SHADOWBOX_ENCODER_STEPS_PER_DETENT`, `SHADOWBOX_ENCODER_LONG_PRESS_SECONDS`, `SHADOWBOX_ENCODER_AB_GLITCH_US`, `SHADOWBOX_ENCODER_SW_GLITCH_US`, `SHADOWBOX_BACK_BUTTON_GLITCH_US`, `SHADOWBOX_ENCODER_ACCEL_FAST_SECONDS`, `SHADOWBOX_ENCODER_ACCEL_FAST_MULTIPLIER`, `SHADOWBOX_ENCODER_ACCEL_TURBO_SECONDS`, `SHADOWBOX_ENCODER_ACCEL_TURBO_MULTIPLIER`, `SHADOWBOX_HAT_JOY_UP`, `SHADOWBOX_HAT_JOY_DOWN`, `SHADOWBOX_HAT_JOY_LEFT`, `SHADOWBOX_HAT_JOY_RIGHT`, `SHADOWBOX_HAT_JOY_PRESS`, `SHADOWBOX_HAT_KEY1`, `SHADOWBOX_HAT_KEY2`, `SHADOWBOX_HAT_KEY3`, `SHADOWBOX_HAT_KEY1_ACTION`, `SHADOWBOX_HAT_KEY2_ACTION`, `SHADOWBOX_HAT_KEY3_ACTION`, `SHADOWBOX_TOUCH_DEVICE`, `SHADOWBOX_TOUCH_WIDTH`, `SHADOWBOX_TOUCH_HEIGHT`, `SHADOWBOX_KEYPAD_DEVICE`, `SHADOWBOX_KEYPAD_EXCLUSIVE`
@@ -671,7 +676,7 @@ Notes:
 - `SHADOWBOX_INPUT_KIND=touch_direct` enables the first-pass direct-touch action model for the 5-inch prototype. It emits semantic actions (`tap_row`, `tap_back`, `tap_button`, `page_up`, `page_down`) and enables the touch layout/hit-target renderer. `waveshare_5inch_dsi` defaults to this input mode unless `SHADOWBOX_INPUT_KIND` is set explicitly.
 - On navigable direct-touch screens below the home screen, the header provides Back on the left and Home on the right. Home immediately clears the nested navigation context and returns to the top-level cards.
 - `SHADOWBOX_KEYPAD_DEVICE` enables an auxiliary USB numeric keypad alongside the primary input. Use a stable `/dev/input/by-id/...-event-kbd` path or `auto`. Exclusive capture is enabled by default so keypad input does not reach the Linux console; set `SHADOWBOX_KEYPAD_EXCLUSIVE=0` only for diagnostics.
-- On the home screen, keypad `Enter` starts the global Runner transport and `0` stops it when transport controls are available. The fourth home card provides the same state-aware `PLAY` / `STOP` action by touch or encoder, and its BPM label opens the tempo editor directly on touch displays.
+- On the home screen, keypad `Enter` requests Play and `0` requests Stop when transport controls are available. The fourth home card provides the same state-aware action by touch or encoder. Server mode waits for acknowledgement and shows BPM, section, and sync context; fallback mode is explicitly labeled `LOCAL`.
 - On the ListSequencer and ListVelSequencer surfaces, keypad digits enter numbers, `+` enters a space, `.` deletes, `Enter` sends, `/` / `*` select the previous / next field, and `Tab` cycles to the next field. ListSequencer also uses `-` to toggle the current sign where supported.
 - In a regular numeric parameter editor, keypad digits start a typed value, `.` enters a decimal point, `+` or Backspace deletes, `-` toggles the sign when the parameter range permits negative values, and `Enter` commits the range-clamped value. Keypad input is ignored by non-numeric editors and other Shadowbox screens.
 - `SHADOWBOX_BRICK_PANEL_FPS` is a legacy fallback for `SHADOWBOX_TURBO_FPS`.

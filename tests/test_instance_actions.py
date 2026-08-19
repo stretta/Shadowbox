@@ -2032,12 +2032,12 @@ class InstanceActionTests(unittest.TestCase):
         ui.handle_event(type("Evt", (), {"kind": "short_press"})())
 
         self.assertEqual(ui.state.ui_mode, "SYSTEM_TRANSPORT")
-        self.assertEqual([(row.label, row.value) for row in ui.transport_rows], [("state", "STOPPED"), ("tempo", "90.0 BPM")])
+        self.assertEqual([(row.label, row.value) for row in ui.transport_rows], [("state", "STOPPED · LOCAL"), ("tempo", "90.0 BPM")])
 
         ui.handle_event(type("Evt", (), {"kind": "short_press"})())
         actions = [action for action in ui.pop_actions() if action.kind == "set_transport"]
         self.assertEqual([(action.path, action.value) for action in actions], [("/rnbo/jack/transport/rolling", True)])
-        self.assertEqual(ui.transport_rows[0].value, "RUNNING")
+        self.assertEqual(ui.transport_rows[0].value, "RUNNING · LOCAL")
 
         ui.state.transport_cursor = 2
         ui.handle_event(type("Evt", (), {"kind": "short_press"})())
@@ -2048,6 +2048,66 @@ class InstanceActionTests(unittest.TestCase):
 
         ui.handle_event(type("Evt", (), {"kind": "long_press"})())
         self.assertEqual(ui.state.ui_mode, "SYSTEM_TRANSPORT")
+
+    def test_server_transport_is_acknowledged_and_exposes_arrangement_actions(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.system = {
+            "transport": {
+                "rolling_path": "/rnbo/jack/transport/rolling",
+                "rolling": False,
+                "bpm_path": "/rnbo/jack/transport/bpm",
+                "bpm": 90.0,
+            }
+        }
+        snapshot = {
+            "revision": 4,
+            "is_playing": False,
+            "tempo": 108.0,
+            "active_section": "B",
+            "position_bbt": "3.1.000",
+            "sync": {"state": "slipped", "re_sync_recommended": True},
+            "capabilities": {"can_re_sync": True},
+        }
+        self.assertTrue(ui.apply_shadowscore_transport_snapshot(snapshot, base_url="http://wren:8790"))
+        self.assertEqual(ui.top_level_items[-1], "PLAY")
+        self.assertEqual(ui.home_transport_tempo_label, "108 BPM · B · SLIPPED")
+        self.assertEqual(
+            [(row.label, row.value) for row in ui.transport_rows],
+            [
+                ("state", "STOPPED · SHADOWSCORE"),
+                ("tempo", "108.0 BPM"),
+                ("section", "B"),
+                ("position", "3.1.000"),
+                ("sync", "SLIPPED"),
+                ("previous", "SECTION"),
+                ("next", "SECTION"),
+                ("return", "TO START"),
+                ("re-sync", "RECOMMENDED"),
+            ],
+        )
+
+        ui.state.ui_mode = "TOP"
+        ui.state.top_index = 3
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+        actions = [action for action in ui.pop_actions() if action.kind == "transport_command"]
+        self.assertEqual(actions[0].value, {"operation": "play", "args": {}})
+        self.assertEqual(ui.home_transport_label, "STARTING")
+        self.assertFalse(ui.state.system["transport"]["rolling"])
+
+        acknowledged = dict(snapshot, revision=5, is_playing=True)
+        ui.apply_shadowscore_transport_snapshot(acknowledged, operation="play")
+        self.assertEqual(ui.home_transport_label, "STOP")
+        self.assertEqual(ui.state.shadowscore_transport_pending, "")
+
+    def test_server_transport_rejects_older_snapshots_and_reports_command_errors(self) -> None:
+        ui = ShadowboxUI()
+        self.assertTrue(ui.apply_shadowscore_transport_snapshot({"revision": 8, "is_playing": False, "tempo": 120}))
+        self.assertFalse(ui.apply_shadowscore_transport_snapshot({"revision": 7, "is_playing": True, "tempo": 90}))
+        self.assertFalse(ui.transport_rolling)
+        ui._queue_transport_command("play")
+        ui.apply_shadowscore_transport_command_error("play", "timed out; verifying state")
+        self.assertEqual(ui.state.shadowscore_transport_pending, "")
+        self.assertEqual(ui.state.shadowscore_transport_error, "timed out; verifying state")
 
     def test_home_transport_card_toggles_global_runner_state(self) -> None:
         ui = ShadowboxUI()
@@ -2132,7 +2192,7 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(renderer.last_header, "TRANSPORT")
         self.assertEqual(
             renderer.last_selectable_value_rows,
-            [("state", "RUNNING", True), ("tempo", "123.5 BPM", False)],
+            [("state", "RUNNING · LOCAL", True), ("tempo", "123.5 BPM", False)],
         )
 
     def test_designated_midi_note_sets_absolute_offset_and_source(self) -> None:

@@ -346,21 +346,32 @@ Authority, offsets, controller identity, controller function, and the last
 source label are persisted in `~/rnbo-ui/shadowbox_state.json` under
 `transpose_control`.
 
-6b. Global Runner transport
+6b. Global transport
 
-`SYSTEM -> TRANSPORT` appears only when OSCQuery publishes both global Runner
-controls:
+When ShadowscoreServer's canonical transport object is reachable,
+`SYSTEM -> TRANSPORT` follows its revisioned state and exposes:
+
+- acknowledged Play and Stop;
+- Tempo;
+- active Section and bars/beats/ticks Position;
+- Sync health;
+- Previous/Next Section, Return to Start, and Re-sync.
+
+`STARTING` and `STOPPING` identify a pending request; they do not claim that
+the ensemble has begun or stopped. The returned object and observer snapshots
+are authoritative.
+
+If the server is unavailable, the screen falls back to the two global Runner
+controls and labels the state `LOCAL`:
 
 - `/rnbo/jack/transport/rolling`
 - `/rnbo/jack/transport/bpm`
 
-Selecting `STATE` toggles the published rolling value. Selecting `TEMPO` opens
-an editor constrained to `20.0..300.0 BPM` with one-BPM encoder steps. These
-actions control musical transport only; they do not stop or restart JACK and
-do not introduce ShadowScore player or arrangement state. The touch home
-screen also displays the current BPM inside the `PLAY` / `STOP` card. Tapping
-the BPM opens the same tempo editor; confirming or backing out returns to the
-home screen rather than the System transport list.
+Selecting `STATE` toggles the active authority. Selecting `TEMPO` opens an
+editor constrained to `20.0..300.0 BPM` with one-BPM encoder steps. The touch
+home screen displays BPM plus section/sync context in server mode or `LOCAL` in
+fallback mode. Tapping that pill opens the same tempo editor; confirming or
+backing out returns to the home screen rather than the System transport list.
 
 6c. Network credential retry
 
