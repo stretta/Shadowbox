@@ -177,6 +177,7 @@ class UIState:
     shadowscore_transport_base_url: str = ""
     shadowscore_transport_error: str = ""
     shadowscore_transport_pending: str = ""
+    transport_locate_preview: float | None = None
     patcher_picker_context: str = "add"
     pending_remove_instance_id: str = ""
     remove_instance_origin: str = ""
@@ -577,12 +578,20 @@ class ValueRow:
 
 
 class ShadowboxUI:
-    def __init__(self, rnbo=None, *, hdmi_mirror_available: bool = False, hdmi_mirror_enabled: bool = False):
+    def __init__(
+        self,
+        rnbo=None,
+        *,
+        hdmi_mirror_available: bool = False,
+        hdmi_mirror_enabled: bool = False,
+        touch_locate_available: bool = False,
+    ):
         self.rnbo = rnbo
         self.render_revision = 0
         self.last_render_reason = "startup"
         self.state = UIState()
         self.hdmi_mirror_available = bool(hdmi_mirror_available)
+        self.touch_locate_available = bool(touch_locate_available)
         self._startup_hdmi_mirror_enabled = bool(hdmi_mirror_enabled)
         self.state.hdmi_mirror_enabled = bool(hdmi_mirror_enabled)
         self._actions: list[UIAction] = []
@@ -692,6 +701,7 @@ class ShadowboxUI:
         self.state.wifi_network_cursor = self.wifi_network_initial_cursor()
         self.state.system_audio_cursor = 1
         self.state.transport_cursor = 1
+        self.state.transport_locate_preview = None
         self.state.hdmi_mirror_cursor = 1
         self.state.reboot_confirm_cursor = 0
         self.state.transpose_cursor = 2
@@ -1255,9 +1265,12 @@ class ShadowboxUI:
             return rows
         transport = self.state.shadowscore_transport
         sync = transport.get("sync", {}) if isinstance(transport.get("sync"), dict) else {}
+        position_text = str(transport.get("position_bbt") or "-")
+        if pending == "locate_fraction" and self.state.transport_locate_preview is not None:
+            position_text = f"LOCATING {self.state.transport_locate_preview * 100:.0f}%"
         rows.extend([
             ValueRow("section", str(transport.get("active_section") or "-")),
-            ValueRow("position", str(transport.get("position_bbt") or "-")),
+            ValueRow("position", position_text),
             ValueRow("sync", str(sync.get("state") or "uncertain").upper()),
             ValueRow("previous", "SECTION"),
             ValueRow("next", "SECTION"),
@@ -1267,6 +1280,78 @@ class ShadowboxUI:
         if capabilities.get("can_re_sync") is True:
             rows.append(ValueRow("re-sync", "RECOMMENDED" if sync.get("re_sync_recommended") else "AVAILABLE"))
         return rows
+
+    @property
+    def transport_locate_fraction(self) -> float:
+        preview = self.state.transport_locate_preview
+        if isinstance(preview, (int, float)) and not isinstance(preview, bool):
+            return max(0.0, min(1.0, float(preview)))
+        value = self.state.shadowscore_transport.get("position_fraction", 0.0)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return max(0.0, min(1.0, float(value)))
+        return 0.0
+
+    @property
+    def transport_locate_position_label(self) -> str:
+        transport = self.state.shadowscore_transport
+        duration = transport.get("duration_beats")
+        numerator = transport.get("time_signature_numerator", 4)
+        if not isinstance(duration, (int, float)) or isinstance(duration, bool) or duration <= 0:
+            return f"{self.transport_locate_fraction * 100:.0f}%"
+        if not isinstance(numerator, (int, float)) or isinstance(numerator, bool) or numerator <= 0:
+            numerator = 4
+        beats = self.transport_locate_fraction * float(duration)
+        bar = int(beats // float(numerator)) + 1
+        beat_in_bar = beats % float(numerator)
+        beat = int(beat_in_bar) + 1
+        ticks = min(959, int(round((beat_in_bar - int(beat_in_bar)) * 960)))
+        return f"{bar}.{beat}.{ticks:03d}"
+
+    @property
+    def transport_locate_section_label(self) -> str:
+        transport = self.state.shadowscore_transport
+        duration = transport.get("duration_beats")
+        arrangement = transport.get("arrangement", {})
+        sections = arrangement.get("sections", []) if isinstance(arrangement, dict) else []
+        if isinstance(duration, (int, float)) and duration > 0 and isinstance(sections, list):
+            beat = self.transport_locate_fraction * float(duration)
+            for section in sections:
+                if not isinstance(section, dict):
+                    continue
+                start = section.get("start_beat")
+                end = section.get("end_beat")
+                if isinstance(start, (int, float)) and isinstance(end, (int, float)) and start <= beat < end:
+                    return str(section.get("id") or "-")
+            if sections and isinstance(sections[-1], dict):
+                return str(sections[-1].get("id") or "-")
+        return str(transport.get("active_section") or "-")
+
+    def _begin_transport_locate(self) -> bool:
+        capabilities = self.state.shadowscore_transport.get("capabilities", {})
+        if (
+            not self.touch_locate_available
+            or not self.server_transport_available
+            or not isinstance(capabilities, dict)
+            or capabilities.get("can_locate") is not True
+            or self.state.shadowscore_transport_pending
+        ):
+            return False
+        self.state.transport_locate_preview = self.transport_locate_fraction
+        self.state.ui_mode = "SYSTEM_TRANSPORT_LOCATE"
+        self.request_render("transport_locate")
+        return True
+
+    def _handle_transport_locate(self, normalized_value: float | None, *, pressed: bool = False) -> None:
+        if self.state.ui_mode != "SYSTEM_TRANSPORT_LOCATE" or normalized_value is None:
+            return
+        if self.state.shadowscore_transport_pending:
+            return
+        fraction = max(0.0, min(1.0, float(normalized_value)))
+        self.state.transport_locate_preview = fraction
+        self.state.activity_ticks += 1
+        self.request_render("transport_locate_preview")
+        if not pressed:
+            self._queue_transport_command("locate_fraction", {"fraction": fraction})
 
     @property
     def transport_tempo_edit_param(self) -> dict:
@@ -1353,6 +1438,15 @@ class ShadowboxUI:
         if operation and self.state.shadowscore_transport_pending == operation:
             self.state.shadowscore_transport_pending = ""
             changed = True
+            if operation == "locate_fraction":
+                value = snapshot.get("position_fraction")
+                self.state.transport_locate_preview = (
+                    max(0.0, min(1.0, float(value)))
+                    if isinstance(value, (int, float)) and not isinstance(value, bool)
+                    else None
+                )
+                if self.state.ui_mode == "SYSTEM_TRANSPORT_LOCATE":
+                    self.state.ui_mode = "SYSTEM_TRANSPORT"
         if self.state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT" and self.transport_bpm is not None:
             self.state.edit_value = self.transport_bpm
         if changed:
@@ -1375,6 +1469,8 @@ class ShadowboxUI:
         if self.state.shadowscore_transport_pending == str(operation):
             self.state.shadowscore_transport_pending = ""
         self.state.shadowscore_transport_error = str(error or "transport command failed")
+        if str(operation) == "locate_fraction":
+            self.state.transport_locate_preview = None
         self.set_status_message(self.state.shadowscore_transport_error, frames=90)
         self.request_render("shadowscore_transport_error")
 
@@ -3305,6 +3401,8 @@ class ShadowboxUI:
             self._handle_touch_page(1, event.page_size)
         elif event.kind == "set_edit_value":
             self._handle_touch_edit_value(event.value, pressed=bool(getattr(event, "pressed", False)))
+        elif event.kind == "set_transport_position":
+            self._handle_transport_locate(event.value, pressed=bool(getattr(event, "pressed", False)))
         elif event.kind == "set_surface_value":
             self._handle_surface_value(event.index, event.value, pressed=bool(getattr(event, "pressed", False)))
         elif event.kind == "set_surface_range":
@@ -5043,6 +5141,8 @@ class ShadowboxUI:
                 self._set_transport_rolling(not bool(self.transport_rolling))
             elif label == "tempo":
                 self._begin_transport_tempo_edit()
+            elif label == "position":
+                self._begin_transport_locate()
             elif label == "previous":
                 self._queue_transport_command("previous_section")
             elif label == "next":
@@ -5395,6 +5495,10 @@ class ShadowboxUI:
             self.state.ui_mode = "TOP"
         elif self.state.ui_mode == "REMOVE_INSTANCE_CONFIRM":
             self._cancel_remove_instance_confirm()
+        elif self.state.ui_mode == "SYSTEM_TRANSPORT_LOCATE":
+            if not self.state.shadowscore_transport_pending:
+                self.state.transport_locate_preview = None
+                self.state.ui_mode = "SYSTEM_TRANSPORT"
         elif self.state.ui_mode in ("STATUS", "NETWORK", "SOFTWARE_UPDATE", "ABOUT", "MAINT", "SYSTEM_TRANSPOSE", "SYSTEM_TRANSPORT", "SYSTEM_HDMI_MIRROR", "SYSTEM_REBOOT_CONFIRM"):
             self._about_press_count = 0
             self.state.ui_mode = "SYSTEM_MENU"

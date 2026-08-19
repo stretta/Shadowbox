@@ -81,6 +81,15 @@ class ShadowScoreTransportClientTests(unittest.TestCase):
             "PLAY FAILED · 2 CLIENTS NOT READY",
         )
 
+    def test_locate_failure_uses_short_front_panel_label(self) -> None:
+        self.assertEqual(
+            transport_error_message(
+                RuntimeError("did not reach ACTIVE on every required client"),
+                operation="locate_fraction",
+            ),
+            "LOCATE FAILED · CLIENTS NOT ACTIVE",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

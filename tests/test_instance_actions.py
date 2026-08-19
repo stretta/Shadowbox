@@ -15,7 +15,7 @@ sys.modules.setdefault("pythonosc.udp_client", udp_client_module)
 
 from shadowbox.renderer import ShadowboxRenderer
 from shadowbox.rnbo import RNBO_PORT, RNBOSnapshot
-from shadowbox.ui import MenuRow, ShadowboxUI
+from shadowbox.ui import MenuRow, ShadowboxUI, UIEvent
 from shadowbox.transpose_control import MidiInputPort, ROLE_CHROMATIC, ROLE_SCALAR
 
 
@@ -2108,6 +2108,74 @@ class InstanceActionTests(unittest.TestCase):
         ui.apply_shadowscore_transport_command_error("play", "timed out; verifying state")
         self.assertEqual(ui.state.shadowscore_transport_pending, "")
         self.assertEqual(ui.state.shadowscore_transport_error, "timed out; verifying state")
+
+    def test_touch_transport_locate_previews_until_release_and_waits_for_ack(self) -> None:
+        ui = ShadowboxUI(touch_locate_available=True)
+        snapshot = {
+            "revision": 10,
+            "is_playing": False,
+            "tempo": 120,
+            "position_fraction": 0.25,
+            "position_bbt": "3.1.000",
+            "duration_beats": 32,
+            "time_signature_numerator": 4,
+            "active_section": "B",
+            "arrangement": {
+                "sections": [
+                    {"id": "A", "start_beat": 0, "end_beat": 8},
+                    {"id": "B", "start_beat": 8, "end_beat": 16},
+                    {"id": "C", "start_beat": 16, "end_beat": 24},
+                    {"id": "D", "start_beat": 24, "end_beat": 32},
+                ]
+            },
+            "sync": {"state": "aligned"},
+            "capabilities": {"can_locate": True},
+        }
+        ui.apply_shadowscore_transport_snapshot(snapshot)
+        ui.state.ui_mode = "SYSTEM_TRANSPORT"
+        ui.state.transport_cursor = next(
+            index for index, row in enumerate(ui.transport_rows, start=1) if row.label == "position"
+        )
+
+        ui.handle_event(UIEvent(kind="short_press"))
+        self.assertEqual(ui.state.ui_mode, "SYSTEM_TRANSPORT_LOCATE")
+        self.assertEqual(ui.transport_locate_fraction, 0.25)
+
+        ui.handle_event(UIEvent(kind="set_transport_position", value=0.625, pressed=True))
+        self.assertEqual(ui.transport_locate_position_label, "6.1.000")
+        self.assertEqual(ui.transport_locate_section_label, "C")
+        self.assertEqual([a for a in ui.pop_actions() if a.kind == "transport_command"], [])
+
+        ui.handle_event(UIEvent(kind="set_transport_position", value=0.625, pressed=False))
+        actions = [a for a in ui.pop_actions() if a.kind == "transport_command"]
+        self.assertEqual(actions[0].value, {"operation": "locate_fraction", "args": {"fraction": 0.625}})
+        self.assertEqual(ui.state.shadowscore_transport_pending, "locate_fraction")
+        self.assertIn("LOCATING 62%", [row.value for row in ui.transport_rows if row.label == "position"])
+
+        acknowledged = dict(snapshot, revision=11, position_fraction=0.625, position_bbt="6.1.000", active_section="C")
+        ui.apply_shadowscore_transport_snapshot(acknowledged, operation="locate_fraction")
+        self.assertEqual(ui.state.ui_mode, "SYSTEM_TRANSPORT")
+        self.assertEqual(ui.state.shadowscore_transport_pending, "")
+
+    def test_touch_transport_locate_failure_stays_authoritative(self) -> None:
+        ui = ShadowboxUI(touch_locate_available=True)
+        ui.apply_shadowscore_transport_snapshot({
+            "revision": 2,
+            "is_playing": True,
+            "position_fraction": 0.1,
+            "position_bbt": "1.4.192",
+            "capabilities": {"can_locate": True},
+        })
+        self.assertTrue(ui._begin_transport_locate())
+        ui.handle_event(UIEvent(kind="set_transport_position", value=0.8, pressed=False))
+        ui.pop_actions()
+
+        ui.apply_shadowscore_transport_command_error("locate_fraction", "LOCATE FAILED · CLIENTS NOT ACTIVE")
+
+        self.assertEqual(ui.state.ui_mode, "SYSTEM_TRANSPORT_LOCATE")
+        self.assertEqual(ui.state.shadowscore_transport_pending, "")
+        self.assertEqual(ui.transport_locate_fraction, 0.1)
+        self.assertEqual(ui.state.shadowscore_transport_error, "LOCATE FAILED · CLIENTS NOT ACTIVE")
 
     def test_home_transport_card_toggles_global_runner_state(self) -> None:
         ui = ShadowboxUI()

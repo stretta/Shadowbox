@@ -798,14 +798,16 @@ def main():
     rnbo = RNBOClient()
     osc_listener = RunnerOSCListener()
     encoder = EncoderInput()
+    touch_layout_enabled = should_enable_touch_layout(encoder.input_kind)
     ui = ShadowboxUI(
         rnbo=rnbo,
         hdmi_mirror_available=_is_five_inch_dsi_display(display),
         hdmi_mirror_enabled=_env_bool("SHADOWBOX_DSI_HDMI_MIRROR", False),
+        touch_locate_available=touch_layout_enabled and _is_five_inch_dsi_display(display),
     )
     transpose_midi = AlsaMidiControllerMonitor()
     scheduler = RenderScheduler(mode=os.environ.get("SHADOWBOX_RENDER_SCHEDULER", "dirty").strip().lower())
-    renderer.set_touch_mode(should_enable_touch_layout(encoder.input_kind))
+    renderer.set_touch_mode(touch_layout_enabled)
     ui.restore_from_saved_state()
     transpose_midi.configure(ui.state.transpose_controller_identity)
     transpose_midi.start()

@@ -136,7 +136,7 @@ class TouchLayout:
     ) -> TouchAction | None:
         if target is None or not target.action_kind:
             return None
-        if target.action_kind in {"set_edit_value", "set_surface_value", "set_surface_range"}:
+        if target.action_kind in {"set_edit_value", "set_surface_value", "set_surface_range", "set_transport_position"}:
             x, y = self._point_to_pixels(normalized_x, normalized_y)
             if target.action_kind == "set_surface_value":
                 vertical = (y - target.y) / max(1, target.h - 1)

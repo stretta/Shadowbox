@@ -357,6 +357,16 @@ When ShadowscoreServer's canonical transport object is reachable,
 - Sync health;
 - Previous/Next Section, Return to Start, and Re-sync.
 
+On the five-inch direct-touch display, select `POSITION` to open the
+section-marked arrangement scrubber. Dragging previews a bars/beats/ticks and
+section destination without changing server state. Releasing the touch sends
+one `locate_fraction` request. `LOCATING…` remains visible while the server
+activates the destination payload and repositions the cohort; acknowledgement
+returns to the transport list, while failure keeps the authoritative position
+and presents the server error. The control is absent when `can_locate` is
+false. Encoder-first displays continue to use section navigation and Return to
+Start.
+
 `STARTING` and `STOPPING` identify a pending request; they do not claim that
 the ensemble has begun or stopped. The returned object and observer snapshots
 are authoritative.

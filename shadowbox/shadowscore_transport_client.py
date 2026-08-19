@@ -237,6 +237,11 @@ class ShadowScoreTransportCoordinator:
 
 
 def transport_error_message(error: Exception, *, operation: str = "") -> str:
+    operation_label = {
+        "locate_fraction": "LOCATE",
+        "locate_beats": "LOCATE",
+        "return_to_start": "RETURN",
+    }.get(str(operation), str(operation).upper() or "TRANSPORT")
     message = str(error) or error.__class__.__name__
     if isinstance(error, urllib.error.HTTPError):
         try:
@@ -248,7 +253,7 @@ def transport_error_message(error: Exception, *, operation: str = "") -> str:
     if "RNBO playback is not ready:" in message:
         failures = [item for item in message.split(":", 1)[1].split(",") if item.strip()]
         count = len(failures)
-        return f"{operation.upper() or 'TRANSPORT'} FAILED · {count} CLIENT{'S' if count != 1 else ''} NOT READY"
+        return f"{operation_label} FAILED · {count} CLIENT{'S' if count != 1 else ''} NOT READY"
     if "did not reach ACTIVE on every required client" in message:
-        return f"{operation.upper() or 'TRANSPORT'} FAILED · CLIENTS NOT ACTIVE"
+        return f"{operation_label} FAILED · CLIENTS NOT ACTIVE"
     return message

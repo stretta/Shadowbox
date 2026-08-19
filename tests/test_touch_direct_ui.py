@@ -224,7 +224,7 @@ class TouchDirectUITests(unittest.TestCase):
         ui.state.enum_cursor = 0
         ui.state.edit_value = "1"
 
-        renderer, _display = _render_touch_layout(ui)
+        renderer, display = _render_touch_layout(ui)
         page_down = _touch_action_for_target(renderer, kind="page_down", button_id="page_down")
         ui.handle_event(UIEvent(kind=page_down.kind, page_size=page_down.page_size))
 
@@ -437,6 +437,40 @@ class TouchDirectUITests(unittest.TestCase):
 
         self.assertEqual(ui.home_transport_tempo_label, "")
         self.assertFalse(any(target.kind == "home_tempo" for target in renderer.touch_layout.targets))
+
+    def test_transport_locate_screen_exposes_large_fraction_slider(self) -> None:
+        ui = ShadowboxUI(touch_locate_available=True)
+        ui.apply_shadowscore_transport_snapshot({
+            "revision": 1,
+            "is_playing": False,
+            "position_fraction": 0.25,
+            "position_bbt": "3.1.000",
+            "duration_beats": 32,
+            "time_signature_numerator": 4,
+            "active_section": "B",
+            "arrangement": {
+                "sections": [
+                    {"id": "A", "start_beat": 0, "end_beat": 8},
+                    {"id": "B", "start_beat": 8, "end_beat": 16},
+                    {"id": "C", "start_beat": 16, "end_beat": 24},
+                    {"id": "D", "start_beat": 24, "end_beat": 32},
+                ]
+            },
+            "capabilities": {"can_locate": True},
+        })
+        self.assertTrue(ui._begin_transport_locate())
+
+        renderer, display = _render_touch_layout(ui)
+        target = next(target for target in renderer.touch_layout.targets if target.kind == "transport_locate_slider")
+        x = (target.x + (target.w * 0.75)) / max(1, renderer.touch_layout.width - 1)
+        y = (target.y + (target.h / 2)) / max(1, renderer.touch_layout.height - 1)
+
+        action = renderer.touch_layout.action_for_point(x, y)
+
+        self.assertIsNotNone(action)
+        self.assertEqual(action.kind, "set_transport_position")
+        self.assertAlmostEqual(action.value, 0.75, places=2)
+        self.assertGreaterEqual(target.h, 150)
         self.assertFalse(any(op[0] == "text" and str(op[1]).endswith("BPM") for op in display.ops))
 
     def test_home_card_icons_scale_up_on_touch_layout(self) -> None:

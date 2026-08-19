@@ -1461,6 +1461,91 @@ class ShadowboxRenderer:
                 emphasis=self._row_base_weight(row),
             )
 
+    def draw_transport_locate(self, ui) -> None:
+        fraction = max(0.0, min(1.0, float(ui.transport_locate_fraction)))
+        pending = ui.state.shadowscore_transport_pending == "locate_fraction"
+        panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
+        self._draw_panel(panel_x, panel_y, panel_w, panel_h, None)
+
+        rail_x = panel_x + 54
+        rail_w = max(1, panel_w - 108)
+        rail_h = 54
+        rail_y = panel_y + max(96, (panel_h - rail_h) // 2)
+        fill_w = int(round(rail_w * fraction))
+        thumb_x = rail_x + int(round((rail_w - 1) * fraction))
+
+        if self.has_color:
+            self._rounded_theme(rail_x, rail_y, rail_w, rail_h, 14, "panel_alt", fill=True)
+            self._rounded_theme(rail_x, rail_y, rail_w, rail_h, 14, "line", fill=False)
+            if fill_w > 0:
+                self._fill_theme(rail_x, rail_y, fill_w, rail_h, "accent")
+            self._fill_theme(max(rail_x, thumb_x - 3), rail_y - 12, 7, rail_h + 24, "text")
+        else:
+            self.display.rect(rail_x, rail_y, rail_w, rail_h, True, False)
+            if fill_w > 0:
+                self.display.rect(rail_x + 2, rail_y + 2, max(1, fill_w - 4), rail_h - 4, True, True)
+            self.display.vline(thumb_x, rail_y - 6, rail_h + 12, True)
+
+        transport = ui.state.shadowscore_transport
+        duration = transport.get("duration_beats")
+        arrangement = transport.get("arrangement", {})
+        sections = arrangement.get("sections", []) if isinstance(arrangement, dict) else []
+        if isinstance(duration, (int, float)) and duration > 0 and isinstance(sections, list):
+            for section in sections:
+                if not isinstance(section, dict):
+                    continue
+                start = section.get("start_beat")
+                if not isinstance(start, (int, float)) or start <= 0:
+                    continue
+                x = rail_x + int(round(rail_w * (float(start) / float(duration))))
+                if self.has_color:
+                    self._fill_theme(x, rail_y, 2, rail_h, "bg")
+                else:
+                    self.display.vline(x, rail_y, rail_h, False)
+            for section in sections:
+                if not isinstance(section, dict):
+                    continue
+                start = section.get("start_beat")
+                end = section.get("end_beat")
+                if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+                    continue
+                center = (float(start) + float(end)) / (2.0 * float(duration))
+                label = str(section.get("id") or "")
+                label_w, _ = self._measure_text(label, 2, "semibold")
+                x = rail_x + int(round(rail_w * center)) - (label_w // 2)
+                if self.has_color:
+                    self._text_theme(label, x, rail_y + rail_h + 20, "muted", 2, "semibold")
+                else:
+                    self._text(label, x, rail_y + rail_h + 10, 1, "medium")
+
+        position = ui.transport_locate_position_label
+        section = ui.transport_locate_section_label
+        title = f"{position}  ·  SECTION {section}"
+        title_w, title_h = self._measure_text(title, 3, "semibold")
+        title_x = panel_x + max(0, (panel_w - title_w) // 2)
+        title_y = panel_y + 38
+        instruction = "LOCATING…" if pending else "DRAG · RELEASE TO LOCATE"
+        instruction_w, instruction_h = self._measure_text(instruction, 2, "medium")
+        instruction_x = panel_x + max(0, (panel_w - instruction_w) // 2)
+        instruction_y = min(panel_y + panel_h - instruction_h - 24, rail_y + rail_h + 76)
+        if self.has_color:
+            self._text_theme(title, title_x, title_y, "accent" if not pending else "text", 3, "semibold")
+            self._text_theme(instruction, instruction_x, instruction_y, "muted", 2, "medium")
+        else:
+            self._text(title, title_x, title_y, 2, "medium")
+            self._text(instruction, instruction_x, instruction_y, 1, "regular")
+
+        self._record_touch_target(
+            "transport_locate_slider",
+            rail_x,
+            max(self.content_top, rail_y - 54),
+            rail_w,
+            rail_h + 108,
+            action_kind="set_transport_position" if not pending else "noop",
+            button_id="transport_position",
+            label="Transport position",
+        )
+
     def _draw_selectable_value_rows_tft(self, rows: list[ValueRow], selected_idx: int) -> None:
         touch_layout = self._touch_list_geometry(visible_rows=4) if self.touch_layout_enabled else None
         panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
@@ -5145,6 +5230,7 @@ class ShadowboxRenderer:
             "SYSTEM_AUDIO_BUFFER": "BUFFER",
             "SYSTEM_AUDIO_RESTART": "AUDIO",
             "SYSTEM_TRANSPORT": "TRANSPORT",
+            "SYSTEM_TRANSPORT_LOCATE": "LOCATE",
             "SYSTEM_TRANSPORT_TEMPO_EDIT": "TEMPO",
             "SYSTEM_HDMI_MIRROR": "HDMI",
             "SYSTEM_REBOOT_CONFIRM": "REBOOT",
@@ -5301,6 +5387,8 @@ class ShadowboxRenderer:
             self.draw_system_audio_restart(ui)
         elif state.ui_mode == "SYSTEM_TRANSPORT":
             self.draw_selectable_value_rows(ui.transport_rows, state.transport_cursor)
+        elif state.ui_mode == "SYSTEM_TRANSPORT_LOCATE":
+            self.draw_transport_locate(ui)
         elif state.ui_mode == "SYSTEM_HDMI_MIRROR":
             self.draw_selectable_value_rows(ui.hdmi_mirror_rows, state.hdmi_mirror_cursor)
         elif state.ui_mode == "SYSTEM_REBOOT_CONFIRM":

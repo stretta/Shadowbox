@@ -327,6 +327,41 @@ class EncoderTouchZoneTests(unittest.TestCase):
         self.assertEqual([event.button_id for event in events], ["low", "low"])
         self.assertIsNone(encoder._touch_capture)
 
+    def test_touch_direct_transport_locate_streams_preview_and_release(self) -> None:
+        sample_type = types.SimpleNamespace
+        with (
+            mock.patch.dict(os.environ, {"SHADOWBOX_INPUT_KIND": "touch_direct"}, clear=False),
+            mock.patch.object(self.encoder_module, "TouchZoneReader", _FakeTouchReader),
+        ):
+            encoder = self.encoder_module.EncoderInput()
+
+        layout = TouchLayout(800, 480)
+        layout.add_target(
+            "transport_locate_slider",
+            100,
+            160,
+            600,
+            180,
+            action_kind="set_transport_position",
+            button_id="transport_position",
+        )
+        encoder.set_touch_layout(layout)
+        encoder._touch_reader.samples.extend(
+            [
+                sample_type(normalized_x=250 / 799, normalized_y=240 / 479, pressed=True),
+                sample_type(normalized_x=550 / 799, normalized_y=240 / 479, pressed=True),
+                sample_type(normalized_x=625 / 799, normalized_y=240 / 479, pressed=False),
+            ]
+        )
+
+        events = encoder.get_events()
+
+        self.assertEqual([event.kind for event in events], ["set_transport_position", "set_transport_position"])
+        self.assertEqual([event.pressed for event in events], [True, False])
+        self.assertAlmostEqual(events[0].value, 450 / 599)
+        self.assertAlmostEqual(events[1].value, 525 / 599)
+        self.assertIsNone(encoder._touch_capture)
+
 
 if __name__ == "__main__":
     unittest.main()

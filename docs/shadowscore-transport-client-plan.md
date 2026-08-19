@@ -130,9 +130,12 @@ primary content and continue working without the server.
 
 ## Current status
 
-Checkpoints 1 and 2 are implemented and deployed to Wren for physical testing.
-Checkpoint 3 remains deliberately separate because touch seek needs a
-purpose-built interaction and physical evaluation.
+Checkpoints 1, 2, and 4 are implemented, deployed, and physically accepted on
+Wren. Checkpoint 3 is also implemented, deployed, and physically accepted with
+a dedicated five-inch scrubber, release-only `locate_fraction` commit, pending
+acknowledgement, and authoritative failure recovery. Musician testing confirmed
+cross-section seeks while stopped and running, including continued audible
+playback after the running seek. All four delivery checkpoints are complete.
 
 On 2026-08-19, live acceptance on Wren confirmed canonical Play with HTTP 200,
 seven assigned targets prepared and transaction-matched ACTIVE, an advancing
