@@ -309,6 +309,7 @@ def _transport_locate_ui() -> ShadowboxUI:
         "duration_beats": 32,
         "time_signature_numerator": 4,
         "active_section": "C",
+        "playback_session": {"id": 4, "started_at": "2026-08-21T17:30:00.000Z", "elapsed_seconds": 754, "running": True},
         "arrangement": {
             "requested_mode": "run",
             "running": True,
@@ -338,6 +339,7 @@ def _transport_surface_ui() -> ShadowboxUI:
         "duration_beats": 32,
         "time_signature_numerator": 4,
         "active_section": "C",
+        "playback_session": {"id": 4, "started_at": "2026-08-21T17:30:00.000Z", "elapsed_seconds": 754, "running": True},
         "arrangement": {
             "requested_mode": "run",
             "running": True,

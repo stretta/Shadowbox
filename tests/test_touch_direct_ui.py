@@ -594,6 +594,7 @@ class TouchDirectUITests(unittest.TestCase):
             "position_bbt": "1.2.000",
             "duration_beats": 16,
             "active_section": "A",
+            "playback_session": {"id": 2, "started_at": "2026-08-21T17:30:00.000Z", "elapsed_seconds": 754.8, "running": True},
             "arrangement": {"requested_mode": "run", "running": True, "sections": [{"id": "A", "start_beat": 0, "end_beat": 8}, {"id": "B", "start_beat": 8, "end_beat": 16}]},
             "block_launcher": {
                 "active_block_id": "A",
@@ -625,6 +626,11 @@ class TouchDirectUITests(unittest.TestCase):
         self.assertEqual([target.button_id for target in block_targets], ["transport_block_index:0", "transport_block_index:1", "transport_block_index:2"])
         self.assertEqual(block_targets[2].action_kind, "noop")
 
+        renderer, display = _render_touch_layout(ui)
+        labels = [op[1] for op in display.ops if op[0] == "text"]
+        self.assertIn("12:34", labels)
+        self.assertNotIn("1.2.000", labels)
+
         action = _touch_action_for_target(renderer, kind="transport_control", button_id="transport_block_index:1")
         ui.handle_event(UIEvent(kind=action.kind, button_id=action.button_id))
         commands = [item for item in ui.pop_actions() if item.kind == "transport_command"]
@@ -647,6 +653,15 @@ class TouchDirectUITests(unittest.TestCase):
         ui.handle_event(UIEvent(kind="tap_button", button_id="transport_play_stop"))
         commands = [item for item in ui.pop_actions() if item.kind == "transport_command"]
         self.assertEqual(commands[0].value, {"operation": "play", "args": {"arrangement_mode": "hold"}})
+
+    def test_transport_elapsed_label_formats_minutes_and_hours(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_shadowscore_transport_snapshot({"revision": 1, "playback_session": {"elapsed_seconds": 0}})
+        self.assertEqual(ui.transport_playback_elapsed_label, "00:00")
+        ui.apply_shadowscore_transport_snapshot({"revision": 2, "playback_session": {"elapsed_seconds": 3599.9}})
+        self.assertEqual(ui.transport_playback_elapsed_label, "59:59")
+        ui.apply_shadowscore_transport_snapshot({"revision": 3, "playback_session": {"elapsed_seconds": 3671}})
+        self.assertEqual(ui.transport_playback_elapsed_label, "1:01:11")
 
     def test_touch_transport_tempo_scrub_previews_and_commits_once_on_release(self) -> None:
         ui = ShadowboxUI(touch_locate_available=True)

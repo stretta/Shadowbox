@@ -1713,13 +1713,17 @@ class ShadowboxRenderer:
         transport = ui.state.shadowscore_transport if ui.server_transport_available else {}
         sync = transport.get("sync", {}) if isinstance(transport.get("sync"), dict) else {}
         previewing = ui.state.transport_locate_preview is not None
-        position = ui.transport_locate_position_label if previewing else str(transport.get("position_bbt") or "-")
+        blocks_view = ui.server_transport_available and ui.state.transport_view == "blocks"
+        position = ui.transport_playback_elapsed_label if blocks_view else ui.transport_locate_position_label if previewing else str(transport.get("position_bbt") or "-")
         section = ui.transport_locate_section_label if previewing else str(transport.get("active_section") or "-")
         sync_state = str(sync.get("state") or "uncertain").upper()
         authority = ui.transport_authority_label
         arrangement = transport.get("arrangement", {}) if isinstance(transport.get("arrangement"), dict) else {}
         workflow = "BLOCK HOLD" if arrangement.get("requested_mode") == "hold" else "ARRANGE"
-        context_label = f"{workflow} · SECTION {section} · {sync_state} · {authority}" if ui.server_transport_available else "LOCAL RUNNER"
+        if blocks_view:
+            context_label = f"ELAPSED · {workflow} · SECTION {section} · {sync_state}"
+        else:
+            context_label = f"{workflow} · SECTION {section} · {sync_state} · {authority}" if ui.server_transport_available else "LOCAL RUNNER"
         if self.has_color:
             self._rounded_theme(info_x, top_y, info_w, top_h, 12, "panel_alt", True)
             self._rounded_theme(info_x, top_y, info_w, top_h, 12, "line", False)

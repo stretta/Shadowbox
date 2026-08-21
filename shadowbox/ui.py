@@ -1253,6 +1253,19 @@ class ShadowboxUI:
         return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
     @property
+    def transport_playback_elapsed_seconds(self) -> float:
+        session = self.state.shadowscore_transport.get("playback_session", {})
+        value = session.get("elapsed_seconds", 0) if isinstance(session, dict) else 0
+        return max(0.0, float(value)) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0.0
+
+    @property
+    def transport_playback_elapsed_label(self) -> str:
+        total_seconds = int(self.transport_playback_elapsed_seconds)
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes:02d}:{seconds:02d}"
+
+    @property
     def transport_authority_label(self) -> str:
         return "SHADOWSCORE" if self.server_transport_available else "LOCAL"
 
