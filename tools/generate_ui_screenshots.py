@@ -345,9 +345,36 @@ def _transport_surface_ui() -> ShadowboxUI:
             ]
         },
         "sync": {"state": "aligned", "re_sync_recommended": False},
-        "capabilities": {"can_locate": True, "can_re_sync": True},
+        "block_launcher": {
+            "active_block_id": "C",
+            "requested_block_id": "",
+            "request_state": "",
+            "quantization": "",
+            "blocks": [
+                {"id": "A", "label": "A", "launchable": True, "occurrence_indices": [0]},
+                {"id": "B", "label": "B", "launchable": True, "occurrence_indices": [1]},
+                {"id": "C", "label": "C", "launchable": True, "occurrence_indices": [2]},
+                {"id": "D", "label": "D", "launchable": True, "occurrence_indices": [3]},
+                {"id": "CODA", "label": "CODA", "launchable": False, "occurrence_indices": []},
+            ],
+        },
+        "capabilities": {"can_locate": True, "can_re_sync": True, "can_launch_meso_blocks": True},
     })
     ui.state.ui_mode = "SYSTEM_TRANSPORT"
+    return ui
+
+
+def _transport_blocks_ui() -> ShadowboxUI:
+    ui = _transport_surface_ui()
+    ui.state.transport_view = "blocks"
+    snapshot = dict(ui.state.shadowscore_transport)
+    snapshot["block_launcher"] = dict(
+        snapshot["block_launcher"],
+        requested_block_id="D",
+        request_state="ARMED",
+        quantization="end-of-section",
+    )
+    ui.state.shadowscore_transport = snapshot
     return ui
 
 
@@ -362,6 +389,7 @@ SCREENSHOTS = (
     ScreenshotSpec("list-vel-sequencer", "List Velocity Sequencer", "instance surface", "Eight velocity rows with pitch context.", _list_vel_sequencer_ui),
     ScreenshotSpec("shadowscore-client", "ShadowScore Client", "instance surface", "Local playback chord, stage, history, and lifecycle display.", _shadowscore_client_ui),
     ScreenshotSpec("transport", "Transport", "system control", "Consolidated authoritative arrangement transport surface.", _transport_surface_ui),
+    ScreenshotSpec("transport-blocks", "Transport Blocks", "system control", "Capability-gated random-access meso-block launcher.", _transport_blocks_ui),
     ScreenshotSpec("transport-locate", "Transport Locate", "system control", "Release-only authoritative arrangement scrubber.", _transport_locate_ui),
 )
 

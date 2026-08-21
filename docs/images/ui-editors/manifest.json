@@ -81,6 +81,14 @@
       "height": 480
     },
     {
+      "file": "transport-blocks.png",
+      "title": "Transport Blocks",
+      "category": "system control",
+      "description": "Capability-gated random-access meso-block launcher.",
+      "width": 800,
+      "height": 480
+    },
+    {
       "file": "transport-locate.png",
       "title": "Transport Locate",
       "category": "system control",

@@ -2109,6 +2109,37 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(ui.state.shadowscore_transport_pending, "")
         self.assertEqual(ui.state.shadowscore_transport_error, "timed out; verifying state")
 
+    def test_encoder_transport_blocks_view_preserves_block_ids_and_launch_state(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_shadowscore_transport_snapshot({
+            "revision": 1,
+            "is_playing": True,
+            "tempo": 120,
+            "active_section": "VerseA",
+            "block_launcher": {
+                "active_block_id": "VerseA",
+                "requested_block_id": "ChorusB",
+                "request_state": "armed",
+                "blocks": [
+                    {"id": "VerseA", "launchable": True, "occurrence_indices": [0]},
+                    {"id": "ChorusB", "launchable": True, "occurrence_indices": [1]},
+                ],
+            },
+            "capabilities": {"can_launch_meso_blocks": True},
+        })
+        ui.state.ui_mode = "SYSTEM_TRANSPORT"
+        ui.state.transport_view = "blocks"
+
+        self.assertEqual(
+            [(row.label, row.value) for row in ui.transport_rows[-2:]],
+            [("block:VerseA", "ACTIVE"), ("block:ChorusB", "ARMED")],
+        )
+        ui.state.transport_cursor = next(index for index, row in enumerate(ui.transport_rows, start=1) if row.label == "block:ChorusB")
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+
+        commands = [action for action in ui.pop_actions() if action.kind == "transport_command"]
+        self.assertEqual(commands[0].value, {"operation": "launch_meso_block", "args": {"block_id": "ChorusB", "macro_index": 1}})
+
     def test_touch_transport_locate_previews_until_release_and_waits_for_ack(self) -> None:
         ui = ShadowboxUI(touch_locate_available=True)
         snapshot = {

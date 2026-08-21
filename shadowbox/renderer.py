@@ -1752,10 +1752,95 @@ class ShadowboxRenderer:
             return
 
         capabilities = transport.get("capabilities", {}) if isinstance(transport.get("capabilities"), dict) else {}
+        can_launch_blocks = capabilities.get("can_launch_meso_blocks") is True
+        mode_y = top_y + top_h + 12
+        if can_launch_blocks:
+            mode_w = 128
+            draw_button(
+                "ARRANGE",
+                panel_x + margin,
+                mode_y,
+                mode_w,
+                38,
+                "transport_view_arrange",
+                active=ui.state.transport_view == "arrange",
+                accent=ui.state.transport_view == "arrange",
+                enabled=not bool(pending),
+                scale=1,
+            )
+            draw_button(
+                "BLOCKS",
+                panel_x + margin + mode_w + gap,
+                mode_y,
+                mode_w,
+                38,
+                "transport_view_blocks",
+                active=ui.state.transport_view == "blocks",
+                accent=ui.state.transport_view == "blocks",
+                enabled=not bool(pending),
+                scale=1,
+            )
+
+        if can_launch_blocks and ui.state.transport_view == "blocks":
+            launcher = transport.get("block_launcher", {}) if isinstance(transport.get("block_launcher"), dict) else {}
+            blocks = [block for block in launcher.get("blocks", []) if isinstance(block, dict)]
+            page_size = 8
+            page_count = max(1, (len(blocks) + page_size - 1) // page_size)
+            page = max(0, min(page_count - 1, int(ui.state.transport_block_page)))
+            ui.state.transport_block_page = page
+            page_start = page * page_size
+            page_blocks = blocks[page_start:page_start + page_size]
+            if page_count > 1:
+                page_label = f"{page + 1}/{page_count}"
+                page_label_w, _ = self._measure_text(page_label, 1, "medium")
+                page_right = panel_x + panel_w - margin
+                draw_button("‹", page_right - 112, mode_y, 44, 38, "transport_blocks_page_previous", enabled=page > 0 and not bool(pending), scale=2)
+                if self.has_color:
+                    self._text_theme(page_label, page_right - 62 + max(0, (62 - page_label_w) // 2), mode_y + 10, "muted", 1, "medium")
+                else:
+                    self._text(page_label, page_right - 62 + max(0, (62 - page_label_w) // 2), mode_y + 10, 1, "medium")
+                draw_button("›", page_right - 44, mode_y, 44, 38, "transport_blocks_page_next", enabled=page + 1 < page_count and not bool(pending), scale=2)
+
+            grid_x = panel_x + margin
+            grid_y = mode_y + 50
+            grid_w = panel_w - (margin * 2)
+            grid_h = max(1, panel_y + panel_h - grid_y - 16)
+            columns = 4
+            rows = 2
+            block_gap = 10
+            block_w = (grid_w - (block_gap * (columns - 1))) // columns
+            block_h = (grid_h - block_gap) // rows
+            active_id = str(launcher.get("active_block_id") or "")
+            requested_id = str(launcher.get("requested_block_id") or "")
+            request_state = str(launcher.get("request_state") or "").upper()
+            for visible_index, block in enumerate(page_blocks):
+                block_id = str(block.get("id") or "")
+                label = str(block.get("label") or block_id)
+                launchable = block.get("launchable") is True
+                active = block_id == active_id
+                requested = block_id == requested_id and bool(request_state) and not active
+                status = "ACTIVE" if active else request_state if requested else "READY" if launchable else "UNAVAILABLE"
+                display_label = self._truncate_to_width(f"{label} · {status}", max(1, block_w - 18), 1, "semibold")
+                column = visible_index % columns
+                row = visible_index // columns
+                draw_button(
+                    display_label,
+                    grid_x + column * (block_w + block_gap),
+                    grid_y + row * (block_h + block_gap),
+                    block_w,
+                    block_h,
+                    f"transport_block_index:{page_start + visible_index}",
+                    accent=active,
+                    active=requested,
+                    enabled=launchable and not active and not bool(pending),
+                    scale=1,
+                )
+            return
+
         can_locate = ui.server_transport_available and capabilities.get("can_locate") is True
         rail_x = panel_x + 42
         rail_w = max(1, panel_w - 84)
-        rail_y = top_y + top_h + 60
+        rail_y = top_y + top_h + (96 if can_launch_blocks else 60)
         rail_h = 48
         fraction = max(0.0, min(1.0, float(ui.transport_locate_fraction)))
         fill_w = int(round(rail_w * fraction))

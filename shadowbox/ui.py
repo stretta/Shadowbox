@@ -181,6 +181,8 @@ class UIState:
     transport_tempo_preview: float | None = None
     transport_tempo_drag_origin_bpm: float | None = None
     transport_tempo_drag_origin_position: float | None = None
+    transport_view: str = "arrange"
+    transport_block_page: int = 0
     patcher_picker_context: str = "add"
     pending_remove_instance_id: str = ""
     remove_instance_origin: str = ""
@@ -1276,11 +1278,31 @@ class ShadowboxUI:
             ValueRow("section", str(transport.get("active_section") or "-")),
             ValueRow("position", position_text),
             ValueRow("sync", str(sync.get("state") or "uncertain").upper()),
+        ])
+        capabilities = transport.get("capabilities", {}) if isinstance(transport.get("capabilities"), dict) else {}
+        if capabilities.get("can_launch_meso_blocks") is True:
+            rows.append(ValueRow("view", self.state.transport_view.upper()))
+            if self.state.transport_view == "blocks":
+                launcher = transport.get("block_launcher", {}) if isinstance(transport.get("block_launcher"), dict) else {}
+                active_id = str(launcher.get("active_block_id") or "")
+                requested_id = str(launcher.get("requested_block_id") or "")
+                request_state = str(launcher.get("request_state") or "").upper()
+                for block in launcher.get("blocks", []):
+                    if not isinstance(block, dict):
+                        continue
+                    block_id = str(block.get("id") or "")
+                    if not block_id:
+                        continue
+                    value = "ACTIVE" if block_id == active_id else request_state if block_id == requested_id and request_state else "READY"
+                    if block.get("launchable") is not True:
+                        value = "UNAVAILABLE"
+                    rows.append(ValueRow(f"block:{block_id}", value, current=block_id == active_id))
+                return rows
+        rows.extend([
             ValueRow("previous", "SECTION"),
             ValueRow("next", "SECTION"),
             ValueRow("return", "TO START"),
         ])
-        capabilities = transport.get("capabilities", {}) if isinstance(transport.get("capabilities"), dict) else {}
         if capabilities.get("can_re_sync") is True:
             rows.append(ValueRow("re-sync", "RECOMMENDED" if sync.get("re_sync_recommended") else "AVAILABLE"))
         return rows
@@ -4077,6 +4099,29 @@ class ShadowboxUI:
                     if not self._set_transport_tempo(target) or not self.server_transport_available:
                         self._clear_transport_tempo_preview()
                 return
+            if button in {"transport_view_arrange", "transport_view_blocks"}:
+                self.state.transport_view = "blocks" if button.endswith("blocks") else "arrange"
+                self.state.transport_block_page = 0
+                self.request_render("transport_view")
+                return
+            if button in {"transport_blocks_page_previous", "transport_blocks_page_next"}:
+                step = -1 if button.endswith("previous") else 1
+                self.state.transport_block_page = max(0, self.state.transport_block_page + step)
+                self.request_render("transport_block_page")
+                return
+            if button.startswith("transport_block_index:"):
+                block_index = int(button.split(":", 1)[1])
+                launcher = self.state.shadowscore_transport.get("block_launcher", {})
+                blocks = launcher.get("blocks", []) if isinstance(launcher, dict) else []
+                block = blocks[block_index] if 0 <= block_index < len(blocks) and isinstance(blocks[block_index], dict) else None
+                if block is not None and block.get("launchable") is True:
+                    block_id = str(block.get("id") or "")
+                    args = {"block_id": block_id}
+                    occurrences = block.get("occurrence_indices", [])
+                    if isinstance(occurrences, list) and len(occurrences) == 1:
+                        args["macro_index"] = occurrences[0]
+                    self._queue_transport_command("launch_meso_block", args)
+                return
             operation = {
                 "transport_previous": "previous_section",
                 "transport_next": "next_section",
@@ -5235,6 +5280,20 @@ class ShadowboxUI:
                 self._queue_transport_command("return_to_start")
             elif label == "re-sync":
                 self._queue_transport_command("re_sync")
+            elif label == "view":
+                self.state.transport_view = "blocks" if self.state.transport_view == "arrange" else "arrange"
+                self.state.transport_cursor = 1
+            elif label.startswith("block:"):
+                block_id = label.split(":", 1)[1]
+                launcher = self.state.shadowscore_transport.get("block_launcher", {})
+                blocks = launcher.get("blocks", []) if isinstance(launcher, dict) else []
+                block = next((item for item in blocks if isinstance(item, dict) and str(item.get("id") or "") == block_id), None)
+                if block is not None and block.get("launchable") is True:
+                    args = {"block_id": block_id}
+                    occurrences = block.get("occurrence_indices", [])
+                    if isinstance(occurrences, list) and len(occurrences) == 1:
+                        args["macro_index"] = occurrences[0]
+                    self._queue_transport_command("launch_meso_block", args)
 
         elif self.state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT":
             self._exit_transport_tempo_edit()
