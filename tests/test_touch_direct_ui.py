@@ -594,7 +594,7 @@ class TouchDirectUITests(unittest.TestCase):
             "position_bbt": "1.2.000",
             "duration_beats": 16,
             "active_section": "A",
-            "arrangement": {"sections": [{"id": "A", "start_beat": 0, "end_beat": 8}, {"id": "B", "start_beat": 8, "end_beat": 16}]},
+            "arrangement": {"requested_mode": "run", "running": True, "sections": [{"id": "A", "start_beat": 0, "end_beat": 8}, {"id": "B", "start_beat": 8, "end_beat": 16}]},
             "block_launcher": {
                 "active_block_id": "A",
                 "requested_block_id": "",
@@ -613,6 +613,12 @@ class TouchDirectUITests(unittest.TestCase):
         ui.state.ui_mode = "SYSTEM_TRANSPORT"
 
         ui.handle_event(UIEvent(kind="tap_button", button_id="transport_view_blocks"))
+        mode_commands = [item for item in ui.pop_actions() if item.kind == "transport_command"]
+        self.assertEqual(mode_commands[0].value, {"operation": "set_arrangement_mode", "args": {"mode": "hold"}})
+        self.assertEqual(ui.state.transport_view, "arrange")
+        held = dict(snapshot, revision=2)
+        held["arrangement"] = dict(snapshot["arrangement"], requested_mode="hold", running=False)
+        ui.apply_shadowscore_transport_snapshot(held, operation="set_arrangement_mode")
         self.assertEqual(ui.state.transport_view, "blocks")
         renderer, _display = _render_touch_layout(ui)
         block_targets = [target for target in renderer.touch_layout.targets if target.kind == "transport_control" and target.button_id.startswith("transport_block_index:")]
@@ -624,13 +630,23 @@ class TouchDirectUITests(unittest.TestCase):
         commands = [item for item in ui.pop_actions() if item.kind == "transport_command"]
         self.assertEqual(commands[0].value, {"operation": "launch_meso_block", "args": {"block_id": "B", "macro_index": 1}})
 
-        acknowledged = dict(snapshot, revision=2)
+        acknowledged = dict(held, revision=3)
         acknowledged["block_launcher"] = dict(snapshot["block_launcher"], requested_block_id="B", request_state="selected", quantization="end-of-section")
         ui.apply_shadowscore_transport_snapshot(acknowledged, operation="launch_meso_block")
         renderer, display = _render_touch_layout(ui)
         labels = [op[1] for op in display.ops if op[0] == "text"]
         self.assertIn("B · SELECTED", labels)
         self.assertEqual(ui.state.shadowscore_transport_pending, "")
+
+        ui.handle_event(UIEvent(kind="tap_button", button_id="transport_play_stop"))
+        commands = [item for item in ui.pop_actions() if item.kind == "transport_command"]
+        self.assertEqual(commands[0].value, {"operation": "stop", "args": {}})
+
+        stopped = dict(acknowledged, revision=4, is_playing=False)
+        ui.apply_shadowscore_transport_snapshot(stopped, operation="stop")
+        ui.handle_event(UIEvent(kind="tap_button", button_id="transport_play_stop"))
+        commands = [item for item in ui.pop_actions() if item.kind == "transport_command"]
+        self.assertEqual(commands[0].value, {"operation": "play", "args": {"arrangement_mode": "hold"}})
 
     def test_touch_transport_tempo_scrub_previews_and_commits_once_on_release(self) -> None:
         ui = ShadowboxUI(touch_locate_available=True)

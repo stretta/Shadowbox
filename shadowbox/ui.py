@@ -1471,7 +1471,8 @@ class ShadowboxUI:
             operation = "play" if bool(rolling) else "stop"
             if self.transport_rolling is bool(rolling):
                 return False
-            return self._queue_transport_command(operation)
+            args = {"arrangement_mode": "hold"} if operation == "play" and self.state.transport_view == "blocks" else None
+            return self._queue_transport_command(operation, args)
         transport = self.state.system.get("transport", {})
         path = transport.get("rolling_path") if isinstance(transport, dict) else ""
         if not path:
@@ -1510,6 +1511,13 @@ class ShadowboxUI:
         changed = self.state.shadowscore_transport != snapshot or not self.state.shadowscore_transport_connected
         self.state.shadowscore_transport = dict(snapshot)
         self.state.shadowscore_transport_connected = True
+        arrangement = snapshot.get("arrangement", {}) if isinstance(snapshot.get("arrangement"), dict) else {}
+        requested_mode = str(arrangement.get("requested_mode") or "")
+        if requested_mode in {"run", "hold"}:
+            next_view = "blocks" if requested_mode == "hold" else "arrange"
+            if next_view != self.state.transport_view:
+                self.state.transport_block_page = 0
+            self.state.transport_view = next_view
         if base_url:
             self.state.shadowscore_transport_base_url = str(base_url)
         self.state.shadowscore_transport_error = ""
@@ -4100,9 +4108,8 @@ class ShadowboxUI:
                         self._clear_transport_tempo_preview()
                 return
             if button in {"transport_view_arrange", "transport_view_blocks"}:
-                self.state.transport_view = "blocks" if button.endswith("blocks") else "arrange"
-                self.state.transport_block_page = 0
-                self.request_render("transport_view")
+                mode = "hold" if button.endswith("blocks") else "run"
+                self._queue_transport_command("set_arrangement_mode", {"mode": mode})
                 return
             if button in {"transport_blocks_page_previous", "transport_blocks_page_next"}:
                 step = -1 if button.endswith("previous") else 1
@@ -5281,8 +5288,9 @@ class ShadowboxUI:
             elif label == "re-sync":
                 self._queue_transport_command("re_sync")
             elif label == "view":
-                self.state.transport_view = "blocks" if self.state.transport_view == "arrange" else "arrange"
-                self.state.transport_cursor = 1
+                mode = "hold" if self.state.transport_view == "arrange" else "run"
+                if self._queue_transport_command("set_arrangement_mode", {"mode": mode}):
+                    self.state.transport_cursor = 1
             elif label.startswith("block:"):
                 block_id = label.split(":", 1)[1]
                 launcher = self.state.shadowscore_transport.get("block_launcher", {})

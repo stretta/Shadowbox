@@ -310,6 +310,8 @@ def _transport_locate_ui() -> ShadowboxUI:
         "time_signature_numerator": 4,
         "active_section": "C",
         "arrangement": {
+            "requested_mode": "run",
+            "running": True,
             "sections": [
                 {"id": "A", "start_beat": 0, "end_beat": 8},
                 {"id": "B", "start_beat": 8, "end_beat": 16},
@@ -337,6 +339,8 @@ def _transport_surface_ui() -> ShadowboxUI:
         "time_signature_numerator": 4,
         "active_section": "C",
         "arrangement": {
+            "requested_mode": "run",
+            "running": True,
             "sections": [
                 {"id": "A", "start_beat": 0, "end_beat": 8},
                 {"id": "B", "start_beat": 8, "end_beat": 16},
@@ -374,6 +378,7 @@ def _transport_blocks_ui() -> ShadowboxUI:
         request_state="ARMED",
         quantization="end-of-section",
     )
+    snapshot["arrangement"] = dict(snapshot["arrangement"], requested_mode="hold", running=False)
     ui.state.shadowscore_transport = snapshot
     return ui
 

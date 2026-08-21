@@ -2116,6 +2116,7 @@ class InstanceActionTests(unittest.TestCase):
             "is_playing": True,
             "tempo": 120,
             "active_section": "VerseA",
+            "arrangement": {"requested_mode": "hold", "running": False},
             "block_launcher": {
                 "active_block_id": "VerseA",
                 "requested_block_id": "ChorusB",
@@ -2128,7 +2129,7 @@ class InstanceActionTests(unittest.TestCase):
             "capabilities": {"can_launch_meso_blocks": True},
         })
         ui.state.ui_mode = "SYSTEM_TRANSPORT"
-        ui.state.transport_view = "blocks"
+        self.assertEqual(ui.state.transport_view, "blocks")
 
         self.assertEqual(
             [(row.label, row.value) for row in ui.transport_rows[-2:]],

@@ -1717,7 +1717,9 @@ class ShadowboxRenderer:
         section = ui.transport_locate_section_label if previewing else str(transport.get("active_section") or "-")
         sync_state = str(sync.get("state") or "uncertain").upper()
         authority = ui.transport_authority_label
-        context_label = f"SECTION {section} · {sync_state} · {authority}" if ui.server_transport_available else "LOCAL RUNNER"
+        arrangement = transport.get("arrangement", {}) if isinstance(transport.get("arrangement"), dict) else {}
+        workflow = "BLOCK HOLD" if arrangement.get("requested_mode") == "hold" else "ARRANGE"
+        context_label = f"{workflow} · SECTION {section} · {sync_state} · {authority}" if ui.server_transport_available else "LOCAL RUNNER"
         if self.has_color:
             self._rounded_theme(info_x, top_y, info_w, top_h, 12, "panel_alt", True)
             self._rounded_theme(info_x, top_y, info_w, top_h, 12, "line", False)
