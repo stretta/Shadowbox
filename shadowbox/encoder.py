@@ -421,9 +421,20 @@ class EncoderInput:
                             sample.normalized_y,
                             layout=self._touch_layout,
                         )
-                    if sample_pressed and self._touch_capture is None and action.kind in {"set_surface_value", "set_surface_range", "set_transport_position"}:
+                    if sample_pressed and self._touch_capture is None and action.kind in {
+                        "set_surface_value",
+                        "set_surface_range",
+                        "set_transport_position",
+                        "set_transport_tempo",
+                    }:
                         self._touch_capture = (action.kind, action.index, action.button_id)
-                    if sample_pressed and action.kind not in {"set_edit_value", "set_surface_value", "set_surface_range", "set_transport_position"}:
+                    if sample_pressed and action.kind not in {
+                        "set_edit_value",
+                        "set_surface_value",
+                        "set_surface_range",
+                        "set_transport_position",
+                        "set_transport_tempo",
+                    }:
                         continue
                     event = EncoderEvent(
                         kind=action.kind,
@@ -433,7 +444,13 @@ class EncoderInput:
                         pressed=sample_pressed,
                         page_size=action.page_size,
                     )
-                    if action.kind in {"set_edit_value", "set_surface_value", "set_surface_range", "set_transport_position"} and sample_pressed:
+                    if action.kind in {
+                        "set_edit_value",
+                        "set_surface_value",
+                        "set_surface_range",
+                        "set_transport_position",
+                        "set_transport_tempo",
+                    } and sample_pressed:
                         latest_slider_event = event
                         continue
                     if latest_slider_event is not None:

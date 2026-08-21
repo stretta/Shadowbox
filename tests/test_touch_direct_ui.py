@@ -509,11 +509,23 @@ class TouchDirectUITests(unittest.TestCase):
             set(controls),
             {
                 "transport_play_stop",
-                "transport_tempo",
                 "transport_previous",
                 "transport_next",
                 "transport_start",
                 "transport_re_sync",
+            },
+        )
+        tempo_targets = {
+            (target.kind, target.button_id)
+            for target in renderer.touch_layout.targets
+            if target.kind.startswith("transport_tempo")
+        }
+        self.assertEqual(
+            tempo_targets,
+            {
+                ("transport_tempo_step", "transport_tempo_down"),
+                ("transport_tempo_slider", "transport_tempo"),
+                ("transport_tempo_step", "transport_tempo_up"),
             },
         )
         self.assertTrue(any(op[0] == "text" and op[1] == "3.1.000" for op in display.ops))
@@ -572,6 +584,66 @@ class TouchDirectUITests(unittest.TestCase):
                 actions = [action for action in ui.pop_actions() if action.kind == "transport_command"]
                 self.assertEqual(actions[0].value, {"operation": operation, "args": {}})
 
+    def test_touch_transport_tempo_scrub_previews_and_commits_once_on_release(self) -> None:
+        ui = ShadowboxUI(touch_locate_available=True)
+        snapshot = {
+            "revision": 1,
+            "is_playing": False,
+            "tempo": 120,
+            "position_fraction": 0,
+            "position_bbt": "1.1.000",
+            "duration_beats": 16,
+            "active_section": "A",
+            "arrangement": {"sections": [{"id": "A", "start_beat": 0, "end_beat": 16}]},
+            "sync": {"state": "aligned"},
+            "capabilities": {"can_locate": True},
+        }
+        ui.apply_shadowscore_transport_snapshot(snapshot)
+        ui.state.ui_mode = "SYSTEM_TRANSPORT"
+
+        ui.handle_event(UIEvent(kind="set_transport_tempo", value=0.4, pressed=True))
+        ui.handle_event(UIEvent(kind="set_transport_tempo", value=0.6, pressed=True))
+
+        self.assertEqual(ui.state.transport_tempo_preview, 132)
+        self.assertEqual(ui.pop_actions(), [])
+
+        ui.handle_event(UIEvent(kind="set_transport_tempo", value=0.65, pressed=False))
+
+        actions = [action for action in ui.pop_actions() if action.kind == "transport_command"]
+        self.assertEqual(actions[0].value, {"operation": "set_tempo", "args": {"bpm": 135.0}})
+        self.assertEqual(ui.state.transport_tempo_preview, 135)
+        self.assertEqual(ui.state.shadowscore_transport_pending, "set_tempo")
+
+        ui.apply_shadowscore_transport_snapshot(dict(snapshot, revision=2, tempo=135), operation="set_tempo")
+        self.assertIsNone(ui.state.transport_tempo_preview)
+        self.assertIsNone(ui.state.transport_tempo_drag_origin_bpm)
+        self.assertEqual(ui.transport_bpm, 135)
+
+    def test_touch_transport_tempo_tap_opens_full_editor(self) -> None:
+        ui = ShadowboxUI(touch_locate_available=True)
+        ui.apply_shadowscore_transport_snapshot({"revision": 1, "is_playing": False, "tempo": 120})
+        ui.state.ui_mode = "SYSTEM_TRANSPORT"
+
+        ui.handle_event(UIEvent(kind="set_transport_tempo", value=0.5, pressed=True))
+        ui.handle_event(UIEvent(kind="set_transport_tempo", value=0.51, pressed=False))
+
+        self.assertEqual(ui.state.ui_mode, "SYSTEM_TRANSPORT_TEMPO_EDIT")
+        self.assertEqual(ui.state.edit_value, 120)
+        self.assertEqual(ui.pop_actions(), [])
+
+    def test_touch_transport_tempo_edge_buttons_step_one_bpm(self) -> None:
+        for button_id, expected in (("transport_tempo_down", 119.0), ("transport_tempo_up", 121.0)):
+            with self.subTest(button_id=button_id):
+                ui = ShadowboxUI(touch_locate_available=True)
+                ui.apply_shadowscore_transport_snapshot({"revision": 1, "is_playing": False, "tempo": 120})
+                ui.state.ui_mode = "SYSTEM_TRANSPORT"
+
+                ui.handle_event(UIEvent(kind="tap_button", button_id=button_id))
+
+                actions = [action for action in ui.pop_actions() if action.kind == "transport_command"]
+                self.assertEqual(actions[0].value, {"operation": "set_tempo", "args": {"bpm": expected}})
+                self.assertEqual(ui.state.transport_tempo_preview, expected)
+
     def test_touch_transport_local_fallback_only_draws_owned_controls(self) -> None:
         ui = ShadowboxUI(touch_locate_available=True)
         ui.state.system = {
@@ -591,7 +663,11 @@ class TouchDirectUITests(unittest.TestCase):
             for target in renderer.touch_layout.targets
             if target.kind == "transport_control"
         ]
-        self.assertEqual(controls, ["transport_play_stop", "transport_tempo"])
+        self.assertEqual(controls, ["transport_play_stop"])
+        self.assertEqual(
+            [target.button_id for target in renderer.touch_layout.targets if target.kind.startswith("transport_tempo")],
+            ["transport_tempo_down", "transport_tempo", "transport_tempo_up"],
+        )
         self.assertFalse(any(target.kind == "transport_locate_slider" for target in renderer.touch_layout.targets))
         self.assertTrue(any(op[0] == "text" and op[1] == "LOCAL RUNNER" for op in display.ops))
 

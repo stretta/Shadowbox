@@ -178,6 +178,9 @@ class UIState:
     shadowscore_transport_error: str = ""
     shadowscore_transport_pending: str = ""
     transport_locate_preview: float | None = None
+    transport_tempo_preview: float | None = None
+    transport_tempo_drag_origin_bpm: float | None = None
+    transport_tempo_drag_origin_position: float | None = None
     patcher_picker_context: str = "add"
     pending_remove_instance_id: str = ""
     remove_instance_origin: str = ""
@@ -702,6 +705,7 @@ class ShadowboxUI:
         self.state.system_audio_cursor = 1
         self.state.transport_cursor = 1
         self.state.transport_locate_preview = None
+        self._clear_transport_tempo_preview()
         self.state.hdmi_mirror_cursor = 1
         self.state.reboot_confirm_cursor = 0
         self.state.transpose_cursor = 2
@@ -1361,6 +1365,50 @@ class ShadowboxUI:
         if not pressed:
             self._queue_transport_command("locate_fraction", {"fraction": fraction})
 
+    def _clear_transport_tempo_preview(self) -> None:
+        self.state.transport_tempo_preview = None
+        self.state.transport_tempo_drag_origin_bpm = None
+        self.state.transport_tempo_drag_origin_position = None
+
+    def _handle_transport_tempo(self, normalized_value: float | None, *, pressed: bool = False) -> None:
+        if self.state.ui_mode != "SYSTEM_TRANSPORT" or normalized_value is None:
+            return
+        if self.state.shadowscore_transport_pending:
+            return
+        current_bpm = self.transport_bpm
+        if not isinstance(current_bpm, (int, float)) or isinstance(current_bpm, bool):
+            return
+        position = max(0.0, min(1.0, float(normalized_value)))
+        origin_bpm = self.state.transport_tempo_drag_origin_bpm
+        origin_position = self.state.transport_tempo_drag_origin_position
+        if origin_bpm is None or origin_position is None:
+            if not pressed:
+                return
+            origin_bpm = float(current_bpm)
+            origin_position = position
+            self.state.transport_tempo_drag_origin_bpm = origin_bpm
+            self.state.transport_tempo_drag_origin_position = origin_position
+
+        movement = position - origin_position
+        preview = max(20.0, min(300.0, round(origin_bpm + (movement * 60.0))))
+        self.state.transport_tempo_preview = preview
+        self.state.activity_ticks += 1
+        self.request_render("transport_tempo_preview")
+        if pressed:
+            return
+
+        self.state.transport_tempo_drag_origin_bpm = None
+        self.state.transport_tempo_drag_origin_position = None
+        if abs(movement) < 0.04:
+            self.state.transport_tempo_preview = None
+            self._begin_transport_tempo_edit()
+            return
+        if preview == float(current_bpm):
+            self.state.transport_tempo_preview = None
+            return
+        if self._set_transport_tempo(preview) and not self.server_transport_available:
+            self._clear_transport_tempo_preview()
+
     @property
     def transport_tempo_edit_param(self) -> dict:
         transport = self.state.system.get("transport", {})
@@ -1450,6 +1498,8 @@ class ShadowboxUI:
                 self.state.transport_locate_preview = None
                 if self.state.ui_mode == "SYSTEM_TRANSPORT_LOCATE":
                     self.state.ui_mode = "SYSTEM_TRANSPORT"
+            elif operation == "set_tempo":
+                self._clear_transport_tempo_preview()
         if self.state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT" and self.transport_bpm is not None:
             self.state.edit_value = self.transport_bpm
         if changed:
@@ -1474,6 +1524,8 @@ class ShadowboxUI:
         self.state.shadowscore_transport_error = str(error or "transport command failed")
         if str(operation) == "locate_fraction":
             self.state.transport_locate_preview = None
+        elif str(operation) == "set_tempo":
+            self._clear_transport_tempo_preview()
         self.set_status_message(self.state.shadowscore_transport_error, frames=90)
         self.request_render("shadowscore_transport_error")
 
@@ -1481,6 +1533,7 @@ class ShadowboxUI:
         transport = self.state.system.get("transport", {})
         if not self.server_transport_available and (not isinstance(transport, dict) or not transport.get("bpm_path")):
             return False
+        self._clear_transport_tempo_preview()
         return_mode = self.state.ui_mode
         self.state.transport_tempo_return_mode = (
             return_mode if return_mode in {"TOP", "SYSTEM_TRANSPORT"} else "SYSTEM_TRANSPORT"
@@ -3406,6 +3459,8 @@ class ShadowboxUI:
             self._handle_touch_edit_value(event.value, pressed=bool(getattr(event, "pressed", False)))
         elif event.kind == "set_transport_position":
             self._handle_transport_locate(event.value, pressed=bool(getattr(event, "pressed", False)))
+        elif event.kind == "set_transport_tempo":
+            self._handle_transport_tempo(event.value, pressed=bool(getattr(event, "pressed", False)))
         elif event.kind == "set_surface_value":
             self._handle_surface_value(event.index, event.value, pressed=bool(getattr(event, "pressed", False)))
         elif event.kind == "set_surface_range":
@@ -4012,6 +4067,15 @@ class ShadowboxUI:
                 return
             if button == "transport_tempo":
                 self._begin_transport_tempo_edit()
+                return
+            if button in {"transport_tempo_down", "transport_tempo_up"}:
+                bpm = self.transport_bpm
+                if isinstance(bpm, (int, float)) and not isinstance(bpm, bool):
+                    delta = -1.0 if button.endswith("down") else 1.0
+                    target = max(20.0, min(300.0, float(bpm) + delta))
+                    self.state.transport_tempo_preview = target
+                    if not self._set_transport_tempo(target) or not self.server_transport_available:
+                        self._clear_transport_tempo_preview()
                 return
             operation = {
                 "transport_previous": "previous_section",

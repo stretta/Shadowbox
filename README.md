@@ -143,7 +143,10 @@ section navigation, and the arrangement scrubber together. Dragging previews
 locally, and release sends one capability-gated `locate_fraction` operation.
 The view remains pending while the server coordinates payload activation and
 phase, then returns to the advancing authoritative transport position or
-presents the server failure.
+presents the server failure. The Tempo card is also a relative scrubber:
+dragging previews a whole-BPM change and release sends one acknowledged
+`set_tempo`; its edge buttons step one BPM, while a stationary tap retains the
+full tempo editor for keypad or large changes.
 
 When the canonical object is unavailable, Shadowbox retains the published
 Runner `/rnbo/jack/transport/rolling` and `/rnbo/jack/transport/bpm` controls

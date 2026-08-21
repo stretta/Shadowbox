@@ -1555,8 +1555,8 @@ class ShadowboxRenderer:
         gap = 12
         top_y = panel_y + 16
         top_h = 88
-        play_w = 180
-        tempo_w = 168
+        play_w = 168
+        tempo_w = 224
         play_x = panel_x + margin
         tempo_x = play_x + play_w + gap
         info_x = tempo_x + tempo_w + gap
@@ -1635,16 +1635,80 @@ class ShadowboxRenderer:
         )
 
         bpm = ui.transport_bpm
-        bpm_label = f"{float(bpm):.0f} BPM" if isinstance(bpm, (int, float)) and not isinstance(bpm, bool) else "TEMPO"
-        draw_button(
-            bpm_label,
+        tempo_preview = ui.state.transport_tempo_preview
+        shown_bpm = tempo_preview if isinstance(tempo_preview, (int, float)) else bpm
+        bpm_label = f"{float(shown_bpm):.0f} BPM" if isinstance(shown_bpm, (int, float)) and not isinstance(shown_bpm, bool) else "TEMPO"
+        tempo_enabled = not bool(pending)
+        tempo_pending = pending == "set_tempo"
+        edge_w = 48
+        slider_x = tempo_x + edge_w
+        slider_w = max(1, tempo_w - (edge_w * 2))
+        self._record_touch_target(
+            "transport_tempo_step",
             tempo_x,
             top_y,
-            tempo_w,
+            edge_w,
             top_h,
-            "transport_tempo",
-            enabled=not bool(pending),
+            action_kind="tap_button" if tempo_enabled else "noop",
+            button_id="transport_tempo_down",
+            label="Tempo down",
         )
+        self._record_touch_target(
+            "transport_tempo_slider",
+            slider_x,
+            top_y,
+            slider_w,
+            top_h,
+            action_kind="set_transport_tempo" if tempo_enabled else "noop",
+            button_id="transport_tempo",
+            label="Tempo",
+        )
+        self._record_touch_target(
+            "transport_tempo_step",
+            tempo_x + tempo_w - edge_w,
+            top_y,
+            edge_w,
+            top_h,
+            action_kind="tap_button" if tempo_enabled else "noop",
+            button_id="transport_tempo_up",
+            label="Tempo up",
+        )
+        if self.has_color:
+            tempo_fill = "panel_pressed" if self._touch_pressed(kind="transport_tempo_slider", button_id="transport_tempo") else "panel_alt"
+            tempo_border = "accent" if tempo_preview is not None or tempo_pending else "line"
+            self._rounded_theme(tempo_x, top_y, tempo_w, top_h, 12, tempo_fill, True)
+            self._rounded_theme(tempo_x, top_y, tempo_w, top_h, 12, tempo_border, False)
+            self._fill_theme(tempo_x + edge_w, top_y + 12, 1, top_h - 24, "line")
+            self._fill_theme(tempo_x + tempo_w - edge_w, top_y + 12, 1, top_h - 24, "line")
+            minus_color = "accent" if self._touch_pressed(kind="transport_tempo_step", button_id="transport_tempo_down") else "text" if tempo_enabled else "muted"
+            plus_color = "accent" if self._touch_pressed(kind="transport_tempo_step", button_id="transport_tempo_up") else "text" if tempo_enabled else "muted"
+            self._text_theme("−", tempo_x + 15, top_y + 25, minus_color, 3, "medium")
+            self._text_theme("+", tempo_x + tempo_w - 35, top_y + 25, plus_color, 3, "medium")
+            bpm_w, _ = self._measure_text(bpm_label, 2, "semibold")
+            bpm_color = "accent" if tempo_preview is not None else "text"
+            self._text_theme(bpm_label, slider_x + max(0, (slider_w - bpm_w) // 2), top_y + 12, bpm_color, 2, "semibold")
+            if tempo_pending:
+                setting_w, _ = self._measure_text("SETTING…", 1, "medium")
+                self._text_theme("SETTING…", slider_x + max(0, (slider_w - setting_w) // 2), top_y + 62, "muted", 1, "medium")
+            else:
+                tempo_rail_x = slider_x + 14
+                tempo_rail_w = max(1, slider_w - 28)
+                tempo_rail_y = top_y + 67
+                self._fill_theme(tempo_rail_x, tempo_rail_y, tempo_rail_w, 3, "line")
+                tempo_delta = 0.0
+                if isinstance(tempo_preview, (int, float)) and isinstance(bpm, (int, float)):
+                    tempo_delta = (float(tempo_preview) - float(bpm)) / 60.0
+                tempo_thumb = tempo_rail_x + int(round((tempo_rail_w - 1) * max(0.0, min(1.0, 0.5 + tempo_delta))))
+                self._fill_theme(tempo_thumb - 2, tempo_rail_y - 7, 5, 17, "accent")
+        else:
+            self.display.rect(tempo_x, top_y, tempo_w, top_h, True, False)
+            self.display.vline(tempo_x + edge_w, top_y + 8, top_h - 16, True)
+            self.display.vline(tempo_x + tempo_w - edge_w, top_y + 8, top_h - 16, True)
+            self._text("-", tempo_x + 18, top_y + 30, 2, "medium")
+            self._text("+", tempo_x + tempo_w - 32, top_y + 30, 2, "medium")
+            bpm_w, _ = self._measure_text(bpm_label, 2, "semibold")
+            self._text(bpm_label, slider_x + max(0, (slider_w - bpm_w) // 2), top_y + 18, 2, "semibold")
+            self.display.hline(slider_x + 14, top_y + 68, max(1, slider_w - 28), True)
 
         transport = ui.state.shadowscore_transport if ui.server_transport_available else {}
         sync = transport.get("sync", {}) if isinstance(transport.get("sync"), dict) else {}

@@ -24,6 +24,13 @@ becomes visually recommended only when the authoritative object recommends it.
 Commands remain pending until a returned object or newer observation
 acknowledges them.
 
+Tempo is inline on the five-inch surface. The center of its card is a relative
+scrubber: horizontal movement previews a whole-BPM offset from the gesture's
+starting value and release sends exactly one `set_tempo`. The left and right
+edges step one BPM. A stationary tap opens the existing full editor. Pending
+and failed changes follow the same authoritative acknowledgement rules as the
+other transport commands.
+
 ## Arrangement view
 
 Arrangement view is implemented in this checkout. It makes the section-marked
@@ -64,6 +71,9 @@ changing the shared Play/Stop, Tempo, authority, or error semantics.
   timeline, and relevant navigation without a drilldown.
 - Timeline preview does not change authoritative state before release.
 - One release produces one `locate_fraction` request.
+- Tempo drag previews locally and produces one `set_tempo` request on release.
+- Tempo edge buttons step exactly one BPM; tapping the value opens the full
+  editor.
 - Pending and failed commands never masquerade as acknowledged playback state.
 - A successful running locate resumes display from the advancing server
   position rather than preserving the preview value.

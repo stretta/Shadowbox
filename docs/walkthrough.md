@@ -369,6 +369,13 @@ keeps the authoritative position and presents the server error. The scrubber
 is read-only when `can_locate` is false. Encoder-first displays continue to use
 the selectable transport rows, section navigation, and Return to Start.
 
+The five-inch Tempo card adjusts without leaving this surface. Drag its center
+left or right to preview a whole-BPM relative change; release sends one
+`set_tempo` request. Tap the card's minus or plus edge to step one BPM. A
+stationary tap on the BPM value still opens the full editor for keypad entry or
+larger changes. `SETTING…` remains visible until the server acknowledges the
+new value, and a failure restores the authoritative tempo.
+
 `STARTING` and `STOPPING` identify a pending request; they do not claim that
 the ensemble has begun or stopped. The returned object and observer snapshots
 are authoritative.
