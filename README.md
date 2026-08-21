@@ -137,11 +137,13 @@ screen also exposes active section, bars/beats/ticks, sync health,
 Previous/Next Section, Return to Start, and capability-gated Re-sync. The home
 card shows pending `STARTING` / `STOPPING` state until the server acknowledges
 the operation, then follows the revisioned server object rather than assuming
-that a button press succeeded. On the five-inch touch UI, selecting Position
-opens an arrangement scrubber: dragging previews locally, and release sends
-one capability-gated `locate_fraction` operation. The view remains pending
-while the server coordinates payload activation and phase, then returns to the
-authoritative transport position or presents the server failure.
+that a button press succeeded. On the five-inch touch UI, one consolidated
+performance surface keeps Play/Stop, Tempo, position, section, sync context,
+section navigation, and the arrangement scrubber together. Dragging previews
+locally, and release sends one capability-gated `locate_fraction` operation.
+The view remains pending while the server coordinates payload activation and
+phase, then returns to the advancing authoritative transport position or
+presents the server failure.
 
 When the canonical object is unavailable, Shadowbox retains the published
 Runner `/rnbo/jack/transport/rolling` and `/rnbo/jack/transport/bpm` controls

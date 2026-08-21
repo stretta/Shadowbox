@@ -473,6 +473,150 @@ class TouchDirectUITests(unittest.TestCase):
         self.assertGreaterEqual(target.h, 150)
         self.assertFalse(any(op[0] == "text" and str(op[1]).endswith("BPM") for op in display.ops))
 
+    def test_touch_transport_consolidates_primary_controls_and_arrangement_slider(self) -> None:
+        ui = ShadowboxUI(touch_locate_available=True)
+        snapshot = {
+            "revision": 1,
+            "is_playing": False,
+            "tempo": 108,
+            "position_fraction": 0.25,
+            "position_bbt": "3.1.000",
+            "duration_beats": 32,
+            "time_signature_numerator": 4,
+            "active_section": "B",
+            "arrangement": {
+                "sections": [
+                    {"id": "A", "start_beat": 0, "end_beat": 8},
+                    {"id": "B", "start_beat": 8, "end_beat": 16},
+                    {"id": "C", "start_beat": 16, "end_beat": 24},
+                    {"id": "D", "start_beat": 24, "end_beat": 32},
+                ]
+            },
+            "sync": {"state": "aligned", "re_sync_recommended": False},
+            "capabilities": {"can_locate": True, "can_re_sync": True},
+        }
+        ui.apply_shadowscore_transport_snapshot(snapshot)
+        ui.state.ui_mode = "SYSTEM_TRANSPORT"
+
+        renderer, display = _render_touch_layout(ui)
+
+        controls = {
+            target.button_id: target
+            for target in renderer.touch_layout.targets
+            if target.kind == "transport_control"
+        }
+        self.assertEqual(
+            set(controls),
+            {
+                "transport_play_stop",
+                "transport_tempo",
+                "transport_previous",
+                "transport_next",
+                "transport_start",
+                "transport_re_sync",
+            },
+        )
+        self.assertTrue(any(op[0] == "text" and op[1] == "3.1.000" for op in display.ops))
+        slider = next(target for target in renderer.touch_layout.targets if target.kind == "transport_locate_slider")
+        action = renderer.touch_layout.action_for_point(
+            (slider.x + slider.w * 0.75) / max(1, renderer.touch_layout.width - 1),
+            (slider.y + slider.h / 2) / max(1, renderer.touch_layout.height - 1),
+        )
+        self.assertEqual(action.kind, "set_transport_position")
+        self.assertAlmostEqual(action.value, 0.75, places=2)
+
+        ui.handle_event(UIEvent(kind="set_transport_position", value=0.75, pressed=True))
+        self.assertEqual(ui.state.ui_mode, "SYSTEM_TRANSPORT")
+        self.assertEqual(ui.transport_locate_position_label, "7.1.000")
+        self.assertEqual(ui.transport_locate_section_label, "D")
+        self.assertEqual(ui.pop_actions(), [])
+
+        ui.handle_event(UIEvent(kind="set_transport_position", value=0.75, pressed=False))
+        actions = [action for action in ui.pop_actions() if action.kind == "transport_command"]
+        self.assertEqual(actions[0].value, {"operation": "locate_fraction", "args": {"fraction": 0.75}})
+
+        acknowledged = dict(snapshot, revision=2, position_fraction=0.75, position_bbt="7.1.000", active_section="D")
+        ui.apply_shadowscore_transport_snapshot(acknowledged, operation="locate_fraction")
+        self.assertIsNone(ui.state.transport_locate_preview)
+        advancing = dict(acknowledged, revision=3, position_fraction=0.8, position_bbt="7.2.576")
+        ui.apply_shadowscore_transport_snapshot(advancing)
+        self.assertAlmostEqual(ui.transport_locate_fraction, 0.8)
+
+    def test_touch_transport_controls_dispatch_semantic_operations(self) -> None:
+        operations = {
+            "transport_play_stop": "play",
+            "transport_previous": "previous_section",
+            "transport_next": "next_section",
+            "transport_start": "return_to_start",
+            "transport_re_sync": "re_sync",
+        }
+        for button_id, operation in operations.items():
+            with self.subTest(button_id=button_id):
+                ui = ShadowboxUI(touch_locate_available=True)
+                ui.apply_shadowscore_transport_snapshot({
+                    "revision": 1,
+                    "is_playing": False,
+                    "tempo": 120,
+                    "position_fraction": 0,
+                    "position_bbt": "1.1.000",
+                    "duration_beats": 16,
+                    "active_section": "A",
+                    "arrangement": {"sections": [{"id": "A", "start_beat": 0, "end_beat": 16}]},
+                    "sync": {"state": "aligned"},
+                    "capabilities": {"can_locate": True, "can_re_sync": True},
+                })
+                ui.state.ui_mode = "SYSTEM_TRANSPORT"
+
+                ui.handle_event(UIEvent(kind="tap_button", button_id=button_id))
+
+                actions = [action for action in ui.pop_actions() if action.kind == "transport_command"]
+                self.assertEqual(actions[0].value, {"operation": operation, "args": {}})
+
+    def test_touch_transport_local_fallback_only_draws_owned_controls(self) -> None:
+        ui = ShadowboxUI(touch_locate_available=True)
+        ui.state.system = {
+            "transport": {
+                "rolling_path": "/rnbo/jack/transport/rolling",
+                "rolling": False,
+                "bpm_path": "/rnbo/jack/transport/bpm",
+                "bpm": 90.0,
+            }
+        }
+        ui.state.ui_mode = "SYSTEM_TRANSPORT"
+
+        renderer, display = _render_touch_layout(ui)
+
+        controls = [
+            target.button_id
+            for target in renderer.touch_layout.targets
+            if target.kind == "transport_control"
+        ]
+        self.assertEqual(controls, ["transport_play_stop", "transport_tempo"])
+        self.assertFalse(any(target.kind == "transport_locate_slider" for target in renderer.touch_layout.targets))
+        self.assertTrue(any(op[0] == "text" and op[1] == "LOCAL RUNNER" for op in display.ops))
+
+    def test_five_inch_encoder_layout_retains_selectable_transport_rows(self) -> None:
+        ui = ShadowboxUI(touch_locate_available=False)
+        ui.apply_shadowscore_transport_snapshot({
+            "revision": 1,
+            "is_playing": False,
+            "tempo": 108,
+            "position_bbt": "3.1.000",
+            "active_section": "B",
+            "sync": {"state": "aligned"},
+            "capabilities": {"can_locate": True},
+        })
+        ui.state.ui_mode = "SYSTEM_TRANSPORT"
+        display = _FiveInchDisplay()
+        renderer = create_renderer(display)
+
+        renderer.draw(ui)
+
+        self.assertIsNone(renderer.touch_layout)
+        labels = [op[1] for op in display.ops if op[0] == "text"]
+        self.assertIn("state", labels)
+        self.assertIn("tempo", labels)
+
     def test_home_card_icons_scale_up_on_touch_layout(self) -> None:
         ui = ShadowboxUI()
         display = _FiveInchDisplay()

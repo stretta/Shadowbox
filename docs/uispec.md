@@ -463,7 +463,8 @@ Rules:
 - Host-derived `SYSTEM` data should stay read-only unless there is a deliberately integrated control path for that feature
 - `TRANSPORT` is a global control surface, not an instance parameter editor. It uses the canonical ShadowscoreServer object when connected and otherwise writes only the published Runner `/rnbo/jack/transport/rolling` and `/rnbo/jack/transport/bpm` paths
 - Server mode exposes active section, bars/beats/ticks position, sync health, Previous/Next Section, Return to Start, and capability-gated Re-sync; UI state follows acknowledged objects and rejects older revisions
-- On the five-inch direct-touch UI, selecting Position opens a section-marked arrangement scrubber only when the server advertises `can_locate`. Dragging changes a local preview; exactly one `locate_fraction` command is committed on release. Pending and failed seeks must never be rendered as acknowledged position
+- On the five-inch direct-touch UI, `TRANSPORT` is a consolidated performance surface with Play/Stop, Tempo, authoritative position and section, a section-marked arrangement scrubber, and secondary section navigation on one page. The scrubber is interactive only when the server advertises `can_locate`. Dragging changes a local preview; exactly one `locate_fraction` command is committed on release. Pending and failed seeks must never be rendered as acknowledged position
+- A future Blocks view requires an explicit server-published meso-block launch capability and operation. It must not infer block launching by translating a block button into `locate_fraction`
 - Encoder-first displays retain Previous/Next Section and Return to Start rather than offering fine continuous locate
 - `TRANSPORT` must not start/stop JACK, restart the audio engine, or recreate ShadowScore arrangement/player controls
 - `STARTUP` must invoke only the startup configuration controls published by Runner; Shadowbox must not maintain a competing startup-set preference

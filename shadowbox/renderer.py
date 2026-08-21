@@ -1546,6 +1546,241 @@ class ShadowboxRenderer:
             label="Transport position",
         )
 
+    def draw_transport_surface(self, ui) -> None:
+        """Draw the five-inch, task-oriented global transport surface."""
+        panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
+        self._draw_panel(panel_x, panel_y, panel_w, panel_h, None)
+
+        margin = 24
+        gap = 12
+        top_y = panel_y + 16
+        top_h = 88
+        play_w = 180
+        tempo_w = 168
+        play_x = panel_x + margin
+        tempo_x = play_x + play_w + gap
+        info_x = tempo_x + tempo_w + gap
+        info_w = max(1, panel_x + panel_w - margin - info_x)
+        pending = str(ui.state.shadowscore_transport_pending or "")
+
+        def draw_button(
+            label: str,
+            x: int,
+            y: int,
+            w: int,
+            h: int,
+            button_id: str,
+            *,
+            accent: bool = False,
+            active: bool = False,
+            enabled: bool = True,
+            scale: int = 2,
+        ) -> None:
+            pressed = enabled and self._touch_pressed(kind="transport_control", button_id=button_id)
+            self._record_touch_target(
+                "transport_control",
+                x,
+                y,
+                w,
+                h,
+                action_kind="tap_button" if enabled else "noop",
+                button_id=button_id,
+                label=label,
+            )
+            if self.has_color:
+                fill = "panel_pressed" if pressed else "accent" if accent else "panel_alt"
+                border = "accent" if accent or active or pressed else "line"
+                text_color = "bg" if accent and not pressed else "text" if enabled else "muted"
+                self._rounded_theme(x, y, w, h, 12, fill, True)
+                self._rounded_theme(x, y, w, h, 12, border, False)
+                text_w, text_h = self._measure_text(label, scale, "semibold")
+                self._text_theme(
+                    label,
+                    x + max(0, (w - text_w) // 2),
+                    y + max(0, (h - text_h) // 2),
+                    text_color,
+                    scale,
+                    "semibold",
+                )
+                return
+            self.display.rect(x, y, w, h, True, pressed or accent)
+            text_w, text_h = self._measure_text(label, scale, "semibold")
+            self._text(
+                label,
+                x + max(0, (w - text_w) // 2),
+                y + max(0, (h - text_h) // 2),
+                scale,
+                "semibold",
+                on=not (pressed or accent),
+            )
+
+        rolling = ui.transport_rolling
+        if pending == "play":
+            play_label = "STARTING…"
+        elif pending == "stop":
+            play_label = "STOPPING…"
+        else:
+            play_label = "STOP" if rolling is True else "PLAY"
+        draw_button(
+            play_label,
+            play_x,
+            top_y,
+            play_w,
+            top_h,
+            "transport_play_stop",
+            accent=rolling is not True and not pending,
+            active=rolling is True,
+            enabled=not bool(pending),
+            scale=3 if len(play_label) <= 5 else 2,
+        )
+
+        bpm = ui.transport_bpm
+        bpm_label = f"{float(bpm):.0f} BPM" if isinstance(bpm, (int, float)) and not isinstance(bpm, bool) else "TEMPO"
+        draw_button(
+            bpm_label,
+            tempo_x,
+            top_y,
+            tempo_w,
+            top_h,
+            "transport_tempo",
+            enabled=not bool(pending),
+        )
+
+        transport = ui.state.shadowscore_transport if ui.server_transport_available else {}
+        sync = transport.get("sync", {}) if isinstance(transport.get("sync"), dict) else {}
+        previewing = ui.state.transport_locate_preview is not None
+        position = ui.transport_locate_position_label if previewing else str(transport.get("position_bbt") or "-")
+        section = ui.transport_locate_section_label if previewing else str(transport.get("active_section") or "-")
+        sync_state = str(sync.get("state") or "uncertain").upper()
+        authority = ui.transport_authority_label
+        context_label = f"SECTION {section} · {sync_state} · {authority}" if ui.server_transport_available else "LOCAL RUNNER"
+        if self.has_color:
+            self._rounded_theme(info_x, top_y, info_w, top_h, 12, "panel_alt", True)
+            self._rounded_theme(info_x, top_y, info_w, top_h, 12, "line", False)
+            position_text = self._truncate_to_width(position, max(1, info_w - 32), 3, "semibold")
+            position_w, _ = self._measure_text(position_text, 3, "semibold")
+            self._text_theme(position_text, info_x + max(16, (info_w - position_w) // 2), top_y + 12, "text", 3, "semibold")
+            context = self._truncate_to_width(
+                context_label,
+                max(1, info_w - 32),
+                1,
+                "medium",
+            )
+            context_w, context_h = self._measure_text(context, 1, "medium")
+            self._text_theme(
+                context,
+                info_x + max(16, (info_w - context_w) // 2),
+                top_y + top_h - context_h - 12,
+                "muted",
+                1,
+                "medium",
+            )
+        else:
+            self.display.rect(info_x, top_y, info_w, top_h, True, False)
+            position_text = self._truncate_to_width(position, max(1, info_w - 16), 2, "semibold")
+            position_w, _ = self._measure_text(position_text, 2, "semibold")
+            self._text(position_text, info_x + max(8, (info_w - position_w) // 2), top_y + 14, 2, "semibold")
+            context = self._truncate_to_width(context_label, max(1, info_w - 16), 1, "medium")
+            context_w, context_h = self._measure_text(context, 1, "medium")
+            self._text(context, info_x + max(8, (info_w - context_w) // 2), top_y + top_h - context_h - 12, 1, "medium")
+
+        if not ui.server_transport_available:
+            return
+
+        capabilities = transport.get("capabilities", {}) if isinstance(transport.get("capabilities"), dict) else {}
+        can_locate = ui.server_transport_available and capabilities.get("can_locate") is True
+        rail_x = panel_x + 42
+        rail_w = max(1, panel_w - 84)
+        rail_y = top_y + top_h + 60
+        rail_h = 48
+        fraction = max(0.0, min(1.0, float(ui.transport_locate_fraction)))
+        fill_w = int(round(rail_w * fraction))
+        thumb_x = rail_x + int(round((rail_w - 1) * fraction))
+        instruction = "DRAG · RELEASE TO LOCATE" if can_locate else "POSITION"
+        if pending == "locate_fraction":
+            instruction = "LOCATING…"
+        instruction_w, _ = self._measure_text(instruction, 1, "medium")
+        if self.has_color:
+            self._text_theme(
+                instruction,
+                panel_x + max(0, (panel_w - instruction_w) // 2),
+                rail_y - 28,
+                "muted",
+                1,
+                "medium",
+            )
+            self._rounded_theme(rail_x, rail_y, rail_w, rail_h, 12, "panel_alt", True)
+            self._rounded_theme(rail_x, rail_y, rail_w, rail_h, 12, "line", False)
+            if fill_w > 0:
+                self._fill_theme(rail_x, rail_y, fill_w, rail_h, "accent")
+            self._fill_theme(max(rail_x, thumb_x - 3), rail_y - 10, 7, rail_h + 20, "text")
+        else:
+            self._text(instruction, panel_x + max(0, (panel_w - instruction_w) // 2), rail_y - 20, 1, "medium")
+            self.display.rect(rail_x, rail_y, rail_w, rail_h, True, False)
+            if fill_w > 0:
+                self.display.rect(rail_x + 2, rail_y + 2, max(1, fill_w - 4), rail_h - 4, True, True)
+            self.display.vline(thumb_x, rail_y - 6, rail_h + 12, True)
+
+        duration = transport.get("duration_beats")
+        arrangement = transport.get("arrangement", {})
+        sections = arrangement.get("sections", []) if isinstance(arrangement, dict) else []
+        if isinstance(duration, (int, float)) and duration > 0 and isinstance(sections, list):
+            for item in sections:
+                if not isinstance(item, dict):
+                    continue
+                start = item.get("start_beat")
+                end = item.get("end_beat")
+                if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+                    continue
+                if start > 0:
+                    x = rail_x + int(round(rail_w * float(start) / float(duration)))
+                    if self.has_color:
+                        self._fill_theme(x, rail_y, 2, rail_h, "bg")
+                    else:
+                        self.display.vline(x, rail_y, rail_h, False)
+                center = (float(start) + float(end)) / (2.0 * float(duration))
+                label = str(item.get("id") or "")
+                label_w, _ = self._measure_text(label, 1, "semibold")
+                label_x = rail_x + int(round(rail_w * center)) - (label_w // 2)
+                if self.has_color:
+                    self._text_theme(label, label_x, rail_y + rail_h + 12, "muted", 1, "semibold")
+                else:
+                    self._text(label, label_x, rail_y + rail_h + 8, 1, "semibold")
+
+        self._record_touch_target(
+            "transport_locate_slider",
+            rail_x,
+            rail_y - 34,
+            rail_w,
+            rail_h + 88,
+            action_kind="set_transport_position" if can_locate and not pending else "noop",
+            button_id="transport_position",
+            label="Transport position",
+        )
+
+        controls_y = panel_y + panel_h - 76
+        control_h = 60
+        controls = [
+            ("PREV", "transport_previous"),
+            ("NEXT", "transport_next"),
+            ("START", "transport_start"),
+        ]
+        if capabilities.get("can_re_sync") is True:
+            controls.append(("RE-SYNC!" if sync.get("re_sync_recommended") else "RE-SYNC", "transport_re_sync"))
+        control_gap = 10
+        control_w = (panel_w - (margin * 2) - (control_gap * (len(controls) - 1))) // max(1, len(controls))
+        for index, (label, button_id) in enumerate(controls):
+            draw_button(
+                label,
+                panel_x + margin + index * (control_w + control_gap),
+                controls_y,
+                control_w,
+                control_h,
+                button_id,
+                accent=button_id == "transport_re_sync" and bool(sync.get("re_sync_recommended")),
+                enabled=ui.server_transport_available and not bool(pending),
+            )
+
     def _draw_selectable_value_rows_tft(self, rows: list[ValueRow], selected_idx: int) -> None:
         touch_layout = self._touch_list_geometry(visible_rows=4) if self.touch_layout_enabled else None
         panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
@@ -5386,7 +5621,10 @@ class ShadowboxRenderer:
         elif state.ui_mode == "SYSTEM_AUDIO_RESTART":
             self.draw_system_audio_restart(ui)
         elif state.ui_mode == "SYSTEM_TRANSPORT":
-            self.draw_selectable_value_rows(ui.transport_rows, state.transport_cursor)
+            if self.touch_layout_enabled:
+                self.draw_transport_surface(ui)
+            else:
+                self.draw_selectable_value_rows(ui.transport_rows, state.transport_cursor)
         elif state.ui_mode == "SYSTEM_TRANSPORT_LOCATE":
             self.draw_transport_locate(ui)
         elif state.ui_mode == "SYSTEM_HDMI_MIRROR":

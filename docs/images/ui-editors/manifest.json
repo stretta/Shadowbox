@@ -71,6 +71,22 @@
       "description": "Local playback chord, stage, history, and lifecycle display.",
       "width": 800,
       "height": 480
+    },
+    {
+      "file": "transport.png",
+      "title": "Transport",
+      "category": "system control",
+      "description": "Consolidated authoritative arrangement transport surface.",
+      "width": 800,
+      "height": 480
+    },
+    {
+      "file": "transport-locate.png",
+      "title": "Transport Locate",
+      "category": "system control",
+      "description": "Release-only authoritative arrangement scrubber.",
+      "width": 800,
+      "height": 480
     }
   ]
 }

@@ -1342,7 +1342,15 @@ class ShadowboxUI:
         return True
 
     def _handle_transport_locate(self, normalized_value: float | None, *, pressed: bool = False) -> None:
-        if self.state.ui_mode != "SYSTEM_TRANSPORT_LOCATE" or normalized_value is None:
+        if self.state.ui_mode not in {"SYSTEM_TRANSPORT", "SYSTEM_TRANSPORT_LOCATE"} or normalized_value is None:
+            return
+        capabilities = self.state.shadowscore_transport.get("capabilities", {})
+        if (
+            not self.touch_locate_available
+            or not self.server_transport_available
+            or not isinstance(capabilities, dict)
+            or capabilities.get("can_locate") is not True
+        ):
             return
         if self.state.shadowscore_transport_pending:
             return
@@ -1439,12 +1447,7 @@ class ShadowboxUI:
             self.state.shadowscore_transport_pending = ""
             changed = True
             if operation == "locate_fraction":
-                value = snapshot.get("position_fraction")
-                self.state.transport_locate_preview = (
-                    max(0.0, min(1.0, float(value)))
-                    if isinstance(value, (int, float)) and not isinstance(value, bool)
-                    else None
-                )
+                self.state.transport_locate_preview = None
                 if self.state.ui_mode == "SYSTEM_TRANSPORT_LOCATE":
                     self.state.ui_mode = "SYSTEM_TRANSPORT"
         if self.state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT" and self.transport_bpm is not None:
@@ -4002,6 +4005,23 @@ class ShadowboxUI:
         if self.state.ui_mode == "TOP" and button == "home_tempo":
             self._begin_transport_tempo_edit()
             return
+
+        if self.state.ui_mode == "SYSTEM_TRANSPORT":
+            if button == "transport_play_stop":
+                self._set_transport_rolling(not bool(self.transport_rolling))
+                return
+            if button == "transport_tempo":
+                self._begin_transport_tempo_edit()
+                return
+            operation = {
+                "transport_previous": "previous_section",
+                "transport_next": "next_section",
+                "transport_start": "return_to_start",
+                "transport_re_sync": "re_sync",
+            }.get(button)
+            if operation:
+                self._queue_transport_command(operation)
+                return
 
         if self.state.ui_mode == "EDIT":
             if button == "learn":

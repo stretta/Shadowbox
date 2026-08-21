@@ -303,6 +303,7 @@ def _transport_locate_ui() -> ShadowboxUI:
     ui.apply_shadowscore_transport_snapshot({
         "revision": 1,
         "is_playing": True,
+        "tempo": 120,
         "position_fraction": 0.625,
         "position_bbt": "6.1.000",
         "duration_beats": 32,
@@ -324,6 +325,32 @@ def _transport_locate_ui() -> ShadowboxUI:
     return ui
 
 
+def _transport_surface_ui() -> ShadowboxUI:
+    ui = ShadowboxUI(touch_locate_available=True)
+    ui.apply_shadowscore_transport_snapshot({
+        "revision": 1,
+        "is_playing": True,
+        "tempo": 120,
+        "position_fraction": 0.625,
+        "position_bbt": "6.1.000",
+        "duration_beats": 32,
+        "time_signature_numerator": 4,
+        "active_section": "C",
+        "arrangement": {
+            "sections": [
+                {"id": "A", "start_beat": 0, "end_beat": 8},
+                {"id": "B", "start_beat": 8, "end_beat": 16},
+                {"id": "C", "start_beat": 16, "end_beat": 24},
+                {"id": "D", "start_beat": 24, "end_beat": 32},
+            ]
+        },
+        "sync": {"state": "aligned", "re_sync_recommended": False},
+        "capabilities": {"can_locate": True, "can_re_sync": True},
+    })
+    ui.state.ui_mode = "SYSTEM_TRANSPORT"
+    return ui
+
+
 SCREENSHOTS = (
     ScreenshotSpec("ttid", "TTID", "parameter editor", "Pitch-class set keyboard and scale controls.", _ttid_ui),
     ScreenshotSpec("step16", "Step 16", "parameter editor", "Sixteen-step trigger-pattern editor.", _step16_ui),
@@ -334,6 +361,7 @@ SCREENSHOTS = (
     ScreenshotSpec("list-sequencer", "List Sequencer", "instance surface", "Seven list fields with direct-entry keypad.", _list_sequencer_ui),
     ScreenshotSpec("list-vel-sequencer", "List Velocity Sequencer", "instance surface", "Eight velocity rows with pitch context.", _list_vel_sequencer_ui),
     ScreenshotSpec("shadowscore-client", "ShadowScore Client", "instance surface", "Local playback chord, stage, history, and lifecycle display.", _shadowscore_client_ui),
+    ScreenshotSpec("transport", "Transport", "system control", "Consolidated authoritative arrangement transport surface.", _transport_surface_ui),
     ScreenshotSpec("transport-locate", "Transport Locate", "system control", "Release-only authoritative arrangement scrubber.", _transport_locate_ui),
 )
 

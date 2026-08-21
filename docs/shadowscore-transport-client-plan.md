@@ -137,6 +137,12 @@ acknowledgement, and authoritative failure recovery. Musician testing confirmed
 cross-section seeks while stopped and running, including continued audible
 playback after the running seek. All four delivery checkpoints are complete.
 
+The next five-inch UI pass consolidates the accepted scrubber with Play/Stop,
+Tempo, position and section readout, sync context, and secondary arrangement
+navigation on one purpose-built Transport surface. A future session-style meso
+Blocks view is intentionally gated on a semantic server launch operation and
+capability; Shadowbox will not simulate block launch with `locate_fraction`.
+
 On 2026-08-19, live acceptance on Wren confirmed canonical Play with HTTP 200,
 seven assigned targets prepared and transaction-matched ACTIVE, an advancing
 authoritative BBT position, direct advancing stage witnesses from all seven
