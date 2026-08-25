@@ -757,13 +757,26 @@ def _discover_instance_routing(instance_root: dict, system_ports: dict) -> dict:
     }
 
 
-def _instance_label(instance_root: dict, instance_id: str) -> str:
+def _instance_alias(instance_root: dict) -> str:
     alias = safe_get(instance_root, ["config", "CONTENTS", "name_alias", "VALUE"], "")
-    name = safe_get(instance_root, ["name", "VALUE"], "")
-    if isinstance(alias, str) and alias.strip():
+    if isinstance(alias, str):
         return alias.strip()
+    return ""
+
+
+def _instance_label(
+    instance_root: dict,
+    instance_id: str,
+    duplicate_aliases: set[str] | None = None,
+) -> str:
+    alias = _instance_alias(instance_root)
+    name = safe_get(instance_root, ["name", "VALUE"], "")
+    if alias:
+        if duplicate_aliases and alias.casefold() in duplicate_aliases:
+            return f"{alias}-{instance_id}"
+        return alias
     if isinstance(name, str) and name.strip():
-        return name.strip()
+        return f"{name.strip()}-{instance_id}"
     return f"instance {instance_id}"
 
 
@@ -874,6 +887,8 @@ def discover_instances(tree: dict) -> list[dict]:
     if not isinstance(inst_root, dict):
         return instances
 
+    instance_entries = []
+    alias_counts: dict[str, int] = {}
     for instance_id, instance_node in sorted(inst_root.items(), key=lambda item: str(item[0])):
         if not str(instance_id).isdigit():
             continue
@@ -883,12 +898,19 @@ def discover_instances(tree: dict) -> list[dict]:
         contents = instance_node.get("CONTENTS", {})
         if not isinstance(contents, dict):
             continue
+        instance_entries.append((str(instance_id), contents))
+        alias_key = _instance_alias(contents).casefold()
+        if alias_key:
+            alias_counts[alias_key] = alias_counts.get(alias_key, 0) + 1
+
+    duplicate_aliases = {alias for alias, count in alias_counts.items() if count > 1}
+    for instance_id, contents in instance_entries:
         preset_capabilities = _discover_instance_preset_capabilities(contents)
 
         instances.append(
             {
-                "id": str(instance_id),
-                "label": _instance_label(contents, str(instance_id)),
+                "id": instance_id,
+                "label": _instance_label(contents, instance_id, duplicate_aliases),
                 "name": safe_get(contents, ["name", "VALUE"], ""),
                 "params": _discover_instance_params(contents),
                 "state": _discover_instance_state(contents),

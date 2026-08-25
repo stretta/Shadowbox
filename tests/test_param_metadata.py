@@ -794,9 +794,59 @@ class ParamMetadataTests(unittest.TestCase):
 
         instances = discover_instances(tree)
 
+        self.assertEqual(instances[0]["label"], "My Synth-1")
         self.assertEqual(instances[0]["routing"]["audio"]["inputs"][0]["name"], "in1")
         self.assertEqual(instances[0]["routing"]["audio"]["inputs"][0]["display_name"], "Main Input")
         self.assertEqual(instances[0]["routing"]["audio"]["outputs"][0]["display_name"], "Main Output")
+
+    def test_discover_instances_uses_runner_ids_to_disambiguate_export_names(self) -> None:
+        tree = {
+            "CONTENTS": {
+                "rnbo": {
+                    "CONTENTS": {
+                        "inst": {
+                            "CONTENTS": {
+                                "1": {"CONTENTS": {"name": {"VALUE": "My Synth"}}},
+                                "7": {"CONTENTS": {"name": {"VALUE": "My Synth"}}},
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        instances = discover_instances(tree)
+
+        self.assertEqual([instance["label"] for instance in instances], ["My Synth-1", "My Synth-7"])
+
+    def test_discover_instances_preserves_unique_aliases_and_disambiguates_duplicate_aliases(self) -> None:
+        def instance(name: str, alias: str) -> dict:
+            return {
+                "CONTENTS": {
+                    "name": {"VALUE": name},
+                    "config": {"CONTENTS": {"name_alias": {"VALUE": alias}}},
+                }
+            }
+
+        tree = {
+            "CONTENTS": {
+                "rnbo": {
+                    "CONTENTS": {
+                        "inst": {
+                            "CONTENTS": {
+                                "1": instance("My Synth", "Bass"),
+                                "2": instance("My Synth", "Lead"),
+                                "7": instance("My Synth", "bass"),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        instances = discover_instances(tree)
+
+        self.assertEqual([instance["label"] for instance in instances], ["Bass-1", "Lead", "bass-7"])
 
     def test_discover_set_presets_reads_published_graph_preset_branch(self) -> None:
         tree = {
