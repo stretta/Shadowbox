@@ -32,6 +32,12 @@ The snapshot currently includes:
 - audio and MIDI routing
 - system audio and status information
 
+Instance labels are presentation-only. A unique published `name_alias` is
+shown unchanged; case-insensitive duplicate aliases receive a `-<runtime-id>`
+suffix. Without an alias, the label is `<export-name>-<runtime-id>` or, if no
+name is published, `instance <runtime-id>`. Shadowbox retains the raw Runner id
+for control, selection, and refresh.
+
 Shadowbox currently discovers read-only instance state from:
 - `/rnbo/inst/<id>/state/...`
 - `/rnbo/inst/<id>/messages/out/...`
@@ -375,6 +381,18 @@ left or right to preview a whole-BPM relative change; release sends one
 stationary tap on the BPM value still opens the full editor for keypad entry or
 larger changes. `SETTING…` remains visible until the server acknowledges the
 new value, and a failure restores the authoritative tempo.
+
+When the server advertises `can_launch_meso_blocks`, the surface also shows
+`ARRANGE` and `BLOCKS`. Selecting Blocks sends
+`set_arrangement_mode {mode:"hold"}` and waits for an acknowledged transport
+object before changing the view; returning to Arrange sends `{mode:"run"}`.
+The Blocks grid uses the server's `block_launcher.blocks` ids, labels,
+occurrence indices, availability, and active/requested state. Selecting an
+available block sends `launch_meso_block` with `block_id`, adding `macro_index`
+when exactly one occurrence index is published. Shadowbox never substitutes an
+arrangement `locate_fraction` seek. The grid shows eight blocks per page and
+uses the authoritative `playback_session` elapsed time instead of BBT position.
+Starting from Blocks includes `arrangement_mode: "hold"`.
 
 `STARTING` and `STOPPING` identify a pending request; they do not claim that
 the ensemble has begun or stopped. The returned object and observer snapshots

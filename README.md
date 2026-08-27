@@ -111,6 +111,10 @@ Shadowbox treats the published live OSCQuery runtime tree as the source of truth
 It does not maintain its own set model or restore set/session state from local persistence.
 Set load/save/startup behavior is executed only through Runner-published set and startup controls.
 A curated `NEW SET` action is acceptable when it maps directly to the published set load path using a verified backend template.
+Instance display labels preserve a unique published `name_alias`. If aliases are
+duplicated case-insensitively, Shadowbox appends each Runner instance id; an
+instance without an alias is displayed as `ExportName-ID`. Runtime control and
+selection always use the raw instance id rather than the display label.
 The `SYSTEM -> NETWORK` screen also includes WiFi network selection and a local direct-Ethernet setup action that can assign a predictable fallback IP for headless rescue connections.
 The WiFi chooser uses NetworkManager's `nmcli` when available, connects saved profiles directly, opens an on-device password editor for first-time secured networks, and includes a `RESCAN` row for intentionally refreshing the access-point list. If NetworkManager rejects a password, Shadowbox returns directly to password entry for that network. Retrying updates any profile left behind by the failed attempt so the new password is used instead of the stale saved secret.
 
@@ -147,6 +151,18 @@ presents the server failure. The Tempo card is also a relative scrubber:
 dragging previews a whole-BPM change and release sends one acknowledged
 `set_tempo`; its edge buttons step one BPM, while a stationary tap retains the
 full tempo editor for keypad or large changes.
+
+When the canonical object advertises `can_launch_meso_blocks`, the same
+five-inch surface offers `ARRANGE` and `BLOCKS` views. Entering Blocks requests
+`set_arrangement_mode {mode:"hold"}` and does not change views until the server
+acknowledges that mode. The Blocks grid preserves server-published ids and
+labels, disables unavailable blocks, and sends `launch_meso_block` with the
+selected block id, adding `macro_index` when the server publishes exactly one
+occurrence. Active and requested states remain server-authoritative. Blocks
+mode replaces BBT position with the authoritative
+playback-session elapsed clock and starts playback with arrangement mode held;
+returning to Arrange requests `set_arrangement_mode {mode:"run"}`. A block
+launch is never simulated with `locate_fraction`.
 
 When the canonical object is unavailable, Shadowbox retains the published
 Runner `/rnbo/jack/transport/rolling` and `/rnbo/jack/transport/bpm` controls
@@ -602,8 +618,13 @@ hardware, install the service without enabling or starting it yet:
 After attaching the hardware and rebooting, start Shadowbox:
 
 ```
+sudo systemctl enable shadowbox-early-splash
 sudo systemctl enable --now shadowbox
 ```
+
+The first command is required after a staged DSI install because `--no-start`
+leaves both services disabled. It enables the early framebuffer splash for
+subsequent boots; the second command enables and starts the full application.
 
 You can still set `SHADOWBOX_DISPLAY` in the environment instead; `--display`
 takes precedence when both are provided.

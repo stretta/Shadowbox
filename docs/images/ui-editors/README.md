@@ -32,4 +32,12 @@ including Pillow. Use `--output PATH` to write a copy somewhere else.
 | List Velocity Sequencer | [list-vel-sequencer.png](list-vel-sequencer.png) |
 | ShadowScore Client | [shadowscore-client.png](shadowscore-client.png) |
 
+## System controls
+
+| Control | Screenshot |
+| --- | --- |
+| Transport Arrangement | [transport.png](transport.png) |
+| Transport Blocks | [transport-blocks.png](transport-blocks.png) |
+| Transport Locate | [transport-locate.png](transport-locate.png) |
+
 `manifest.json` provides the same inventory in machine-readable form.

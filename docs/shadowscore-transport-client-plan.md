@@ -140,9 +140,12 @@ playback after the running seek. All four delivery checkpoints are complete.
 The five-inch UI consolidates the accepted scrubber with Play/Stop, an inline
 relative Tempo scrubber and one-BPM edge controls, position and section readout,
 sync context, and secondary arrangement navigation on one purpose-built
-Transport surface. A future session-style meso
-Blocks view is intentionally gated on a semantic server launch operation and
-capability; Shadowbox will not simulate block launch with `locate_fraction`.
+Transport surface. The capability-gated Blocks view is now implemented against
+the semantic server contract: `set_arrangement_mode` acknowledges Arrange/Run
+versus Blocks/Hold, `launch_meso_block` preserves block identity and occurrence,
+and `playback_session.elapsed_seconds` drives the Blocks clock. Unavailable
+blocks remain disabled, pending/active state follows the returned object, and
+Shadowbox does not simulate block launch with `locate_fraction`.
 
 On 2026-08-19, live acceptance on Wren confirmed canonical Play with HTTP 200,
 seven assigned targets prepared and transaction-matched ACTIVE, an advancing

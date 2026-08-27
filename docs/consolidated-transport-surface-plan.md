@@ -44,26 +44,34 @@ The existing standalone locate screen remains available as an internal path,
 but direct five-inch transport use no longer requires opening a second page to
 scrub.
 
-## Blocks view contract
+## Blocks view
 
-Blocks view must not translate a meso-block button into an inferred
+Blocks view is implemented in this checkout. It does not translate a
+meso-block button into an inferred
 `locate_fraction`. A block launch is a different musical intention from an
-arrangement seek and needs a semantic server operation.
+arrangement seek and uses the server's semantic launch operation.
 
-Before Shadowbox exposes Blocks view, the authoritative transport object should
-publish:
+Shadowbox exposes Blocks view only when the authoritative transport object
+publishes:
 
 - a stable list of launchable meso-block ids and display labels;
 - the active block and any requested, preparing, or queued block;
 - per-block availability and a concise unavailable reason;
 - launch timing policy such as immediate, next beat, next bar, or end of block;
-- a capability such as `can_launch_meso_blocks`;
-- a direct operation such as `launch_meso_block` with `block_id`.
+- the `can_launch_meso_blocks` capability;
+- `set_arrangement_mode` with `run` and `hold` modes;
+- the `launch_meso_block` operation with `block_id` and optional occurrence
+  `macro_index`;
+- authoritative `playback_session.elapsed_seconds`.
 
 The operation must own payload preparation, participating-cohort checks,
-activation, phase policy, acknowledgement, and failure. When that contract is
-available, the five-inch surface can offer `ARRANGE` and `BLOCKS` views without
-changing the shared Play/Stop, Tempo, authority, or error semantics.
+activation, phase policy, acknowledgement, and failure. Selecting Blocks asks
+the server for Hold and changes the view only after acknowledgement; selecting
+Arrange asks for Run. The grid preserves server ids and labels, disables
+unavailable entries, reflects active/requested state, and paginates eight
+blocks at a time. Blocks uses elapsed session time in place of BBT and adds
+`arrangement_mode: "hold"` when starting playback without changing the shared
+Tempo, authority, or error semantics.
 
 ## Acceptance
 
@@ -77,5 +85,11 @@ changing the shared Play/Stop, Tempo, authority, or error semantics.
 - Pending and failed commands never masquerade as acknowledged playback state.
 - A successful running locate resumes display from the advancing server
   position rather than preserving the preview value.
+- Blocks is absent unless `can_launch_meso_blocks` is true.
+- Arrange/Blocks mode changes wait for acknowledged Run/Hold state.
+- Available blocks launch only through `launch_meso_block`; unavailable blocks
+  cannot emit a launch command.
+- Blocks shows authoritative active/requested state and elapsed session time.
+- Play initiated from Blocks requests held arrangement mode.
 - Local fallback presents only the controls it actually owns.
 - Encoder-first layouts retain the existing row navigation.

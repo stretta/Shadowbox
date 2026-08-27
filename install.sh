@@ -457,6 +457,9 @@ else
     sudo systemctl disable shadowbox >/dev/null 2>&1 || true
     echo "Shadowbox service installed but not enabled or started."
     echo "After attaching the display/input hardware, run:"
+    if [[ "${DISPLAY_KIND}" == "waveshare_5inch_dsi" ]]; then
+        echo "sudo systemctl enable shadowbox-early-splash"
+    fi
     echo "sudo systemctl enable --now shadowbox"
 fi
 
