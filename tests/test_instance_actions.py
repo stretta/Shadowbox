@@ -2049,6 +2049,75 @@ class InstanceActionTests(unittest.TestCase):
         ui.handle_event(type("Evt", (), {"kind": "long_press"})())
         self.assertEqual(ui.state.ui_mode, "SYSTEM_TRANSPORT")
 
+    def test_list_sequencer_set_defaults_to_local_transport_when_server_is_connected(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.instances = [{"id": "14", "name": "ListSequencer", "params": []}]
+        ui.state.system = {
+            "set_name": "Local Lists",
+            "transport": {
+                "rolling_path": "/rnbo/jack/transport/rolling",
+                "rolling": False,
+                "bpm_path": "/rnbo/jack/transport/bpm",
+                "bpm": 100.0,
+            },
+        }
+        ui.apply_shadowscore_transport_snapshot({
+            "revision": 1,
+            "is_playing": False,
+            "tempo": 90.0,
+            "active_section": "F",
+            "sync": {"state": "unavailable"},
+        })
+
+        self.assertEqual(ui.transport_authority, "local")
+        self.assertEqual(ui.home_transport_tempo_label, "100 BPM · LOCAL")
+        ui.state.ui_mode = "SYSTEM_TRANSPORT"
+        ui.handle_event(UIEvent(kind="tap_button", button_id="transport_play_stop"))
+
+        actions = ui.pop_actions()
+        self.assertEqual(
+            [(action.kind, action.path, action.value) for action in actions],
+            [("set_transport", "/rnbo/jack/transport/rolling", True)],
+        )
+
+    def test_live_remote_shadowscore_cohort_keeps_score_authority_without_local_client(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.instances = [{"id": "14", "name": "ListSequencer", "params": []}]
+        ui.state.system = {
+            "set_name": "Ensemble",
+            "transport": {
+                "rolling_path": "/rnbo/jack/transport/rolling",
+                "rolling": False,
+                "bpm_path": "/rnbo/jack/transport/bpm",
+                "bpm": 100.0,
+            },
+        }
+        ui.apply_shadowscore_transport_snapshot({
+            "revision": 1,
+            "is_playing": False,
+            "tempo": 90.0,
+            "sync": {"online_players": 3, "fresh_players": 3},
+        })
+
+        self.assertEqual(ui.transport_authority, "shadowscore")
+        self.assertEqual(ui.transport_authority_label, "SHADOWSCORE")
+
+    def test_transport_authority_choice_persists_per_set(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "state.json"
+            with mock.patch("shadowbox.ui.STATE_PATH", state_path):
+                ui = ShadowboxUI()
+                ui.state.transport_authority_by_set = {"Local Lists": "local", "Ensemble": "shadowscore"}
+                ui.save_state()
+
+                restored = ShadowboxUI()
+                restored.restore_from_saved_state()
+
+        self.assertEqual(
+            restored.state.transport_authority_by_set,
+            {"Local Lists": "local", "Ensemble": "shadowscore"},
+        )
+
     def test_server_transport_is_acknowledged_and_exposes_arrangement_actions(self) -> None:
         ui = ShadowboxUI()
         ui.state.system = {
@@ -2074,6 +2143,7 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(
             [(row.label, row.value) for row in ui.transport_rows],
             [
+                ("authority", "SHADOWSCORE"),
                 ("state", "STOPPED · SHADOWSCORE"),
                 ("tempo", "108.0 BPM"),
                 ("section", "B"),

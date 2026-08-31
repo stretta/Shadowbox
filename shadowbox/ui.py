@@ -181,6 +181,7 @@ class UIState:
     transport_tempo_preview: float | None = None
     transport_tempo_drag_origin_bpm: float | None = None
     transport_tempo_drag_origin_position: float | None = None
+    transport_authority_by_set: dict[str, str] = field(default_factory=dict)
     transport_view: str = "arrange"
     transport_block_page: int = 0
     patcher_picker_context: str = "add"
@@ -650,6 +651,13 @@ class ShadowboxUI:
         self.state.top_index = clamp_index(int(saved.get("top_index", 0)), len(self.top_level_items))
         self.state.saved_audio_card = str(saved.get("saved_audio_card", ""))
         self.state.touch_feedback_enabled = bool(saved.get("touch_feedback_enabled", False))
+        transport_authority = saved.get("transport_authority_by_set", {})
+        if isinstance(transport_authority, dict):
+            self.state.transport_authority_by_set = {
+                str(set_name): str(authority)
+                for set_name, authority in transport_authority.items()
+                if str(set_name).strip() and str(authority) in {"local", "shadowscore"}
+            }
         transpose = saved.get("transpose_control", {})
         if not isinstance(transpose, dict):
             transpose = {}
@@ -666,6 +674,7 @@ class ShadowboxUI:
                 "top_index": self.state.top_index,
                 "saved_audio_card": self.current_audio_card,
                 "touch_feedback_enabled": self.state.touch_feedback_enabled,
+                "transport_authority_by_set": dict(self.state.transport_authority_by_set),
                 "transpose_control": {
                     "version": 1,
                     "authority": normalize_transpose_authority(self.state.transpose_authority),
@@ -1115,7 +1124,7 @@ class ShadowboxUI:
     def home_transport_label(self) -> str:
         if not self.transport_available:
             return "TRANSPORT"
-        pending = self.state.shadowscore_transport_pending
+        pending = self.state.shadowscore_transport_pending if self.server_transport_active else ""
         if pending == "play":
             return "STARTING"
         if pending == "stop":
@@ -1136,7 +1145,7 @@ class ShadowboxUI:
             return ""
         value = float(bpm)
         bpm_text = f"{value:.0f}" if value.is_integer() else f"{value:.1f}"
-        if not self.server_transport_available:
+        if not self.server_transport_active:
             return f"{bpm_text} BPM · LOCAL"
         section = str(self.state.shadowscore_transport.get("active_section") or "-")
         sync = self.state.shadowscore_transport.get("sync", {})
@@ -1228,8 +1237,10 @@ class ShadowboxUI:
 
     @property
     def transport_available(self) -> bool:
-        if self.server_transport_available:
-            return True
+        return self.local_transport_available or self.server_transport_available
+
+    @property
+    def local_transport_available(self) -> bool:
         transport = self.state.system.get("transport", {})
         return bool(transport.get("rolling_path") and transport.get("bpm_path"))
 
@@ -1238,15 +1249,82 @@ class ShadowboxUI:
         return self.state.shadowscore_transport_connected and bool(self.state.shadowscore_transport)
 
     @property
-    def transport_rolling(self) -> bool | None:
+    def has_local_shadowscore_client(self) -> bool:
+        return any(
+            "".join(character for character in str(instance.get("name", "")).lower() if character.isalnum())
+            == "shadowscoreclient"
+            for instance in self.state.instances
+            if isinstance(instance, dict)
+        )
+
+    @property
+    def server_transport_has_live_players(self) -> bool:
+        transport = self.state.shadowscore_transport
+        sync = transport.get("sync", {}) if isinstance(transport, dict) else {}
+        if not isinstance(sync, dict):
+            sync = {}
+        for key in ("online_players", "fresh_players"):
+            value = sync.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+                return True
+        session = transport.get("playback_session", {}) if isinstance(transport, dict) else {}
+        return transport.get("is_playing") is True or (isinstance(session, dict) and session.get("running") is True)
+
+    @property
+    def transport_authority(self) -> str:
+        selected = self.state.transport_authority_by_set.get(self.current_set_name, "")
+        if selected == "local" and self.local_transport_available:
+            return "local"
+        if selected == "shadowscore" and self.server_transport_available:
+            return "shadowscore"
+        if self.server_transport_available and self.server_transport_has_live_players:
+            return "shadowscore"
+        if self.local_transport_available and self.state.instances and not self.has_local_shadowscore_client:
+            return "local"
         if self.server_transport_available:
+            return "shadowscore"
+        return "local"
+
+    @property
+    def server_transport_active(self) -> bool:
+        return self.server_transport_available and self.transport_authority == "shadowscore"
+
+    @property
+    def transport_authority_selectable(self) -> bool:
+        if not (self.local_transport_available and self.server_transport_available):
+            return False
+        if self.state.shadowscore_transport_pending:
+            return False
+        local_rolling = self.state.system.get("transport", {}).get("rolling")
+        server_rolling = self.state.shadowscore_transport.get("is_playing")
+        return local_rolling is not True and server_rolling is not True
+
+    def _set_transport_authority(self, authority: str) -> bool:
+        authority = str(authority).strip().lower()
+        if authority not in {"local", "shadowscore"}:
+            return False
+        if authority == self.transport_authority:
+            return False
+        if not self.transport_authority_selectable:
+            return False
+        self.state.transport_authority_by_set[self.current_set_name] = authority
+        self.state.transport_locate_preview = None
+        self._clear_transport_tempo_preview()
+        self.state.transport_cursor = 1
+        self.queue_action(UIAction(kind="save_state"))
+        self.request_render("transport_authority")
+        return True
+
+    @property
+    def transport_rolling(self) -> bool | None:
+        if self.server_transport_active:
             value = self.state.shadowscore_transport.get("is_playing")
             return value if isinstance(value, bool) else None
         return self.state.system.get("transport", {}).get("rolling")
 
     @property
     def transport_bpm(self) -> float | None:
-        if self.server_transport_available:
+        if self.server_transport_active:
             value = self.state.shadowscore_transport.get("tempo")
         else:
             value = self.state.system.get("transport", {}).get("bpm")
@@ -1267,20 +1345,22 @@ class ShadowboxUI:
 
     @property
     def transport_authority_label(self) -> str:
-        return "SHADOWSCORE" if self.server_transport_available else "LOCAL"
+        return "SHADOWSCORE" if self.server_transport_active else "LOCAL"
 
     @property
     def transport_rows(self) -> list[ValueRow]:
         rolling = self.transport_rolling
         bpm = self.transport_bpm
         bpm_text = f"{float(bpm):.1f} BPM" if isinstance(bpm, (int, float)) and not isinstance(bpm, bool) else "-"
-        pending = self.state.shadowscore_transport_pending
+        pending = self.state.shadowscore_transport_pending if self.server_transport_active else ""
         state_text = "STARTING" if pending == "play" else "STOPPING" if pending == "stop" else "RUNNING" if rolling is True else "STOPPED" if rolling is False else "UNKNOWN"
         rows = [
             ValueRow("state", f"{state_text} · {self.transport_authority_label}", current=rolling is True),
             ValueRow("tempo", bpm_text),
         ]
-        if not self.server_transport_available:
+        if self.local_transport_available and self.server_transport_available:
+            rows.insert(0, ValueRow("authority", self.transport_authority_label, current=True))
+        if not self.server_transport_active:
             return rows
         transport = self.state.shadowscore_transport
         sync = transport.get("sync", {}) if isinstance(transport.get("sync"), dict) else {}
@@ -1369,7 +1449,7 @@ class ShadowboxUI:
         capabilities = self.state.shadowscore_transport.get("capabilities", {})
         if (
             not self.touch_locate_available
-            or not self.server_transport_available
+            or not self.server_transport_active
             or not isinstance(capabilities, dict)
             or capabilities.get("can_locate") is not True
             or self.state.shadowscore_transport_pending
@@ -1386,7 +1466,7 @@ class ShadowboxUI:
         capabilities = self.state.shadowscore_transport.get("capabilities", {})
         if (
             not self.touch_locate_available
-            or not self.server_transport_available
+            or not self.server_transport_active
             or not isinstance(capabilities, dict)
             or capabilities.get("can_locate") is not True
         ):
@@ -1441,7 +1521,7 @@ class ShadowboxUI:
         if preview == float(current_bpm):
             self.state.transport_tempo_preview = None
             return
-        if self._set_transport_tempo(preview) and not self.server_transport_available:
+        if self._set_transport_tempo(preview) and not self.server_transport_active:
             self._clear_transport_tempo_preview()
 
     @property
@@ -1478,9 +1558,9 @@ class ShadowboxUI:
         return True
 
     def _set_transport_rolling(self, rolling: bool) -> bool:
-        if self.state.shadowscore_transport_pending:
+        if self.server_transport_active and self.state.shadowscore_transport_pending:
             return False
-        if self.server_transport_available:
+        if self.server_transport_active:
             operation = "play" if bool(rolling) else "stop"
             if self.transport_rolling is bool(rolling):
                 return False
@@ -1499,7 +1579,7 @@ class ShadowboxUI:
         return True
 
     def _queue_transport_command(self, operation: str, args: dict[str, Any] | None = None) -> bool:
-        if not self.server_transport_available or self.state.shadowscore_transport_pending:
+        if not self.server_transport_active or self.state.shadowscore_transport_pending:
             return False
         operation = str(operation)
         self.state.shadowscore_transport_pending = operation
@@ -1574,7 +1654,7 @@ class ShadowboxUI:
 
     def _begin_transport_tempo_edit(self) -> bool:
         transport = self.state.system.get("transport", {})
-        if not self.server_transport_available and (not isinstance(transport, dict) or not transport.get("bpm_path")):
+        if not self.server_transport_active and (not isinstance(transport, dict) or not transport.get("bpm_path")):
             return False
         self._clear_transport_tempo_preview()
         return_mode = self.state.ui_mode
@@ -1591,9 +1671,9 @@ class ShadowboxUI:
 
     def _set_transport_tempo(self, value: float) -> bool:
         value = float(value)
-        if self.state.shadowscore_transport_pending:
+        if self.server_transport_active and self.state.shadowscore_transport_pending:
             return False
-        if self.server_transport_available:
+        if self.server_transport_active:
             return self._queue_transport_command("set_tempo", {"bpm": value})
         transport = self.state.system.get("transport", {})
         path = transport.get("bpm_path") if isinstance(transport, dict) else ""
@@ -4117,8 +4197,11 @@ class ShadowboxUI:
                     delta = -1.0 if button.endswith("down") else 1.0
                     target = max(20.0, min(300.0, float(bpm) + delta))
                     self.state.transport_tempo_preview = target
-                    if not self._set_transport_tempo(target) or not self.server_transport_available:
+                    if not self._set_transport_tempo(target) or not self.server_transport_active:
                         self._clear_transport_tempo_preview()
+                return
+            if button in {"transport_authority_local", "transport_authority_shadowscore"}:
+                self._set_transport_authority("local" if button.endswith("local") else "shadowscore")
                 return
             if button in {"transport_view_arrange", "transport_view_blocks"}:
                 mode = "hold" if button.endswith("blocks") else "run"
@@ -5286,7 +5369,10 @@ class ShadowboxUI:
         elif self.state.ui_mode == "SYSTEM_TRANSPORT":
             selected = self.transport_rows[self.state.transport_cursor - 1] if 0 < self.state.transport_cursor <= len(self.transport_rows) else None
             label = selected.label if selected is not None else ""
-            if label == "state":
+            if label == "authority":
+                authority = "shadowscore" if self.transport_authority == "local" else "local"
+                self._set_transport_authority(authority)
+            elif label == "state":
                 self._set_transport_rolling(not bool(self.transport_rolling))
             elif label == "tempo":
                 self._begin_transport_tempo_edit()

@@ -1561,7 +1561,7 @@ class ShadowboxRenderer:
         tempo_x = play_x + play_w + gap
         info_x = tempo_x + tempo_w + gap
         info_w = max(1, panel_x + panel_w - margin - info_x)
-        pending = str(ui.state.shadowscore_transport_pending or "")
+        pending = str(ui.state.shadowscore_transport_pending or "") if ui.server_transport_active else ""
 
         def draw_button(
             label: str,
@@ -1710,10 +1710,10 @@ class ShadowboxRenderer:
             self._text(bpm_label, slider_x + max(0, (slider_w - bpm_w) // 2), top_y + 18, 2, "semibold")
             self.display.hline(slider_x + 14, top_y + 68, max(1, slider_w - 28), True)
 
-        transport = ui.state.shadowscore_transport if ui.server_transport_available else {}
+        transport = ui.state.shadowscore_transport if ui.server_transport_active else {}
         sync = transport.get("sync", {}) if isinstance(transport.get("sync"), dict) else {}
         previewing = ui.state.transport_locate_preview is not None
-        blocks_view = ui.server_transport_available and ui.state.transport_view == "blocks"
+        blocks_view = ui.server_transport_active and ui.state.transport_view == "blocks"
         position = ui.transport_playback_elapsed_label if blocks_view else ui.transport_locate_position_label if previewing else str(transport.get("position_bbt") or "-")
         section = ui.transport_locate_section_label if previewing else str(transport.get("active_section") or "-")
         sync_state = str(sync.get("state") or "uncertain").upper()
@@ -1723,7 +1723,7 @@ class ShadowboxRenderer:
         if blocks_view:
             context_label = f"ELAPSED · {workflow} · SECTION {section} · {sync_state}"
         else:
-            context_label = f"{workflow} · SECTION {section} · {sync_state} · {authority}" if ui.server_transport_available else "LOCAL RUNNER"
+            context_label = f"{workflow} · SECTION {section} · {sync_state} · {authority}" if ui.server_transport_active else "LOCAL RUNNER"
         if self.has_color:
             self._rounded_theme(info_x, top_y, info_w, top_h, 12, "panel_alt", True)
             self._rounded_theme(info_x, top_y, info_w, top_h, 12, "line", False)
@@ -1754,12 +1754,42 @@ class ShadowboxRenderer:
             context_w, context_h = self._measure_text(context, 1, "medium")
             self._text(context, info_x + max(8, (info_w - context_w) // 2), top_y + top_h - context_h - 12, 1, "medium")
 
-        if not ui.server_transport_available:
+        mode_y = top_y + top_h + 12
+        if ui.local_transport_available and ui.server_transport_available:
+            authority_w = 104
+            authority_gap = 8
+            authority_x = panel_x + panel_w - margin - (authority_w * 2) - authority_gap
+            authority_enabled = ui.transport_authority_selectable
+            draw_button(
+                "LOCAL",
+                authority_x,
+                mode_y,
+                authority_w,
+                38,
+                "transport_authority_local",
+                active=ui.transport_authority == "local",
+                accent=ui.transport_authority == "local",
+                enabled=authority_enabled,
+                scale=1,
+            )
+            draw_button(
+                "SCORE",
+                authority_x + authority_w + authority_gap,
+                mode_y,
+                authority_w,
+                38,
+                "transport_authority_shadowscore",
+                active=ui.transport_authority == "shadowscore",
+                accent=ui.transport_authority == "shadowscore",
+                enabled=authority_enabled,
+                scale=1,
+            )
+
+        if not ui.server_transport_active:
             return
 
         capabilities = transport.get("capabilities", {}) if isinstance(transport.get("capabilities"), dict) else {}
         can_launch_blocks = capabilities.get("can_launch_meso_blocks") is True
-        mode_y = top_y + top_h + 12
         if can_launch_blocks:
             mode_w = 128
             draw_button(
@@ -1843,7 +1873,7 @@ class ShadowboxRenderer:
                 )
             return
 
-        can_locate = ui.server_transport_available and capabilities.get("can_locate") is True
+        can_locate = ui.server_transport_active and capabilities.get("can_locate") is True
         rail_x = panel_x + 42
         rail_w = max(1, panel_w - 84)
         rail_y = top_y + top_h + (96 if can_launch_blocks else 60)
@@ -1933,7 +1963,7 @@ class ShadowboxRenderer:
                 control_h,
                 button_id,
                 accent=button_id == "transport_re_sync" and bool(sync.get("re_sync_recommended")),
-                enabled=ui.server_transport_available and not bool(pending),
+                enabled=ui.server_transport_active and not bool(pending),
             )
 
     def _draw_selectable_value_rows_tft(self, rows: list[ValueRow], selected_idx: int) -> None:

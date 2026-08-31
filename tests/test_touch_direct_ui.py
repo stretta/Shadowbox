@@ -654,6 +654,66 @@ class TouchDirectUITests(unittest.TestCase):
         commands = [item for item in ui.pop_actions() if item.kind == "transport_command"]
         self.assertEqual(commands[0].value, {"operation": "play", "args": {"arrangement_mode": "hold"}})
 
+    def test_transport_authority_radio_preserves_blocks_mode_across_local_round_trip(self) -> None:
+        ui = ShadowboxUI(touch_locate_available=True)
+        ui.state.instances = [{"id": "14", "name": "ListSequencer", "params": []}]
+        ui.state.system = {
+            "set_name": "Local Lists",
+            "transport": {
+                "rolling_path": "/rnbo/jack/transport/rolling",
+                "rolling": False,
+                "bpm_path": "/rnbo/jack/transport/bpm",
+                "bpm": 100.0,
+            },
+        }
+        ui.apply_shadowscore_transport_snapshot({
+            "revision": 1,
+            "is_playing": False,
+            "tempo": 90.0,
+            "position_bbt": "118.1.240",
+            "active_section": "F",
+            "arrangement": {"requested_mode": "hold", "running": False},
+            "block_launcher": {
+                "active_block_id": "F",
+                "requested_block_id": "",
+                "request_state": "",
+                "blocks": [{"id": "F", "label": "F", "launchable": True, "occurrence_indices": [5]}],
+            },
+            "sync": {"state": "unavailable"},
+            "capabilities": {"can_launch_meso_blocks": True},
+        })
+        ui.state.ui_mode = "SYSTEM_TRANSPORT"
+
+        self.assertEqual(ui.transport_authority, "local")
+        self.assertEqual(ui.state.transport_view, "blocks")
+        renderer, display = _render_touch_layout(ui)
+        authority_targets = {
+            target.button_id: target
+            for target in renderer.touch_layout.targets
+            if target.button_id.startswith("transport_authority_")
+        }
+        self.assertEqual(set(authority_targets), {"transport_authority_local", "transport_authority_shadowscore"})
+        self.assertTrue(any(op[0] == "text" and op[1] == "LOCAL RUNNER" for op in display.ops))
+        self.assertFalse(any(target.button_id.startswith("transport_block_index:") for target in renderer.touch_layout.targets))
+
+        ui.handle_event(UIEvent(kind="tap_button", button_id="transport_authority_shadowscore"))
+        self.assertEqual(ui.transport_authority, "shadowscore")
+        self.assertEqual(ui.state.transport_view, "blocks")
+        self.assertEqual([action.kind for action in ui.pop_actions()], ["save_state"])
+        renderer, _display = _render_touch_layout(ui)
+        self.assertTrue(any(target.button_id == "transport_block_index:0" for target in renderer.touch_layout.targets))
+
+        ui.handle_event(UIEvent(kind="tap_button", button_id="transport_authority_local"))
+        self.assertEqual(ui.transport_authority, "local")
+        self.assertEqual(ui.state.transport_view, "blocks")
+        self.assertEqual([action.kind for action in ui.pop_actions()], ["save_state"])
+
+        ui.handle_event(UIEvent(kind="tap_button", button_id="transport_authority_shadowscore"))
+        ui.pop_actions()
+        ui.handle_event(UIEvent(kind="tap_button", button_id="transport_play_stop"))
+        commands = [action for action in ui.pop_actions() if action.kind == "transport_command"]
+        self.assertEqual(commands[0].value, {"operation": "play", "args": {"arrangement_mode": "hold"}})
+
     def test_transport_elapsed_label_formats_minutes_and_hours(self) -> None:
         ui = ShadowboxUI()
         ui.apply_shadowscore_transport_snapshot({"revision": 1, "playback_session": {"elapsed_seconds": 0}})

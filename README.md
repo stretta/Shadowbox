@@ -173,6 +173,15 @@ playback readback remain execution witnesses, not audible-output proof. On the
 touch home screen, tapping the BPM/context pill opens the same tempo editor and
 returns to the home screen when editing ends.
 
+When both transports are available, the five-inch Transport screen exposes an
+explicit `LOCAL` / `SCORE` authority choice. `LOCAL` controls the Runner paths
+directly; `SCORE` preserves the canonical acknowledged ShadowScore workflow.
+The choice is remembered per set and cannot change while either transport is
+running or while a canonical command is pending. Sets with local instances but
+no `ShadowScoreClient` initially choose `LOCAL`. Arrange and Blocks remain an
+independent Score-mode choice, and switching transport authority never changes
+or requests the arrangement mode.
+
 Source-aware local OSC may address the Shadowbox listener on port 13333 at
 `/shadowbox/transpose/chromatic` or `/shadowbox/transpose/scalar`. The first
 argument is the integer offset and an optional second string identifies the
