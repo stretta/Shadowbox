@@ -4,13 +4,16 @@ set -e
 
 usage() {
     cat <<EOF
-Usage: ./install.sh [--display DISPLAY_BACKEND] [--no-start]
+Usage: ./install.sh [--display DISPLAY_BACKEND] [--no-start] [--no-restart]
 
 Options:
   --display DISPLAY_BACKEND  Set SHADOWBOX_DISPLAY for this install.
                              Example: waveshare_5inch_dsi
   --no-start                 Install the service but do not enable or start it.
                              Use when display/input hardware is not attached yet.
+  --no-restart               Install and enable the service, but leave the
+                             currently running process in place. The updater
+                             uses this before handing restart to systemd.
   -h, --help                 Show this help.
 
 SHADOWBOX_DISPLAY can still be set in the environment. --display takes
@@ -20,6 +23,7 @@ EOF
 
 DISPLAY_KIND="${SHADOWBOX_DISPLAY:-st7789_raw}"
 START_SERVICE=1
+RESTART_SERVICE=1
 
 install_status() {
     if [[ -n "${SHADOWBOX_INSTALL_STATUS_FILE:-}" ]]; then
@@ -49,6 +53,11 @@ while [[ "$#" -gt 0 ]]; do
             ;;
         --no-start)
             START_SERVICE=0
+            RESTART_SERVICE=0
+            shift
+            ;;
+        --no-restart)
+            RESTART_SERVICE=0
             shift
             ;;
         -h|--help)
@@ -449,9 +458,14 @@ if [[ "${START_SERVICE}" -eq 1 ]]; then
     fi
     sudo systemctl enable shadowbox
 
-    echo "Starting Shadowbox..."
-    install_status "restart service"
-    sudo systemctl restart shadowbox
+    if [[ "${RESTART_SERVICE}" -eq 1 ]]; then
+        echo "Starting Shadowbox..."
+        install_status "restart service"
+        sudo systemctl restart shadowbox
+    else
+        echo "Shadowbox service installed and enabled; restart deferred."
+        install_status "restart deferred"
+    fi
 else
     sudo systemctl disable shadowbox-early-splash >/dev/null 2>&1 || true
     sudo systemctl disable shadowbox >/dev/null 2>&1 || true

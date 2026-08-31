@@ -1017,17 +1017,36 @@ keys currently include `editor`, `unit`, `units`, `display_precision`,
 If Shadowbox is already installed on the Pi and you want to update it to the
 latest version from this repository, use one of these paths.
 
-The unit UI includes `SYSTEM -> UPDATE` for installed git checkouts. `CHECK`
-fetches the configured upstream branch for Shadowbox and, when present, the
-companion ShadowscoreServer checkout at `/home/pi/ShadowscoreServer`.
-`UPDATE BOX` appears only when Shadowbox can fast-forward; it refuses dirty or
-diverged local checkouts, prompts for the Pi user's sudo password, pulls with
-`--ff-only`, then runs `./install.sh` so dependencies, service files, helper
-sudoers entries, and the `shadowbox` restart follow the normal install path.
+The unit UI includes `SYSTEM -> UPDATE` for both Git checkouts and deployed
+source copies. `CHECK` fetches the configured upstream branch for Shadowbox
+and, when present, the companion ShadowscoreServer installation at
+`/home/pi/ShadowscoreServer`.
+
+For a Git checkout, `UPDATE BOX` appears only when Shadowbox can fast-forward;
+it refuses dirty or diverged local checkouts and pulls with `--ff-only`. For a
+source-copy installation, the updater recognizes the project by its required
+files instead of mistaking the missing `.git` directory for an absent install.
+It clones the selected public branch into a temporary staging directory,
+validates the staged project shape, backs up the currently managed source,
+then synchronizes with checksum verification while preserving `.venv` and
+other runtime-only paths. A failed source installation restores the previous
+managed source before reporting the error. Successful source refreshes write
+`.source-release.json`, allowing later checks to compare the installed commit
+with the upstream branch.
+
+Both layouts prompt for the Pi user's sudo password and run `./install.sh` so
+dependencies, service files, and helper sudoers entries follow the normal
+install path. The installer defers its final restart during an in-app update;
+the updater records the result and asks systemd to restart Shadowbox from a
+separate transient unit, so restarting the UI does not terminate its own
+update worker before completion is recorded.
 
 The same screen can manage ShadowscoreServer, which has no dedicated hardware
-UI of its own. If `/home/pi/ShadowscoreServer` is missing, `INSTALL SCORE`
-prompts for sudo and runs the upstream installer from
+UI of its own. An existing source copy is shown as installed and is refreshed
+through the same staged backup/synchronize path while preserving `data/`,
+`config/*.local.json`, and `node_modules`. Only when
+`/home/pi/ShadowscoreServer` is genuinely absent does `INSTALL SCORE` appear;
+it prompts for sudo and runs the upstream installer from
 `https://github.com/stretta/ShadowscoreServer` with these defaults:
 `SHADOWSCORE_ROLE=host`, `SHADOWSCORE_INSTALL_DIR=/home/pi/ShadowscoreServer`,
 and the installer's default public URL of `http://$(hostname).local:8790`.

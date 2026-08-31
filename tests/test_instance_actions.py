@@ -569,6 +569,26 @@ class InstanceActionTests(unittest.TestCase):
         self.assertIn("INSTALL SCORE", ui.software_update_menu_items)
         self.assertTrue(any(row.label == "score" and row.value == "NOT INSTALLED" for row in ui.software_update_value_rows))
 
+    def test_update_screen_refreshes_existing_shadowscore_source_copy(self) -> None:
+        ui = ShadowboxUI()
+        ui.set_software_update_status(
+            {
+                "targets": {
+                    "shadowbox": {"state": "current", "message": "up to date", "available": False},
+                    "shadowscore": {
+                        "state": "available",
+                        "message": "source refresh",
+                        "available": True,
+                        "installed": True,
+                        "layout": "source-copy",
+                    },
+                }
+            }
+        )
+
+        self.assertIn("UPDATE SCORE", ui.software_update_menu_items)
+        self.assertNotIn("INSTALL SCORE", ui.software_update_menu_items)
+
     def test_update_score_prompts_for_sudo_password_with_shadowscore_target(self) -> None:
         ui = ShadowboxUI()
         ui.set_software_update_status(
