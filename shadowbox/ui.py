@@ -2235,7 +2235,7 @@ class ShadowboxUI:
                 ssid = str(item.get("ssid", "") or "").strip()
                 if not ssid:
                     continue
-                rows.append(MenuRow(ssid, current=bool(item.get("connected")) or ssid == current_ssid))
+                rows.append(MenuRow(ssid, current=bool(item.get("connected")) or (self.network_wifi_connected and ssid == current_ssid)))
             if len(rows) == 1:
                 rows.append(MenuRow("no networks"))
         rows.append(MenuRow("RESCAN", action=True))

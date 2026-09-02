@@ -10,7 +10,7 @@ pythonosc_module.udp_client = udp_client_module
 sys.modules.setdefault("pythonosc", pythonosc_module)
 sys.modules.setdefault("pythonosc.udp_client", udp_client_module)
 
-from shadowbox.renderer import ShadowboxRenderer, create_renderer, should_enable_touch_layout
+from shadowbox.renderer import FIVE_INCH_THEME, ShadowboxRenderer, create_renderer, should_enable_touch_layout
 from shadowbox.touch import TouchAction
 from shadowbox.ui import NAME_TOUCH_KEY_VALUES, ShadowboxUI, UIEvent, ValueRow
 
@@ -48,6 +48,9 @@ class _FiveInchDisplay:
 
 
 class _ColorFiveInchDisplay(_FiveInchDisplay):
+    def polyline_color(self, points: list[tuple[int, int]], color: tuple[int, int, int]) -> None:
+        self.ops.append(("polyline_color", points, color))
+
     def fill_rect_color(self, x: int, y: int, w: int, h: int, color: tuple[int, int, int]) -> None:
         self.ops.append(("fill_rect_color", x, y, w, h, color))
 
@@ -125,6 +128,209 @@ def _touch_action_for_target(
 
 
 class TouchDirectUITests(unittest.TestCase):
+    def _render_state_badges(self, ui):
+        display = _ColorFiveInchDisplay()
+        renderer = create_renderer(display)
+        renderer.set_touch_mode(True)
+        renderer.draw(ui)
+        self.assertEqual(ui.pop_actions(), [])
+        return renderer, display
+
+    def _assert_state_badge(self, renderer, display, label, index):
+        target = next(t for t in renderer.touch_layout.targets if t.kind == "row" and t.index == index)
+        badges = [op for op in display.ops if op[0] == "text_color" and op[1] == label and target.y <= op[3] < target.y + target.h]
+        self.assertEqual(len(badges), 1)
+        badge = badges[0]
+        self.assertLessEqual(badge[2] + display.measure_text(label, badge[5], badge[6])[0], target.x + target.w)
+
+    def test_audio_rate_and_buffer_badges_follow_current_values(self) -> None:
+        for mode, cursor, index in (("SYSTEM_AUDIO_RATE", "sample_rate_cursor", 2), ("SYSTEM_AUDIO_BUFFER", "buffer_size_cursor", 2)):
+            with self.subTest(mode=mode):
+                ui = ShadowboxUI()
+                ui.state.ui_mode = mode
+                ui.state.system = {"audio": {"sample_rate": 48000, "sample_rate_options": [44100, 48000], "period_frames": 256, "period_frames_options": [128, 256]}}
+                setattr(ui.state, cursor, 1)
+                renderer, display = self._render_state_badges(ui)
+                self._assert_state_badge(renderer, display, "CURRENT", index)
+
+    def test_load_set_badge_preserves_dirty_italics(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.ui_mode = "GRAPH_LOAD_SET_LIST"
+        ui.state.system = {"set_name": "Studio", "sets": {"available_sets": ["Stage", "Studio"], "dirty": True}}
+        ui.state.graph_load_set_cursor = 1
+        renderer, display = self._render_state_badges(ui)
+        self._assert_state_badge(renderer, display, "CURRENT", 2)
+        label = next(op for op in display.ops if op[0] == "text_color" and op[1] == "Studio")
+        self.assertIn("italic", label[6])
+        self.assertTrue(ui.current_set_dirty)
+
+    def test_both_preset_lists_mark_loaded_name_and_preserve_footer(self) -> None:
+        for mode in ("PRESET_LIST", "GRAPH_PRESET_LIST"):
+            with self.subTest(mode=mode):
+                ui = ShadowboxUI()
+                ui.state.ui_mode = mode
+                ui.state.active_instance_id = "1"
+                ui.state.instances = [{"id": "1", "presets": [{"name": "Dry"}, {"name": "Wet"}], "current_preset_name": "Wet", "preset_save_path": "/save"}]
+                ui.state.system = {"set_presets": {"available_presets": ["Dry", "Wet"], "loaded_name": "Wet", "save_path": "/save"}}
+                ui.state.preset_cursor = len(ui.preset_action_items) + 1
+                ui.state.graph_preset_cursor = len(ui.graph_preset_action_items) + 1
+                renderer, display = self._render_state_badges(ui)
+                self._assert_state_badge(renderer, display, "CURRENT", 2)
+                label = next(op for op in display.ops if op[0] == "text_color" and op[1] == "Wet")
+                self.assertEqual(label[6], "semibold")
+                self.assertTrue(any(t.kind == "modal_button" for t in renderer.touch_layout.targets))
+                self.assertEqual(len([op for op in display.ops if op[0] == "text_color" and op[1] == "CURRENT"]), 1)
+
+    def test_unknown_preset_and_empty_lists_do_not_mark_cursor(self) -> None:
+        for names in ([], ["Dry", "Wet"]):
+            with self.subTest(names=names):
+                ui = ShadowboxUI()
+                ui.state.ui_mode = "GRAPH_PRESET_LIST"
+                ui.state.system = {"set_presets": {"available_presets": names, "loaded_name": "Missing"}}
+                _, display = self._render_state_badges(ui)
+                self.assertFalse(any(op[0] == "text_color" and op[1] == "CURRENT" for op in display.ops))
+
+    def test_wifi_badge_requires_connected_state_not_saved_ssid(self) -> None:
+        for connected, row_connected in ((False, False), (True, False), (False, True)):
+            with self.subTest(connected=connected, row_connected=row_connected):
+                ui = ShadowboxUI()
+                ui.state.ui_mode = "WIFI_NETWORKS"
+                ui.state.system = {"network": {"wifi_name": "wlan0", "wifi_ssid": "Studio", "wifi_connected": connected, "wifi_networks": [{"ssid": "Studio", "connected": row_connected}, {"ssid": "Guest"}]}}
+                ui.state.wifi_network_cursor = 2
+                renderer, display = self._render_state_badges(ui)
+                if connected or row_connected:
+                    self._assert_state_badge(renderer, display, "CONNECTED", 1)
+                else:
+                    self.assertFalse(any(op[0] == "text_color" and op[1] == "CONNECTED" for op in display.ops))
+                self.assertTrue(any(t.label == "Rescan" for t in renderer.touch_layout.targets))
+
+    def test_audio_and_midi_assignments_allow_multiple_quiet_connected_badges(self) -> None:
+        for transport in ("audio", "midi"):
+            with self.subTest(transport=transport):
+                ui = ShadowboxUI()
+                ui.state.ui_mode = "ROUTING_TARGETS"
+                ui.state.active_instance_id = "1"
+                ui.state.active_transport = transport
+                ui.state.active_routing_direction = "outputs"
+                ui.state.routing_port_cursor = 1
+                ui.state.instances = [{"id": "1", "routing": {transport: {"outputs": [{"name": "Out", "connections": ["system:a", "system:b"], "targets": ["system:a", "system:b", "system:c"]}]}}}]
+                renderer, display = self._render_state_badges(ui)
+                for index in (1, 2):
+                    self._assert_state_badge(renderer, display, "CONNECTED", index)
+                self.assertFalse(any(op[0] == "rounded_rect_color" and op[6] == FIVE_INCH_THEME["panel_current"] for op in display.ops))
+                outlines = [op for op in display.ops if op[0] == "rounded_rect_color" and op[6] == FIVE_INCH_THEME["accent"] and not op[7]]
+                self.assertEqual(len(outlines), 2)
+                self.assertEqual([t.button_id for t in renderer.touch_layout.targets if t.kind == "modal_button"], ["add", "remove"])
+                ui.state.instances[0]["routing"][transport]["outputs"][0]["connections"] = []
+                _, empty_display = self._render_state_badges(ui)
+                self.assertFalse(any(op[0] == "text_color" and op[1] == "CONNECTED" for op in empty_display.ops))
+
+    def test_destination_badge_keeps_shared_italics_and_unconnected_chevron(self) -> None:
+        display = _ColorFiveInchDisplay()
+        renderer = create_renderer(display)
+        renderer.set_touch_mode(True)
+        renderer._begin_touch_layout("ROUTING_TARGETS")
+        renderer._draw_routing_targets_touch({"connections": ["A"]}, ["..", "DISCONNECT", "A", "B"], 3, current_indices={2}, item_weights={2: "italic"})
+        self._assert_state_badge(renderer, display, "CONNECTED", 2)
+        self.assertEqual(len([op for op in display.ops if op[0] == "text_color" and op[1] == ">"]), 1)
+        self.assertIn("italic", next(op[6] for op in display.ops if op[0] == "text_color" and op[1] == "A"))
+
+    def _render_audio_devices(self, current: str, cursor: int = 1):
+        ui = ShadowboxUI()
+        ui.state.ui_mode = "SYSTEM_AUDIO_DEVICE"
+        ui.state.system = {"audio": {"current_card": current, "card_options": ["hw:Dummy", "hw:sndrpihifiberry", "hw:USB"]}}
+        ui.state.audio_device_cursor = cursor
+        display = _ColorFiveInchDisplay()
+        renderer = create_renderer(display)
+        renderer.set_touch_mode(True)
+        renderer.draw(ui)
+        return ui, renderer, display
+
+    def test_audio_current_badge_follows_reported_device_not_cursor(self) -> None:
+        for cursor in (1, 2, 3):
+            with self.subTest(cursor=cursor):
+                ui, renderer, display = self._render_audio_devices("hw:sndrpihifiberry", cursor)
+                badges = [op for op in display.ops if op[0] == "text_color" and op[1] == "CURRENT"]
+                self.assertEqual(len(badges), 1)
+                target = next(t for t in renderer.touch_layout.targets if t.kind == "row" and t.index == 2)
+                self.assertLessEqual(target.y, badges[0][3])
+                self.assertLess(badges[0][3], target.y + target.h)
+                fills = [op for op in display.ops if op[0] == "rounded_rect_color" and op[6] == FIVE_INCH_THEME["panel_current"] and op[7]]
+                self.assertEqual(len(fills), 1)
+                self.assertEqual(fills[0][2], target.y)
+                self.assertEqual(len([op for op in display.ops if op[0] == "text_color" and op[1] == ">"]), 2)
+                self.assertEqual(ui.pop_actions(), [])
+
+    def test_audio_device_badge_reserves_space_for_long_device_name(self) -> None:
+        _, renderer, display = self._render_audio_devices("hw:sndrpihifiberry")
+        badge = next(op for op in display.ops if op[0] == "rounded_rect_color" and op[6] == FIVE_INCH_THEME["accent"] and op[7])
+        target = next(t for t in renderer.touch_layout.targets if t.kind == "row" and t.index == 2)
+        label = next(op for op in display.ops if op[0] == "text_color" and str(op[1]).startswith("hw:s") and target.y <= op[3] < target.y + target.h)
+        label_w, _ = display.measure_text(label[1], label[5], label[6])
+        self.assertLess(label[2] + label_w, badge[1])
+        self.assertLessEqual(badge[1] + badge[3], target.x + target.w)
+        self.assertEqual(target.label, "hw:sndrpihifiberry")
+
+    def test_unreported_audio_device_does_not_mark_cursor_as_current(self) -> None:
+        for current in ("", "hw:Unavailable"):
+            with self.subTest(current=current):
+                _, _, display = self._render_audio_devices(current)
+                self.assertFalse(any(op[0] == "text_color" and op[1] == "CURRENT" for op in display.ops))
+                self.assertFalse(any(op[0] == "rounded_rect_color" and op[6] == FIVE_INCH_THEME["panel_current"] for op in display.ops))
+
+    def test_audio_badge_updates_on_reported_device_change(self) -> None:
+        ui, renderer, display = self._render_audio_devices("hw:sndrpihifiberry")
+        ui.state.system["audio"]["current_card"] = "hw:USB"
+        display.ops.clear()
+        renderer.draw(ui)
+        badge = next(op for op in display.ops if op[0] == "text_color" and op[1] == "CURRENT")
+        target = next(t for t in renderer.touch_layout.targets if t.kind == "row" and t.index == 3)
+        self.assertLessEqual(target.y, badge[3])
+        self.assertLess(badge[3], target.y + target.h)
+
+    def test_audio_press_feedback_does_not_move_current_badge(self) -> None:
+        ui, renderer, display = self._render_audio_devices("hw:sndrpihifiberry")
+        ui.state.touch_feedback_enabled = True
+        for index in (1, 2):
+            with self.subTest(index=index):
+                target = next(t for t in renderer.touch_layout.targets if t.kind == "row" and t.index == index)
+                touch_state = SimpleNamespace(
+                    pressed=True,
+                    normalized_x=(target.x + target.w / 2) / (display.width - 1),
+                    normalized_y=(target.y + target.h / 2) / (display.height - 1),
+                )
+                display.ops.clear()
+                renderer.draw(ui, touch_state=touch_state)
+                badge = next(op for op in display.ops if op[0] == "text_color" and op[1] == "CURRENT")
+                current_target = next(t for t in renderer.touch_layout.targets if t.kind == "row" and t.index == 2)
+                self.assertLessEqual(current_target.y, badge[3])
+                self.assertLess(badge[3], current_target.y + current_target.h)
+                self.assertTrue(any(op[0] == "rounded_rect_color" and op[6] == FIVE_INCH_THEME["panel_pressed"] for op in display.ops))
+                self.assertTrue(any(op[0] == "fill_rect_color" and op[3] == 6 and op[5] == FIVE_INCH_THEME["accent"] for op in display.ops))
+                self.assertEqual(ui.pop_actions(), [])
+
+    def test_audio_badge_preserves_paged_device_touch_indices(self) -> None:
+        ui, renderer, display = self._render_audio_devices("hw:sndrpihifiberry")
+        ui.state.system["audio"]["card_options"] = ["hw:0", "hw:1", "hw:2", "hw:3", "hw:Dummy", "hw:sndrpihifiberry", "hw:vc4hdmi0", "hw:vc4hdmi1"]
+        ui._sync_audio_index()
+        display.ops.clear()
+        renderer.draw(ui)
+        target = next(t for t in renderer.touch_layout.targets if t.kind == "row" and t.index == 6)
+        badge = next(op for op in display.ops if op[0] == "text_color" and op[1] == "CURRENT")
+        self.assertEqual(target.label, "hw:sndrpihifiberry")
+        self.assertLessEqual(target.y, badge[3])
+        self.assertLess(badge[3], target.y + target.h)
+        action = _touch_action_for_target(renderer, kind="row", index=6)
+        self.assertEqual(action.index, 6)
+
+    def test_other_current_menus_do_not_get_audio_badge(self) -> None:
+        display = _ColorFiveInchDisplay()
+        renderer = create_renderer(display)
+        renderer.set_touch_mode(True)
+        renderer.draw_string_list(["48000", "96000"], 1, current_indices={0})
+        self.assertFalse(any(op[0] == "text_color" and op[1] == "CURRENT" for op in display.ops))
+        self.assertFalse(any(op[0] == "rounded_rect_color" and op[6] == FIVE_INCH_THEME["panel_current"] for op in display.ops))
+
     def test_touch_direct_enables_shared_touch_layout(self) -> None:
         self.assertTrue(should_enable_touch_layout("touch_direct"))
 
@@ -2098,7 +2304,9 @@ class TouchDirectUITests(unittest.TestCase):
         labels = [op[1] for op in display.ops if op[0] == "text_color"]
         buttons = [target.button_id for target in renderer.touch_layout.targets if target.kind == "modal_button"]
 
-        self.assertIn("system:midi_a", labels)
+        self.assertTrue(any(label.startswith("system:") for label in labels))
+        self.assertIn("CONNECTED", labels)
+        self.assertTrue(any(target.kind == "row" and target.label == "system:midi_a" for target in renderer.touch_layout.targets))
         self.assertIn("Add", labels)
         self.assertIn("Remove", labels)
         self.assertEqual(buttons, ["add", "remove"])

@@ -103,7 +103,7 @@ class _CaptureRenderer(ShadowboxRenderer):
         self.last_selectable_value_rows = [(row.label, row.value, row.current) for row in rows]
         self.last_selected_idx = selected_idx
 
-    def draw_menu_rows(self, rows: list[MenuRow], selected_idx: int) -> None:
+    def draw_menu_rows(self, rows: list[MenuRow], selected_idx: int, *, current_badge: str = "") -> None:
         self.last_items = [str(row.label) for row in rows]
         self.last_selected_idx = selected_idx
         self.last_current_indices = {idx for idx, row in enumerate(rows) if row.current}
@@ -751,6 +751,7 @@ class InstanceActionTests(unittest.TestCase):
         ui = ShadowboxUI()
         snapshot = self._snapshot_with_direct_network()
         snapshot.system["network"]["wifi_ssid"] = "studio"
+        snapshot.system["network"]["wifi_connected"] = True
         ui.apply_runner_snapshot(snapshot)
         ui.state.ui_mode = "WIFI_NETWORKS"
         ui.state.wifi_network_cursor = 1

@@ -60,6 +60,7 @@ FIVE_INCH_THEME = {
     "panel": (28, 33, 32),
     "panel_alt": (38, 44, 42),
     "panel_pressed": (55, 66, 62),
+    "panel_current": (30, 72, 56),
     "text": (244, 247, 242),
     "muted": (154, 164, 157),
     "line": (67, 77, 73),
@@ -849,6 +850,30 @@ class ShadowboxRenderer:
         else:
             self._text(">", chev_x, chev_y, scale, weight)
 
+    def _draw_current_badge(self, x: int, y: int, w: int, h: int, *, pressed: bool, label: str = "CURRENT", subtle: bool = False) -> int:
+        """Mark current/connected state independently of cursor/press feedback."""
+        fill = "panel_alt" if subtle else "panel_current"
+        self._rounded_theme(x, y, w, h - 1, 8, "panel_pressed" if pressed else fill, True)
+        self._fill_theme(x, y + 8, 6, h - 16, "accent")
+        scale = 2
+        text_w, _ = self._measure_text(label, scale, "semibold")
+        text_h = self._line_height(scale, "semibold")
+        badge_w = text_w + 48
+        badge_h = text_h + 16
+        badge_x = x + w - badge_w - 18
+        badge_y = y + (h - badge_h) // 2
+        self._rounded_theme(badge_x, badge_y, badge_w, badge_h, 7, "accent", not subtle)
+        ink = "accent" if subtle else "bg"
+        # Draw the check geometrically so it does not depend on font glyph support.
+        cy = badge_y + badge_h // 2
+        for offset in (0, 1, 2):
+            self._draw_polyline_theme(
+                [(badge_x + 12, cy + offset), (badge_x + 17, cy + 5 + offset), (badge_x + 27, cy - 6 + offset)],
+                ink,
+            )
+        self._text_theme(label, badge_x + 36, badge_y + 8, ink, scale, "semibold")
+        return badge_x
+
     def _draw_touch_page_rail(
         self,
         content_top: int,
@@ -1056,6 +1081,7 @@ class ShadowboxRenderer:
         current_indices: set[int] | None = None,
         item_weights: dict[int, str] | None = None,
         action_indices: set[int] | None = None,
+        current_badge: str = "",
     ) -> None:
         items, selected_idx, index_offset, current_indices, item_weights, action_indices = self._strip_touch_back_item(
             list(items),
@@ -1072,6 +1098,7 @@ class ShadowboxRenderer:
                 item_weights=item_weights,
                 index_offset=index_offset,
                 action_indices=action_indices,
+                current_badge=current_badge,
             )
             return
         indices, selected_row, rows = self.list_window(selected_idx, len(items))
@@ -1092,6 +1119,7 @@ class ShadowboxRenderer:
         item_weights: dict[int, str] | None = None,
         index_offset: int = 0,
         action_indices: set[int] | None = None,
+        current_badge: str = "",
     ) -> None:
         touch_layout = self._touch_list_geometry(visible_rows=4) if self.touch_layout_enabled else None
         panel_x, panel_y, panel_w, panel_h = self._content_panel_box()
@@ -1191,11 +1219,15 @@ class ShadowboxRenderer:
                 if self.touch_layout_enabled and self.has_color:
                     scale = self._touch_menu_scale()
                     text_right_pad = 48 if not is_action else 16
+                    show_current_badge = current_badge and current and not is_action
+                    if show_current_badge:
+                        badge_x = self._draw_current_badge(content_left, row_top, row_w, row_h_px, pressed=pressed, label=current_badge)
+                        text_right_pad = content_left + row_w - badge_x + 16
                     fitted_label = self._truncate_to_width(label, max(1, draw_w - 32 - text_right_pad), scale, weight)
                     text_w, _text_h = self._measure_text(fitted_label, scale, weight)
                     text_x = draw_x + max(16, (draw_w - text_w) // 2) if is_action else content_left + 30
                     self._text_theme(fitted_label, text_x, y - (self._line_height(scale, weight) // 2), "text", scale, weight)
-                    if not is_action:
+                    if not is_action and not show_current_badge:
                         self._draw_touch_row_chevron(content_left, row_top, row_w, row_h_px, scale)
                 else:
                     self._text(f"{prefix} {shorten(label, line_limit)}"[: self.text_cols], 6, y, weight=weight)
@@ -1209,7 +1241,7 @@ class ShadowboxRenderer:
             return row.emphasis
         return None
 
-    def draw_menu_rows(self, rows: list[MenuRow], selected_idx: int) -> None:
+    def draw_menu_rows(self, rows: list[MenuRow], selected_idx: int, *, current_badge: str = "") -> None:
         items = [row.label for row in rows]
         current_indices = {idx for idx, row in enumerate(rows) if row.current}
         action_indices = {idx for idx, row in enumerate(rows) if row.action}
@@ -1224,6 +1256,7 @@ class ShadowboxRenderer:
             current_indices=current_indices,
             item_weights=item_weights or None,
             action_indices=action_indices or None,
+            current_badge=current_badge,
         )
 
     def draw_preset_list_with_footer(
@@ -1290,9 +1323,14 @@ class ShadowboxRenderer:
                 pressed = self._touch_pressed(kind="row", index=tap_index)
                 current = str(names[item_idx]) == str(current_name)
                 self._draw_touch_list_item_background(content_left, row_top, row_w, row_h, current=current, pressed=pressed)
-                text_w = self._truncate_to_width(label, max(1, row_w - 96), 3, "regular")
-                self._text_theme(text_w, content_left + 30, y - (self._line_height(3, "regular") // 2), "text", 3, "regular")
-                self._draw_touch_row_chevron(content_left, row_top, row_w, row_h, 3)
+                text_right = content_right - 66
+                if current and self.has_color:
+                    text_right = self._draw_current_badge(content_left, row_top, row_w, row_h, pressed=pressed) - 16
+                weight = "semibold" if current else "regular"
+                fitted = self._truncate_to_width(label, max(1, text_right - content_left - 30), 3, weight)
+                self._text_theme(fitted, content_left + 30, y - (self._line_height(3, weight) // 2), "text", 3, weight)
+                if not (current and self.has_color):
+                    self._draw_touch_row_chevron(content_left, row_top, row_w, row_h, 3)
 
         if action_labels:
             labels = [label.replace("...", "") for label in action_labels]
@@ -2671,7 +2709,10 @@ class ShadowboxRenderer:
                 )
                 pressed = self._touch_pressed(kind="row", index=tap_index)
                 self._draw_touch_list_item_background(content_left, row_top, row_w, row_h, current=True, pressed=pressed)
-                fitted = self._truncate_to_width(label, max(1, row_w - 96), 3, "regular")
+                text_right = content_right - 66
+                if self.has_color:
+                    text_right = self._draw_current_badge(content_left, row_top, row_w, row_h, pressed=pressed, label="CONNECTED", subtle=True) - 16
+                fitted = self._truncate_to_width(label, max(1, text_right - content_left - 30), 3, "regular")
                 self._text_theme(fitted, content_left + 30, y - (self._line_height(3, "regular") // 2), "text", 3, "regular")
 
         self._draw_touch_footer_button_row(
@@ -2790,9 +2831,13 @@ class ShadowboxRenderer:
                 current=current,
                 pressed=pressed,
             )
-            fitted = self._truncate_to_width(label, max(1, row_w - 96), 3, weight)
+            text_right = content_right - 66
+            if current and self.has_color:
+                text_right = self._draw_current_badge(content_left, row_top, row_w, row_h, pressed=pressed, label="CONNECTED", subtle=True) - 16
+            fitted = self._truncate_to_width(label, max(1, text_right - content_left - 30), 3, weight)
             self._text_theme(fitted, content_left + 30, y - (self._line_height(3, weight) // 2), "text", 3, weight)
-            self._draw_touch_row_chevron(content_left, row_top, row_w, row_h, 3)
+            if not (current and self.has_color):
+                self._draw_touch_row_chevron(content_left, row_top, row_w, row_h, 3)
 
         disconnect_label = self._menu_label(labels[1] if len(labels) > 1 else "DISCONNECT")
         button_h = max(1, row_h - 20)
@@ -4990,7 +5035,7 @@ class ShadowboxRenderer:
         self.draw_value_rows(ui.graph_startup_value_rows)
 
     def draw_system_audio_device(self, ui) -> None:
-        self.draw_menu_rows(ui.audio_device_rows, ui.state.audio_device_cursor)
+        self.draw_menu_rows(ui.audio_device_rows, ui.state.audio_device_cursor, current_badge="CURRENT")
 
     def draw_system_audio_restart(self, ui) -> None:
         device_name = str(ui.state.audio_restart_device or "").strip()
@@ -5042,10 +5087,10 @@ class ShadowboxRenderer:
             self.text_center(shorten(line, self.text_cols), y)
 
     def draw_system_audio_rate(self, ui) -> None:
-        self.draw_menu_rows(ui.sample_rate_rows, ui.state.sample_rate_cursor)
+        self.draw_menu_rows(ui.sample_rate_rows, ui.state.sample_rate_cursor, current_badge="CURRENT")
 
     def draw_system_audio_buffer(self, ui) -> None:
-        self.draw_menu_rows(ui.buffer_size_rows, ui.state.buffer_size_cursor)
+        self.draw_menu_rows(ui.buffer_size_rows, ui.state.buffer_size_cursor, current_badge="CURRENT")
 
     def draw_network(self, ui) -> None:
         self.draw_selectable_value_rows(ui.network_value_rows, ui.state.network_cursor)
@@ -5701,7 +5746,7 @@ class ShadowboxRenderer:
         elif state.ui_mode == "GRAPH_SET_LIST":
             self.draw_menu_rows(ui.graph_set_rows, state.graph_set_cursor)
         elif state.ui_mode == "GRAPH_LOAD_SET_LIST":
-            self.draw_menu_rows(ui.graph_load_set_rows, state.graph_load_set_cursor)
+            self.draw_menu_rows(ui.graph_load_set_rows, state.graph_load_set_cursor, current_badge="CURRENT")
         elif state.ui_mode == "GRAPH_PRESET_LIST":
             if self.touch_layout_enabled:
                 self.draw_preset_list_with_footer(
@@ -5833,7 +5878,7 @@ class ShadowboxRenderer:
         elif state.ui_mode == "SOFTWARE_UPDATE":
             self.draw_software_update(ui)
         elif state.ui_mode == "WIFI_NETWORKS":
-            self.draw_menu_rows(ui.wifi_network_rows, state.wifi_network_cursor)
+            self.draw_menu_rows(ui.wifi_network_rows, state.wifi_network_cursor, current_badge="CONNECTED")
         elif state.ui_mode == "ABOUT":
             self.draw_about()
         elif state.ui_mode == "BRICK_PANEL":

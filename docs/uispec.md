@@ -539,6 +539,10 @@ Display rendering rules:
 - Menu rows should follow one shared semantic styling model:
 - selected row = cursor/highlight only
 - current row = bold or semibold
+- In the color touch audio-device list, the reported current device additionally has a contrasting tinted row, solid accent bar, and check-mark `CURRENT` badge. The badge replaces that row's chevron, remains independent of cursor/press feedback, and does not imply JACK health. Other rows retain their existing navigation styling.
+- The same `CURRENT` treatment applies to sample rate, buffer size, Load Set, and set/instance preset lists. It identifies the current setting or loaded identity, not whether subsequent edits have been saved; existing dirty-set italics and status remain separate.
+- The color touch Wi-Fi list marks connected networks with `CONNECTED`; a remembered SSID without connected state must not receive this badge. This indicates network association, not internet access.
+- Color touch audio/MIDI routing assignment and destination lists use `CONNECTED` badges, a quieter row tint, and outlined badges because several simultaneous connections are valid. These indicate published connections, not signal activity. Add/remove/disconnect actions and unconnected destinations retain their existing styling and behavior.
 - secondary state such as occupied/shared/dirty = italic
 - current plus secondary state = bold italic
 - action rows such as save/rename may use a distinct action weight, but they must not be styled as current unless they actually represent the current live choice
