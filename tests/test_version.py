@@ -1,3 +1,4 @@
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +11,7 @@ from shadowbox.software_update import (
     _install_staged_source,
     _restore_source_backup,
     _run_command_with_status,
+    _run_git_in,
     read_shadowscore_update_status,
     read_all_software_update_status,
     read_software_update_status,
@@ -20,6 +22,62 @@ from shadowbox.version import GitVersionInfo, build_label, display_branch_name, 
 
 
 class VersionTests(unittest.TestCase):
+    def test_update_status_with_real_git_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+
+            def git(*args):
+                return subprocess.run(
+                    ["git", "-c", "core.hooksPath=/dev/null", *args],
+                    cwd=repo, check=True, capture_output=True, text=True,
+                ).stdout.strip()
+
+            git("init", "-b", "main")
+            git("config", "user.name", "Updater Test")
+            git("config", "user.email", "updater@example.invalid")
+            git("config", "commit.gpgsign", "false")
+            tracked = repo / "tracked.txt"
+            tracked.write_text("original\n", encoding="utf-8")
+            git("add", "tracked.txt")
+            git("commit", "-m", "Initial version")
+            git("remote", "add", "origin", str(repo))
+            git("update-ref", "refs/remotes/origin/main", "HEAD")
+            git("branch", "--set-upstream-to=origin/main", "main")
+
+            def check_status(expected):
+                with patch("shadowbox.software_update.REPO_ROOT", repo), patch(
+                    "shadowbox.software_update.SHADOWSCORE_INSTALL_DIR", repo
+                ):
+                    for reader in (read_software_update_status, read_shadowscore_update_status):
+                        with self.subTest(reader=reader.__name__, expected=expected):
+                            status = reader()
+                            self.assertEqual(status.state, expected)
+                            self.assertEqual(status.dirty, expected == "dirty")
+                            self.assertEqual(status.available, expected == "available")
+
+            check_status("current")
+            remote_commit = git("commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Next version")
+            git("update-ref", "refs/remotes/origin/main", remote_commit)
+            check_status("available")
+            tracked.write_text("local changes\n", encoding="utf-8")
+            check_status("dirty")
+            git("add", "tracked.txt")
+            check_status("dirty")
+
+    @patch("shadowbox.software_update.subprocess.run")
+    def test_git_command_output_keeps_diagnostics_out_of_success(self, run) -> None:
+        for returncode, stdout, stderr, expected in (
+            (0, "", "", (True, "")),
+            (0, "", "warning: diagnostic", (True, "")),
+            (0, "main\n", "warning: diagnostic", (True, "main")),
+            (1, "", "fatal: failed\n", (False, "fatal: failed")),
+            (1, "failure details\n", "", (False, "failure details")),
+            (1, "", "", (False, "exit 1")),
+        ):
+            with self.subTest(returncode=returncode, stdout=stdout, stderr=stderr):
+                run.return_value = subprocess.CompletedProcess([], returncode, stdout, stderr)
+                self.assertEqual(_run_git_in(Path("."), "status", "--porcelain"), expected)
+
     def test_display_branch_name_uses_last_segment(self) -> None:
         self.assertEqual(display_branch_name("codex/port-local-changes"), "port-local-changes")
 

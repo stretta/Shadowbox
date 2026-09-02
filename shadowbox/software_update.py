@@ -79,8 +79,10 @@ def _run_git_in(repo_root: Path, *args: str, timeout: float = 8.0) -> tuple[bool
         return False, str(exc)
 
     output = (result.stdout or "").strip()
+    if result.returncode == 0:
+        return True, output
     detail = output or (result.stderr or "").strip() or f"exit {result.returncode}"
-    return result.returncode == 0, detail
+    return False, detail
 
 
 def _run_git(*args: str, timeout: float = 8.0) -> tuple[bool, str]:
