@@ -2101,6 +2101,64 @@ class InstanceActionTests(unittest.TestCase):
             [("set_transport", "/rnbo/jack/transport/rolling", True)],
         )
 
+    def test_local_play_enables_runner_sync_before_starting_transport(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.system = {
+            "transport": {
+                "rolling_path": "/rnbo/jack/transport/rolling",
+                "rolling": False,
+                "bpm_path": "/rnbo/jack/transport/bpm",
+                "bpm": 90.0,
+                "sync_path": "/rnbo/jack/transport/sync",
+                "sync": False,
+            }
+        }
+        ui.state.ui_mode = "SYSTEM_TRANSPORT"
+
+        self.assertEqual(ui.local_transport_sync_label, "REQUIRED")
+        self.assertEqual(ui.transport_rows[-1].label, "sync")
+        ui.handle_event(UIEvent(kind="tap_button", button_id="transport_play_stop"))
+
+        self.assertEqual(
+            [(action.kind, action.path, action.value) for action in ui.pop_actions()],
+            [
+                ("set_transport", "/rnbo/jack/transport/sync", True),
+                ("set_transport", "/rnbo/jack/transport/rolling", True),
+            ],
+        )
+        self.assertEqual(ui.local_transport_sync_label, "READY")
+
+    def test_local_stop_preserves_runner_sync_and_encoder_row_repairs_it(self) -> None:
+        ui = ShadowboxUI()
+        ui.state.system = {
+            "transport": {
+                "rolling_path": "/rnbo/jack/transport/rolling",
+                "rolling": True,
+                "bpm_path": "/rnbo/jack/transport/bpm",
+                "bpm": 90.0,
+                "sync_path": "/rnbo/jack/transport/sync",
+                "sync": True,
+            }
+        }
+        ui.state.ui_mode = "SYSTEM_TRANSPORT"
+
+        ui.handle_event(UIEvent(kind="tap_button", button_id="transport_play_stop"))
+        self.assertEqual(
+            [(action.path, action.value) for action in ui.pop_actions() if action.kind == "set_transport"],
+            [("/rnbo/jack/transport/rolling", False)],
+        )
+        self.assertTrue(ui.local_transport_sync)
+
+        ui.state.system["transport"]["sync"] = False
+        ui.state.transport_cursor = next(
+            index for index, row in enumerate(ui.transport_rows, start=1) if row.label == "sync"
+        )
+        ui.handle_event(type("Evt", (), {"kind": "short_press"})())
+        self.assertEqual(
+            [(action.path, action.value) for action in ui.pop_actions() if action.kind == "set_transport"],
+            [("/rnbo/jack/transport/sync", True)],
+        )
+
     def test_live_remote_shadowscore_cohort_keeps_score_authority_without_local_client(self) -> None:
         ui = ShadowboxUI()
         ui.state.instances = [{"id": "14", "name": "ListSequencer", "params": []}]

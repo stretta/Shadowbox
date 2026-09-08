@@ -166,7 +166,13 @@ launch is never simulated with `locate_fraction`.
 
 When the canonical object is unavailable, Shadowbox retains the published
 Runner `/rnbo/jack/transport/rolling` and `/rnbo/jack/transport/bpm` controls
-and labels them `LOCAL`. A local Play/Stop also sends the legacy non-blocking
+and labels them `LOCAL`. When the Runner advertises `/rnbo/jack/transport/sync`,
+local Play first enables it so transport-locked RNBO instances follow the shared
+tempo and start/stop state. The Transport screen reports that prerequisite as
+`SYNC READY`, `SYNC REQUIRED`, or `SYNC UNKNOWN`; selecting a non-ready Sync row
+on an encoder display or tapping the warning on a touch display requests the
+required enabled state. Stop changes only Runner rolling state and does not
+alter per-instance Clock arming. A local Play/Stop also sends the legacy non-blocking
 hardware intent to a compatible ShadowScore coordinator. Shadowbox never sends
 that legacy intent in addition to a canonical command. Local stage and
 playback readback remain execution witnesses, not audible-output proof. On the

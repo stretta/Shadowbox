@@ -328,7 +328,7 @@ def _parse_instance_state_path(path: str) -> tuple[str, str] | None:
 
 def _transport_event_key(path: str, system: dict) -> str:
     transport = system.get("transport", {}) if isinstance(system, dict) else {}
-    for key in ("bpm", "rolling"):
+    for key in ("bpm", "rolling", "sync"):
         if str(path) == str(transport.get(f"{key}_path", "")):
             return key
     return ""
@@ -423,6 +423,8 @@ def _snapshot_signature(snapshot) -> tuple:
         transport.get("bpm"),
         str(transport.get("rolling_path", "")),
         transport.get("rolling"),
+        str(transport.get("sync_path", "")),
+        transport.get("sync"),
         str(sets.get("current_name", "") or snapshot.system.get("set_name", "")),
         str(sets.get("initial_value", "")),
         sets.get("auto_start_last") is True,
@@ -1026,7 +1028,7 @@ def main():
                     # OSC True/False typetags carry no arguments, so python-osc
                     # reports both as None. Re-read the advertised tree instead
                     # of mistaking a True notification for False.
-                    if transport_key == "rolling" and value is None:
+                    if transport_key in {"rolling", "sync"} and value is None:
                         discovery.request("runner", "transport listener", delay=0.05)
                     elif ui.apply_transport_update(path, value):
                         ui.state.activity_ticks += 1

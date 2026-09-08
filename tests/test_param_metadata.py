@@ -1134,6 +1134,11 @@ class ParamMetadataTests(unittest.TestCase):
                                             "TYPE": "F",
                                             "VALUE": None,
                                         },
+                                        "sync": {
+                                            "FULL_PATH": "/rnbo/jack/transport/sync",
+                                            "TYPE": "T",
+                                            "VALUE": None,
+                                        },
                                     }
                                 },
                             }
@@ -1178,6 +1183,8 @@ class ParamMetadataTests(unittest.TestCase):
                 "bpm": 89.99995422363281,
                 "rolling_path": "/rnbo/jack/transport/rolling",
                 "rolling": False,
+                "sync_path": "/rnbo/jack/transport/sync",
+                "sync": True,
             },
         )
         self.assertNotIn("network", system)

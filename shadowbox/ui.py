@@ -1323,6 +1323,27 @@ class ShadowboxUI:
         return self.state.system.get("transport", {}).get("rolling")
 
     @property
+    def local_transport_sync(self) -> bool | None:
+        transport = self.state.system.get("transport", {})
+        if not isinstance(transport, dict) or not transport.get("sync_path"):
+            return None
+        value = transport.get("sync")
+        return value if isinstance(value, bool) else None
+
+    @property
+    def local_transport_sync_available(self) -> bool:
+        transport = self.state.system.get("transport", {})
+        return isinstance(transport, dict) and bool(transport.get("sync_path"))
+
+    @property
+    def local_transport_sync_label(self) -> str:
+        if self.local_transport_sync is True:
+            return "READY"
+        if self.local_transport_sync is False:
+            return "REQUIRED"
+        return "UNKNOWN"
+
+    @property
     def transport_bpm(self) -> float | None:
         if self.server_transport_active:
             value = self.state.shadowscore_transport.get("tempo")
@@ -1361,6 +1382,8 @@ class ShadowboxUI:
         if self.local_transport_available and self.server_transport_available:
             rows.insert(0, ValueRow("authority", self.transport_authority_label, current=True))
         if not self.server_transport_active:
+            if self.local_transport_sync_available:
+                rows.append(ValueRow("sync", self.local_transport_sync_label, current=self.local_transport_sync is True))
             return rows
         transport = self.state.shadowscore_transport
         sync = transport.get("sync", {}) if isinstance(transport.get("sync"), dict) else {}
@@ -1552,6 +1575,11 @@ class ShadowboxUI:
             transport["bpm"] = next_value
             if self.state.ui_mode == "SYSTEM_TRANSPORT_TEMPO_EDIT":
                 self.state.edit_value = next_value
+        elif str(path) == str(transport.get("sync_path", "")):
+            next_value = bool(value)
+            if transport.get("sync") == next_value:
+                return False
+            transport["sync"] = next_value
         else:
             return False
         self.request_render("transport")
@@ -1573,9 +1601,25 @@ class ShadowboxUI:
         rolling = bool(rolling)
         if transport.get("rolling") == rolling:
             return False
+        if rolling:
+            self._ensure_local_transport_sync()
         transport["rolling"] = rolling
         self.queue_action(UIAction(kind="set_transport", path=path, value=rolling))
         self.request_render("transport")
+        return True
+
+    def _ensure_local_transport_sync(self) -> bool:
+        if self.server_transport_active:
+            return False
+        transport = self.state.system.get("transport", {})
+        if not isinstance(transport, dict):
+            return False
+        path = str(transport.get("sync_path", ""))
+        if not path or transport.get("sync") is True:
+            return False
+        transport["sync"] = True
+        self.queue_action(UIAction(kind="set_transport", path=path, value=True))
+        self.request_render("transport_sync")
         return True
 
     def _queue_transport_command(self, operation: str, args: dict[str, Any] | None = None) -> bool:
@@ -4188,6 +4232,9 @@ class ShadowboxUI:
             if button == "transport_play_stop":
                 self._set_transport_rolling(not bool(self.transport_rolling))
                 return
+            if button == "transport_sync":
+                self._ensure_local_transport_sync()
+                return
             if button == "transport_tempo":
                 self._begin_transport_tempo_edit()
                 return
@@ -5376,6 +5423,8 @@ class ShadowboxUI:
                 self._set_transport_rolling(not bool(self.transport_rolling))
             elif label == "tempo":
                 self._begin_transport_tempo_edit()
+            elif label == "sync":
+                self._ensure_local_transport_sync()
             elif label == "position":
                 self._begin_transport_locate()
             elif label == "previous":

@@ -1003,6 +1003,7 @@ def discover_system(tree: dict) -> dict:
         transport_root = {}
     bpm_node = transport_root.get("bpm", {})
     rolling_node = transport_root.get("rolling", {})
+    sync_node = transport_root.get("sync", {})
 
     def transport_bool(node: dict) -> bool | None:
         if not isinstance(node, dict) or not node.get("FULL_PATH"):
@@ -1048,6 +1049,8 @@ def discover_system(tree: dict) -> dict:
             "bpm": bpm_node.get("VALUE") if isinstance(bpm_node, dict) else None,
             "rolling_path": str(rolling_node.get("FULL_PATH", "")) if isinstance(rolling_node, dict) else "",
             "rolling": transport_bool(rolling_node),
+            "sync_path": str(sync_node.get("FULL_PATH", "")) if isinstance(sync_node, dict) else "",
+            "sync": transport_bool(sync_node),
         },
         "set_name": sets.get("current_name", ""),
         "sets": sets,

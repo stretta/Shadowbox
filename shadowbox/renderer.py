@@ -1761,10 +1761,31 @@ class ShadowboxRenderer:
         if blocks_view:
             context_label = f"ELAPSED · {workflow} · SECTION {section} · {sync_state}"
         else:
-            context_label = f"{workflow} · SECTION {section} · {sync_state} · {authority}" if ui.server_transport_active else "LOCAL RUNNER"
+            if ui.server_transport_active:
+                context_label = f"{workflow} · SECTION {section} · {sync_state} · {authority}"
+            elif ui.local_transport_sync_available:
+                context_label = f"SYNC {ui.local_transport_sync_label} · LOCAL"
+            else:
+                context_label = "LOCAL RUNNER"
+        local_sync_repair = (
+            not ui.server_transport_active
+            and ui.local_transport_sync_available
+            and ui.local_transport_sync is not True
+        )
+        if local_sync_repair:
+            self._record_touch_target(
+                "transport_control",
+                info_x,
+                top_y,
+                info_w,
+                top_h,
+                action_kind="tap_button",
+                button_id="transport_sync",
+                label="Enable runner sync",
+            )
         if self.has_color:
             self._rounded_theme(info_x, top_y, info_w, top_h, 12, "panel_alt", True)
-            self._rounded_theme(info_x, top_y, info_w, top_h, 12, "line", False)
+            self._rounded_theme(info_x, top_y, info_w, top_h, 12, "accent" if local_sync_repair else "line", False)
             position_text = self._truncate_to_width(position, max(1, info_w - 32), 3, "semibold")
             position_w, _ = self._measure_text(position_text, 3, "semibold")
             self._text_theme(position_text, info_x + max(16, (info_w - position_w) // 2), top_y + 12, "text", 3, "semibold")

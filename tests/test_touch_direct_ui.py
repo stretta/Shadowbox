@@ -1016,6 +1016,34 @@ class TouchDirectUITests(unittest.TestCase):
         self.assertFalse(any(target.kind == "transport_locate_slider" for target in renderer.touch_layout.targets))
         self.assertTrue(any(op[0] == "text" and op[1] == "LOCAL RUNNER" for op in display.ops))
 
+    def test_touch_transport_reports_required_runner_sync(self) -> None:
+        ui = ShadowboxUI(touch_locate_available=True)
+        ui.state.system = {
+            "transport": {
+                "rolling_path": "/rnbo/jack/transport/rolling",
+                "rolling": False,
+                "bpm_path": "/rnbo/jack/transport/bpm",
+                "bpm": 90.0,
+                "sync_path": "/rnbo/jack/transport/sync",
+                "sync": False,
+            }
+        }
+        ui.state.ui_mode = "SYSTEM_TRANSPORT"
+
+        renderer, display = _render_touch_layout(ui)
+
+        self.assertTrue(any(op[0] == "text" and "SYNC REQUIRED" in op[1] for op in display.ops))
+        self.assertEqual(
+            _touch_action_for_target(renderer, kind="transport_control", button_id="transport_sync"),
+            TouchAction("tap_button", button_id="transport_sync"),
+        )
+
+        ui.handle_event(UIEvent(kind="tap_button", button_id="transport_sync"))
+        self.assertEqual(
+            [(action.path, action.value) for action in ui.pop_actions() if action.kind == "set_transport"],
+            [("/rnbo/jack/transport/sync", True)],
+        )
+
     def test_five_inch_encoder_layout_retains_selectable_transport_rows(self) -> None:
         ui = ShadowboxUI(touch_locate_available=False)
         ui.apply_shadowscore_transport_snapshot({
