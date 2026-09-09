@@ -23,7 +23,6 @@ from shadowbox.software_update import (
     start_shadowscore_update_install,
     start_software_update_install,
 )
-from shadowbox.shadowscore_transport import notify_shadowscore_transport_async
 from shadowbox.shadowscore_transport_client import ShadowScoreTransportCoordinator
 from shadowbox.ui import ShadowboxUI
 from shadowbox.renderer import create_renderer, should_enable_touch_layout
@@ -1189,8 +1188,6 @@ def main():
                 elif action.kind == "set_transport":
                     if action.path is not None:
                         rnbo.send_value(action.path, action.value)
-                        if _transport_event_key(action.path, ui.state.system) == "rolling":
-                            notify_shadowscore_transport_async(bool(action.value))
                         discovery.request("runner", "transport", delay=0.15)
 
                 elif action.kind == "transport_command":

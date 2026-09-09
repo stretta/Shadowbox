@@ -2087,6 +2087,7 @@ class InstanceActionTests(unittest.TestCase):
             "is_playing": False,
             "tempo": 90.0,
             "active_section": "F",
+            "arrangement": {"requested_mode": "run"},
             "sync": {"state": "unavailable"},
         })
 

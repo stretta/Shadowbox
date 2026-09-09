@@ -53,8 +53,9 @@ clock authority, arrangement details, sync health, and capabilities.
    must not trigger an automatic local command or blind retry.
 5. Direct `/rnbo/jack/transport/rolling` and BPM remain available when no
    canonical object is connected and are labeled `LOCAL`.
-6. `/transport/external` remains a compatibility notification for direct local
-   hardware movement. It is never sent in addition to a canonical operation.
+6. Local authority writes only the Runner transport. It never notifies
+   `/transport/external` or otherwise asks ShadowscoreServer to adopt local
+   hardware movement.
 7. `READY`, `ACTIVE`, server `is_playing`, advancing local stage, emitted MIDI,
    and audible output remain distinct witnesses.
 

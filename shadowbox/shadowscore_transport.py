@@ -2,11 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-import socket
-import urllib.request
 from pathlib import Path
-from threading import Thread
-from typing import Callable
 
 
 DEFAULT_SHADOWSCORE_URL = "http://127.0.0.1:8790"
@@ -30,54 +26,6 @@ def shadowscore_transport_urls(
         if url and url not in urls:
             urls.append(url)
     return urls
-
-
-def notify_shadowscore_transport(
-    rolling: bool,
-    *,
-    unit_id: str | None = None,
-    urls: list[str] | None = None,
-    timeout: float = 0.5,
-    opener: Callable = urllib.request.urlopen,
-) -> bool:
-    payload = json.dumps(
-        {
-            "source": "shadowbox",
-            "unitId": str(unit_id or socket.gethostname()).strip(),
-            "rolling": bool(rolling),
-        },
-        separators=(",", ":"),
-    ).encode("utf-8")
-    for base_url in urls or shadowscore_transport_urls():
-        request = urllib.request.Request(
-            f"{base_url.rstrip('/')}/transport/external",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with opener(request, timeout=timeout) as response:
-                status = int(getattr(response, "status", 200))
-                if 200 <= status < 300:
-                    return True
-        except Exception:
-            continue
-    return False
-
-
-def notify_shadowscore_transport_async(
-    rolling: bool,
-    *,
-    unit_id: str | None = None,
-    thread_factory: Callable = Thread,
-) -> None:
-    thread = thread_factory(
-        target=notify_shadowscore_transport,
-        kwargs={"rolling": bool(rolling), "unit_id": unit_id},
-        daemon=True,
-    )
-    thread.start()
-
 
 def _urls_from_json(path: Path, keys: tuple[str, ...]) -> list[str]:
     try:
