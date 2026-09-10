@@ -1143,9 +1143,9 @@ def main():
                     ui.clear_network_error()
                 else:
                     ui.set_network_error(_short_error_text(result.error))
-                    if result.kind.startswith("connect_wifi") and result.target:
-                        retrying_wifi_password = ui.begin_wifi_password_retry(result.target)
-                if not retrying_wifi_password:
+                if result.kind.startswith("connect_wifi"):
+                    retrying_wifi_password = ui.finish_wifi_connection(ok=result.ok, target=result.target)
+                elif not retrying_wifi_password:
                     ui.state.ui_mode = "NETWORK"
                 ui.state.network_cursor = 5 if result.kind.startswith("connect_wifi") and len(ui.network_value_rows) >= 5 else 1
                 ui.set_busy(False)
@@ -1420,7 +1420,7 @@ def main():
 
                 elif action.kind == "connect_wifi":
                     ui.set_busy(True, "network")
-                    network_operations.request("connect_wifi", action.ssid or "")
+                    network_operations.request("connect_wifi", action.ssid or "", str(action.value or ""))
 
                 elif action.kind == "connect_wifi_new":
                     ui.set_busy(True, "network")

@@ -946,7 +946,20 @@ class ShadowboxUI:
         merged.update(dict(network or {}))
         # Status-only refreshes preserve the cached Wi-Fi list.
         if "wifi_networks" not in network and "wifi_networks" in previous:
-            merged["wifi_networks"] = previous["wifi_networks"]
+            cached_networks = previous["wifi_networks"]
+            if isinstance(cached_networks, list) and ({"wifi_connected", "wifi_ssid"} & set(network)):
+                connected = bool(merged.get("wifi_connected"))
+                current_ssid = str(merged.get("wifi_ssid", "") or "").strip()
+                cached_networks = [
+                    {
+                        **item,
+                        "connected": connected and str(item.get("ssid", "") or "").strip() == current_ssid,
+                    }
+                    if isinstance(item, dict)
+                    else item
+                    for item in cached_networks
+                ]
+            merged["wifi_networks"] = cached_networks
         system["network"] = merged
         self.state.system = system
         self.state.network_cursor = clamp_index(self.state.network_cursor or 1, len(self.network_value_rows))
@@ -3212,6 +3225,25 @@ class ShadowboxUI:
             if target in {connection_id, ssid} and ssid:
                 self._begin_wifi_password_editor(ssid)
                 return True
+        return False
+
+    def finish_wifi_connection(self, *, ok: bool, target: str = "") -> bool:
+        """Keep successful connections visible; reopen credentials after failures."""
+        if not ok and target and self.begin_wifi_password_retry(target):
+            return True
+        if ok and self.network_wifi_available:
+            self.state.ui_mode = "WIFI_NETWORKS"
+            current_ssid = self.network_wifi_ssid
+            self.state.wifi_network_cursor = next(
+                (
+                    index
+                    for index, item in enumerate(self.available_wifi_networks, start=1)
+                    if str(item.get("ssid", "") or "").strip() == current_ssid
+                ),
+                self.wifi_network_initial_cursor(),
+            )
+        else:
+            self.state.ui_mode = "NETWORK"
         return False
 
     @property
@@ -5603,7 +5635,7 @@ class ShadowboxUI:
                 if network.get("saved"):
                     connection_id = str(network.get("id", "") or ssid).strip()
                     if connection_id:
-                        self.queue_action(UIAction(kind="connect_wifi", ssid=connection_id))
+                        self.queue_action(UIAction(kind="connect_wifi", ssid=connection_id, value=ssid))
                 elif ssid and self._wifi_security_requires_password(network.get("security", "")):
                     self._begin_wifi_password_editor(ssid)
                 elif ssid:

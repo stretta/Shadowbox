@@ -149,10 +149,22 @@ class NetworkOperationResult:
 class NetworkOperationCoordinator:
     """Runs privileged network mutations without blocking input/rendering."""
 
-    def __init__(self, rnbo, direct_helper, wifi_helper):
+    def __init__(
+        self,
+        rnbo,
+        direct_helper,
+        wifi_helper,
+        *,
+        wifi_settle_attempts: int = 12,
+        wifi_settle_interval: float = 0.25,
+        sleep_fn: Callable[[float], None] = sleep,
+    ):
         self.rnbo = rnbo
         self.direct_helper = direct_helper
         self.wifi_helper = wifi_helper
+        self.wifi_settle_attempts = max(1, int(wifi_settle_attempts))
+        self.wifi_settle_interval = max(0.0, float(wifi_settle_interval))
+        self.sleep_fn = sleep_fn
         self._jobs: Queue[tuple[str, tuple] | None] = Queue()
         self._results: SimpleQueue[NetworkOperationResult] = SimpleQueue()
         self._thread = Thread(target=self._run, name="shadowbox-network", daemon=True)
@@ -177,6 +189,26 @@ class NetworkOperationCoordinator:
             except Empty:
                 return results
 
+    def _settle_wifi_network(self, expected_ssid: str) -> dict:
+        expected_ssid = str(expected_ssid or "").strip()
+        fallback = self.rnbo.discover_network_status()
+        for attempt in range(self.wifi_settle_attempts):
+            network = self.rnbo.discover_wifi_networks(active_scan=False)
+            connected = bool(network.get("wifi_connected"))
+            current_ssid = str(network.get("wifi_ssid", "") or "").strip()
+            rows = network.get("wifi_networks", [])
+            has_current_row = isinstance(rows, list) and any(
+                isinstance(item, dict) and str(item.get("ssid", "") or "").strip() == current_ssid
+                for item in rows
+            )
+            if connected and current_ssid and (not expected_ssid or current_ssid == expected_ssid) and has_current_row:
+                return network
+            if network:
+                fallback = {key: value for key, value in network.items() if key != "wifi_networks"}
+            if attempt + 1 < self.wifi_settle_attempts:
+                self.sleep_fn(self.wifi_settle_interval)
+        return fallback
+
     def _run(self) -> None:
         while True:
             job = self._jobs.get()
@@ -187,12 +219,16 @@ class NetworkOperationCoordinator:
                 if kind in {"enable_direct_ethernet", "disable_direct_ethernet"}:
                     ok, error = self.direct_helper("enable" if kind.startswith("enable") else "disable")
                 elif kind == "connect_wifi":
-                    ok, error = self.wifi_helper("connect", *args)
+                    ok, error = self.wifi_helper("connect", args[0])
                 elif kind == "connect_wifi_new":
                     ok, error = self.wifi_helper("connect-new", *args)
                 else:
                     raise ValueError(f"Unknown network operation: {kind}")
-                network = self.rnbo.discover_network_status()
+                if ok and kind.startswith("connect_wifi"):
+                    expected_ssid = str(args[1] if kind == "connect_wifi" and len(args) > 1 else args[0])
+                    network = self._settle_wifi_network(expected_ssid)
+                else:
+                    network = self.rnbo.discover_network_status()
             except Exception as exc:
                 ok, error, network = False, str(exc), {}
             target = str(args[0] or "") if args else ""

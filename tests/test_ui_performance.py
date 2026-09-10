@@ -122,6 +122,67 @@ class NetworkOperationCoordinatorTests(unittest.TestCase):
         finally:
             coordinator.stop()
 
+    def test_successful_wifi_connection_waits_for_matching_nonempty_list(self):
+        class _SettlingRNBO(_RNBO):
+            def __init__(self):
+                super().__init__()
+                self.snapshots = [
+                    {"wifi_name": "wlan0", "wifi_connected": False, "wifi_ssid": "", "wifi_networks": []},
+                    {
+                        "wifi_name": "wlan0",
+                        "wifi_connected": True,
+                        "wifi_ssid": "studio",
+                        "wifi_networks": [{"id": "studio-profile", "ssid": "studio", "saved": True, "connected": True}],
+                    },
+                ]
+
+            def discover_wifi_networks(self, *, active_scan=False):
+                self.wifi_calls.append(active_scan)
+                return self.snapshots.pop(0)
+
+        rnbo = _SettlingRNBO()
+        sleeps = []
+        coordinator = NetworkOperationCoordinator(
+            rnbo,
+            lambda *_: (True, ""),
+            lambda *_: (True, ""),
+            wifi_settle_attempts=3,
+            wifi_settle_interval=0.25,
+            sleep_fn=sleeps.append,
+        )
+        coordinator.start()
+        try:
+            coordinator.request("connect_wifi", "studio-profile", "studio")
+            deadline = time.monotonic() + 1.0
+            results = []
+            while not results and time.monotonic() < deadline:
+                results.extend(coordinator.drain())
+                time.sleep(0.005)
+            self.assertEqual(len(results), 1)
+            self.assertTrue(results[0].ok)
+            self.assertEqual(results[0].network["wifi_ssid"], "studio")
+            self.assertEqual(len(results[0].network["wifi_networks"]), 1)
+            self.assertEqual(sleeps, [0.25])
+        finally:
+            coordinator.stop()
+
+    def test_wifi_settle_timeout_does_not_replace_cached_list_with_empty_rows(self):
+        class _EmptyRNBO(_RNBO):
+            def discover_wifi_networks(self, *, active_scan=False):
+                return {"wifi_name": "wlan0", "wifi_connected": False, "wifi_ssid": "", "wifi_networks": []}
+
+        coordinator = NetworkOperationCoordinator(
+            _EmptyRNBO(),
+            lambda *_: (True, ""),
+            lambda *_: (True, ""),
+            wifi_settle_attempts=2,
+            wifi_settle_interval=0,
+        )
+
+        network = coordinator._settle_wifi_network("studio")
+
+        self.assertNotIn("wifi_networks", network)
+
 
 class RenderSchedulerTests(unittest.TestCase):
     def test_redundant_busy_state_does_not_request_another_render(self):

@@ -165,7 +165,23 @@ class ParamMetadataTests(unittest.TestCase):
         self.assertFalse(info["direct_setup_ready"])
         self.assertEqual(info["hostname_local"], "shadowbox.local")
 
-    def test_discover_wifi_networks_merges_saved_and_scanned_nmcli_rows(self) -> None:
+    def test_wifi_list_refresh_preserves_active_ssid_when_scan_rows_are_empty(self) -> None:
+        with (
+            mock.patch("shadowbox.rnbo._list_network_interfaces", return_value=["wlan0"]),
+            mock.patch("shadowbox.rnbo._interface_is_wireless", return_value=True),
+            mock.patch("shadowbox.rnbo._discover_ipv4_addresses", return_value={"wlan0": ["10.0.0.55"]}),
+            mock.patch("shadowbox.rnbo._interface_operstate", return_value="up"),
+            mock.patch("shadowbox.rnbo._discover_wifi_networks", return_value=[]),
+            mock.patch("shadowbox.rnbo._active_wifi_ssid", return_value="studio"),
+            mock.patch("shadowbox.rnbo.socket.gethostname", return_value="shadowbox"),
+        ):
+            info = discover_host_network(include_wifi_list=True, active_scan=False)
+
+        self.assertTrue(info["wifi_connected"])
+        self.assertEqual(info["wifi_ssid"], "studio")
+        self.assertEqual(info["wifi_networks"], [])
+
+    def test_passive_wifi_list_only_includes_visible_saved_networks(self) -> None:
         def fake_nmcli(args, timeout=3.0):
             if args[:2] == ["--fields", "NAME,TYPE,ACTIVE"]:
                 return ["studio-profile:802-11-wireless:yes", "wired:802-3-ethernet:no", "stage-profile:802-11-wireless:no"]
@@ -181,13 +197,35 @@ class ParamMetadataTests(unittest.TestCase):
             mock.patch("shadowbox.rnbo._nmcli_connection_ssid", side_effect=fake_connection_ssid),
             mock.patch("shadowbox.rnbo._wifi_scan_lines", return_value=["*:studio:80:WPA2", ":guest:40:WPA1 WPA2"]),
         ):
-            networks = _discover_wifi_networks()
+            networks = _discover_wifi_networks(active_scan=False)
 
         self.assertEqual(
             networks,
             [
                 {"id": "studio-profile", "ssid": "studio", "saved": True, "connected": True, "signal": "80", "security": "WPA2"},
-                {"id": "stage-profile", "ssid": "stage", "saved": True, "connected": False, "signal": "", "security": ""},
+            ],
+        )
+
+    def test_active_wifi_scan_includes_all_visible_networks(self) -> None:
+        def fake_nmcli(args, timeout=3.0):
+            if args[:2] == ["--fields", "NAME,TYPE,ACTIVE"]:
+                return ["studio-profile:802-11-wireless:yes", "stage-profile:802-11-wireless:no"]
+            return []
+
+        def fake_connection_ssid(connection_id):
+            return {"studio-profile": "studio", "stage-profile": "stage"}.get(connection_id, "")
+
+        with (
+            mock.patch("shadowbox.rnbo._nmcli_lines", side_effect=fake_nmcli),
+            mock.patch("shadowbox.rnbo._nmcli_connection_ssid", side_effect=fake_connection_ssid),
+            mock.patch("shadowbox.rnbo._wifi_scan_lines", return_value=["*:studio:80:WPA2", ":guest:40:WPA1 WPA2"]),
+        ):
+            networks = _discover_wifi_networks(active_scan=True)
+
+        self.assertEqual(
+            networks,
+            [
+                {"id": "studio-profile", "ssid": "studio", "saved": True, "connected": True, "signal": "80", "security": "WPA2"},
                 {"id": "", "ssid": "guest", "saved": False, "connected": False, "signal": "40", "security": "WPA1 WPA2"},
             ],
         )
@@ -206,7 +244,7 @@ class ParamMetadataTests(unittest.TestCase):
 
         self.assertEqual(lines, [" :Wefie:50:WPA2", "*:studio:80:WPA2"])
         run.assert_called_once()
-        self.assertEqual(run.call_args.args[0], ["sudo", "-n", "/tmp/wifi_network.sh", "list"])
+        self.assertEqual(run.call_args.args[0], ["sudo", "-n", "/tmp/wifi_network.sh", "rescan"])
 
     def test_numeric_step_prefers_metadata_edit_step(self) -> None:
         param = {"type": "f", "min": 0, "max": 100, "metadata": {"edit_step": 2.5}}

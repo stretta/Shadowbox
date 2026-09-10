@@ -236,11 +236,11 @@ def _wifi_scan_lines(*, active_scan: bool = True) -> list[str]:
     if active_scan and helper_path and os.path.exists(helper_path):
         try:
             result = subprocess.run(
-                ["sudo", "-n", helper_path, "list"],
+                ["sudo", "-n", helper_path, "rescan"],
                 capture_output=True,
                 check=False,
                 text=True,
-                timeout=2.0,
+                timeout=8.0,
             )
         except Exception:
             result = None
@@ -272,15 +272,12 @@ def _nmcli_connection_ssid(connection_id: str) -> str:
 
 def _discover_wifi_networks(*, active_scan: bool = True) -> list[dict[str, Any]]:
     saved_by_ssid: dict[str, str] = {}
-    saved_connections: list[dict[str, Any]] = []
     for line in _nmcli_lines(["--fields", "NAME,TYPE,ACTIVE", "connection", "show"], timeout=2.0):
         fields = _split_nmcli_terse(line)
         if len(fields) >= 2 and fields[1] == "802-11-wireless" and fields[0].strip():
             connection_id = fields[0].strip()
             ssid = _nmcli_connection_ssid(connection_id) or connection_id
-            active = len(fields) >= 3 and fields[2].strip().lower() == "yes"
             saved_by_ssid[ssid] = connection_id
-            saved_connections.append({"id": connection_id, "ssid": ssid, "active": active})
 
     networks_by_ssid: dict[str, dict[str, Any]] = {}
     lines = _wifi_scan_lines(active_scan=active_scan)
@@ -295,6 +292,8 @@ def _discover_wifi_networks(*, active_scan: bool = True) -> list[dict[str, Any]]
         signal = fields[2].strip() if len(fields) > 2 else ""
         security = fields[3].strip() if len(fields) > 3 else ""
         connection_id = saved_by_ssid.get(ssid, "")
+        if not active_scan and not connection_id:
+            continue
         entry = networks_by_ssid.setdefault(
             ssid,
             {"id": connection_id, "ssid": ssid, "saved": bool(connection_id), "connected": False, "signal": signal, "security": security},
@@ -307,21 +306,6 @@ def _discover_wifi_networks(*, active_scan: bool = True) -> list[dict[str, Any]]
             entry["signal"] = signal
         if security and not entry.get("security"):
             entry["security"] = security
-
-    for item in saved_connections:
-        ssid = str(item.get("ssid", "") or "").strip()
-        if ssid:
-            networks_by_ssid.setdefault(
-                ssid,
-                {
-                    "id": str(item.get("id", "") or ""),
-                    "ssid": ssid,
-                    "saved": True,
-                    "connected": bool(item.get("active")),
-                    "signal": "",
-                    "security": "",
-                },
-            )
 
     return sorted(
         networks_by_ssid.values(),
@@ -431,7 +415,7 @@ def discover_host_network(*, include_wifi_list: bool = True, active_scan: bool =
         if item.get("connected"):
             wifi_ssid = str(item.get("ssid", "") or "").strip()
             break
-    if wifi_name and not wifi_ssid and not include_wifi_list:
+    if wifi_name and not wifi_ssid:
         wifi_ssid = _active_wifi_ssid()
     direct_setup_active = DIRECT_ETHERNET_IP in {str(item).strip() for item in wired_ipv4_list if str(item).strip()}
     direct_setup_ready = bool(

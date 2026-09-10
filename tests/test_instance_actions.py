@@ -658,6 +658,7 @@ class InstanceActionTests(unittest.TestCase):
         action = ui.pop_actions()[0]
         self.assertEqual(action.kind, "connect_wifi")
         self.assertEqual(action.ssid, "stage-profile")
+        self.assertEqual(action.value, "stage")
 
     def test_wifi_network_picker_opens_password_editor_for_unsaved_secured_network(self) -> None:
         ui = ShadowboxUI()
@@ -699,6 +700,26 @@ class InstanceActionTests(unittest.TestCase):
         self.assertEqual(ui.state.name_editor_context, "wifi_password")
         self.assertEqual(ui.state.pending_wifi_ssid, "stage")
         self.assertEqual(ui.state.name_editor_draft, "")
+
+    def test_successful_wifi_connection_stays_in_picker_on_new_current_network(self) -> None:
+        ui = ShadowboxUI()
+        snapshot = self._snapshot_with_direct_network()
+        snapshot.system["network"]["wifi_connected"] = True
+        snapshot.system["network"]["wifi_ssid"] = "studio"
+        snapshot.system["network"]["wifi_networks"][0]["connected"] = True
+        ui.apply_runner_snapshot(snapshot)
+        ui.state.ui_mode = "WIFI_NETWORKS"
+
+        ui.apply_network_snapshot({"wifi_connected": True, "wifi_ssid": "stage", "wifi_ipv4": "10.0.0.55"})
+        retrying = ui.finish_wifi_connection(ok=True, target="stage-profile")
+
+        self.assertFalse(retrying)
+        self.assertEqual(ui.state.ui_mode, "WIFI_NETWORKS")
+        self.assertEqual(ui.state.wifi_network_cursor, 2)
+        self.assertEqual(
+            [index for index, row in enumerate(ui.wifi_network_rows) if row.current],
+            [2],
+        )
 
     def test_wifi_network_picker_queues_open_network_without_password(self) -> None:
         ui = ShadowboxUI()
