@@ -145,8 +145,11 @@ class TouchLayout:
         }:
             x, y = self._point_to_pixels(normalized_x, normalized_y)
             if target.action_kind == "set_surface_value":
-                vertical = (y - target.y) / max(1, target.h - 1)
-                value = vertical if target.button_id == "organ_drawbar" else 1.0 - vertical
+                if target.button_id in {"ring_horizontal", "ring_waveform"}:
+                    value = (x - target.x) / max(1, target.w - 1)
+                else:
+                    vertical = (y - target.y) / max(1, target.h - 1)
+                    value = vertical if target.button_id == "organ_drawbar" else 1.0 - vertical
             else:
                 value = (x - target.x) / max(1, target.w - 1)
             return TouchAction(kind=target.action_kind, index=target.index, button_id=target.button_id, value=max(0.0, min(1.0, value)))

@@ -17,6 +17,16 @@ from shadowbox.surfaces import resolve_instance_surface
 from shadowbox.surfaces.list_sequencer import FIELD_KEYS
 from shadowbox.surfaces.list_vel_sequencer import ROW_KEYS
 from shadowbox.surfaces.organ import FOOTAGES
+from shadowbox.surfaces.ring_buffer import (
+    OVERVIEW_CHUNK_COUNT,
+    OVERVIEW_COLUMNS,
+    empty_overview_columns,
+    normalize_overview_chunk,
+    normalize_record_sync,
+    overview_columns_for_width,
+    projected_record_sync,
+    rotate_overview_columns,
+)
 from shadowbox.surfaces.shadowscore_client import (
     ack_label,
     midi_note_label,
@@ -56,6 +66,26 @@ def _scope_instance():
         "label": "MY SCOPE",
         "params": [_param("SamplingRate", value=48.0, minimum=10.0, maximum=100.0, metadata={"editor": "Scope Display"})],
         "state": [_state("scope", [0.1, -0.1])],
+    }
+
+
+def _ring_buffer_instance():
+    return {
+        "id": "7",
+        "name": "ShadowGrain",
+        "label": "GRAINS",
+        "params": [
+            _param("Rate", value=20.0, minimum=0.0, maximum=100.0, metadata={"unit": "hz"}),
+            _param("Position", value=0.5, minimum=0.0, maximum=1.0),
+            _param("GrainDuration", value=300.0, minimum=0.0, maximum=1000.0, metadata={"unit": "ms"}),
+            _param("Transpose", value=0.0, minimum=-60.0, maximum=60.0, metadata={"unit": "st"}),
+            _param("RecordToggle", value="Off", minimum=None, maximum=None),
+        ],
+        "inputs": [_list_input("getrecordsync"), _list_input("itriggeroverview")],
+        "state": [
+            _state("overviewchunks", [32.0] + [0.0] * 50),
+            _state("recordsync", [0.25]),
+        ],
     }
 
 
@@ -235,6 +265,150 @@ class _SurfaceDisplay:
 
 
 class InstanceSurfaceTests(unittest.TestCase):
+    def test_shadowgrain_resolves_ring_buffer_contract(self):
+        resolved = resolve_instance_surface(_ring_buffer_instance())
+
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved[0].key, "ring_buffer")
+        self.assertEqual(resolved[1].inputs["request_overview"]["name"], "itriggeroverview")
+        self.assertEqual(resolved[1].inputs["request_record_sync"]["name"], "getrecordsync")
+        self.assertEqual(resolved[1].state["overview_chunks"]["name"], "overviewchunks")
+        self.assertEqual(resolved[1].state["record_sync"]["name"], "recordsync")
+        self.assertEqual(set(resolved[1].params), {"rate", "position", "grain_duration", "transpose", "record_toggle"})
+
+    def test_shadowgrain_rejects_incomplete_ring_buffer_contract(self):
+        missing_input = _ring_buffer_instance()
+        missing_input["inputs"] = []
+        missing_output = _ring_buffer_instance()
+        missing_output["state"] = []
+        missing_param = _ring_buffer_instance()
+        missing_param["params"] = missing_param["params"][:-1]
+
+        self.assertIsNone(resolve_instance_surface(missing_input))
+        self.assertIsNone(resolve_instance_surface(missing_output))
+        self.assertIsNone(resolve_instance_surface(missing_param))
+
+    def test_ring_sync_projection_and_rotation(self):
+        self.assertEqual(normalize_record_sync([0.25]), 0.25)
+        self.assertIsNone(normalize_record_sync([0.25, 0.5]))
+        self.assertIsNone(normalize_record_sync(1.1))
+        self.assertEqual(projected_record_sync(0.25, recording=False, elapsed_seconds=7.0), 0.25)
+        self.assertAlmostEqual(projected_record_sync(0.75, recording=True, elapsed_seconds=5.0), 0.25)
+        self.assertEqual(rotate_overview_columns([(0, 0), (1, 1), (2, 2), (3, 3)], 0.5), [(2, 2), (3, 3), (0, 0), (1, 1)])
+
+    def test_ring_overview_chunk_validation_and_downsampling(self):
+        self.assertIsNone(normalize_overview_chunk([1.0] + [0.0] * 49))
+        self.assertIsNone(normalize_overview_chunk([0.0] + [0.0] * 50))
+        self.assertIsNone(normalize_overview_chunk([1.0, 0.5, -0.5] + [0.0] * 48))
+        columns = empty_overview_columns()
+        columns[0] = (-0.25, 0.5)
+        columns[1] = (-0.75, 0.25)
+
+        reduced = overview_columns_for_width(columns, 400)
+
+        self.assertEqual(len(columns), OVERVIEW_COLUMNS)
+        self.assertEqual(reduced[0], (-0.75, 0.5))
+
+    def test_ring_surface_requests_and_assembles_complete_overview(self):
+        ui = ShadowboxUI()
+        instance = _ring_buffer_instance()
+        ui.apply_runner_snapshot(_snapshot([instance]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+
+        ui.handle_event(UIEvent("short_press"))
+
+        self.assertEqual(ui.state.active_surface_key, "ring_buffer")
+        requests = [action for action in ui.pop_actions() if action.kind == "send_osc"]
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(
+            [(request.path, request.value) for request in requests],
+            [
+                ("/rnbo/inst/7/messages/in/itriggeroverview", [1]),
+                ("/rnbo/inst/7/messages/in/getrecordsync", [1]),
+            ],
+        )
+
+        output = next(item for item in instance["state"] if item["name"] == "overviewchunks")
+        for chunk_index in range(1, OVERVIEW_CHUNK_COUNT + 1):
+            self.assertTrue(
+                ui.apply_instance_state_update(
+                    "7",
+                    output["path"],
+                    [float(chunk_index)] + [-0.5, 0.75] * 25,
+                )
+            )
+
+        self.assertTrue(ui.state.surface_state["overview_complete"])
+        self.assertEqual(len(ui.state.surface_state["overview_received"]), OVERVIEW_CHUNK_COUNT)
+        self.assertEqual(ui.state.surface_state["overview_columns"][0], (-0.5, 0.75))
+        self.assertEqual(ui.state.surface_state["overview_columns"][-1], (-0.5, 0.75))
+
+    def test_ring_surface_renders_envelope_and_five_controls(self):
+        ui = ShadowboxUI()
+        instance = _ring_buffer_instance()
+        ui.apply_runner_snapshot(_snapshot([instance]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        ui.pop_actions()
+        output = instance["state"][0]
+        for chunk_index in range(1, OVERVIEW_CHUNK_COUNT + 1):
+            ui.apply_instance_state_update(
+                "7",
+                output["path"],
+                [float(chunk_index)] + [-0.5, 0.75] * 25,
+            )
+
+        display = _SurfaceDisplay()
+        renderer = ShadowboxRenderer(display)
+        renderer.set_touch_mode(True)
+        renderer.draw(ui)
+
+        self.assertGreater(len([op for op in display.ops if op[0] == "vline"]), 600)
+        text = [op[1] for op in display.ops if op[0] in {"text", "text_color"}]
+        self.assertIn("10.0 SEC  ·  800 COLUMNS  ·  REFRESH", text)
+        for label in ("RATE", "POSITION", "DURATION", "TRANSPOSE", "RECORD"):
+            self.assertIn(label, text)
+        self.assertEqual(
+            [target.button_id for target in renderer.touch_layout.targets if target.kind == "ring_param"],
+            ["ring_horizontal"] * 4,
+        )
+        self.assertTrue(any(target.button_id == "ring_record" for target in renderer.touch_layout.targets))
+
+        ui.handle_event(UIEvent("short_press"))
+        self.assertTrue(ui.state.surface_state["adjusting"])
+
+    def test_ring_controls_position_and_record_without_polling(self):
+        ui = ShadowboxUI()
+        instance = _ring_buffer_instance()
+        ui.apply_runner_snapshot(_snapshot([instance]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        ui.pop_actions()
+
+        sync = next(item for item in instance["state"] if item["name"] == "recordsync")
+        self.assertTrue(ui.apply_instance_state_update("7", sync["path"], [0.75]))
+        self.assertAlmostEqual(ui.state.surface_state["record_sync_phase"], 0.75)
+        self.assertEqual(ui.pop_actions(), [])
+
+        ui.handle_event(UIEvent("set_surface_value", index=1, button_id="ring_waveform", value=0.5))
+        position_write = next(action for action in ui.pop_actions() if action.kind == "set_param")
+        self.assertEqual(position_write.path, "/rnbo/inst/7/params/Position")
+        self.assertAlmostEqual(position_write.value, 0.25, places=2)
+
+        ui.handle_event(UIEvent("tap_button", button_id="ring_record"))
+        record_write = next(action for action in ui.pop_actions() if action.kind == "set_param")
+        self.assertEqual((record_write.path, record_write.value), ("/rnbo/inst/7/params/RecordToggle", "On"))
+        self.assertTrue(ui.ring_recording)
+        self.assertEqual(ui.active_surface_frame_rate, 20.0)
+
+        ui.handle_event(UIEvent("tap_button", button_id="ring_record"))
+        ui.pop_actions()
+        self.assertFalse(ui.ring_recording)
+        self.assertIsNone(ui.active_surface_frame_rate)
+
     def test_resolution_uses_export_name_not_label(self):
         instance = _scope_instance()
         instance["label"] = "Tuner"

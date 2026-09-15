@@ -18,6 +18,12 @@ from shadowbox.rnbo import RNBO_HOST
 from shadowbox.surfaces.list_sequencer import FIELD_KEYS, FIELD_LABELS, FIELD_SHORT_LABELS, SIGNED_FIELD_KEYS
 from shadowbox.surfaces.list_vel_sequencer import ROW_KEYS, ROW_LABELS, mute_is_on
 from shadowbox.surfaces.organ import FOOTAGE_COLORS, FOOTAGES
+from shadowbox.surfaces.ring_buffer import (
+    OVERVIEW_CHUNK_COUNT,
+    RING_PARAM_KEYS,
+    overview_columns_for_width,
+    rotate_overview_columns,
+)
 from shadowbox.surfaces.shadowscore_client import (
     midi_note_label,
     parse_current_stage,
@@ -4134,6 +4140,9 @@ class ShadowboxRenderer:
         if key == "tuner":
             self.draw_edit_pitch_display(ui, ui.surface_param_binding("anchor") or {"name": "pitch"})
             return
+        if key == "ring_buffer":
+            self.draw_ring_buffer_surface(ui, state)
+            return
         if key == "analog_sequencer":
             self.draw_analog_sequencer_surface(ui, state)
             return
@@ -4147,6 +4156,186 @@ class ShadowboxRenderer:
             self.draw_shadowscore_client_surface(ui, state)
             return
         self.text_center("surface unavailable", self.edit_content_top(8))
+
+    def draw_ring_buffer_surface(self, ui, state) -> None:
+        columns = state.surface_state.get("overview_columns", [])
+        received = state.surface_state.get("overview_received", set())
+        received_count = len(received) if isinstance(received, set) else 0
+        complete = bool(state.surface_state.get("overview_complete"))
+        error = str(state.surface_state.get("overview_error", "") or "")
+        sync_error = str(state.surface_state.get("record_sync_error", "") or "")
+        display_phase = ui.ring_display_phase
+        recording = ui.ring_recording
+
+        if self.touch_layout_enabled:
+            panel_x = 20
+            panel_w = self.display.width - 40
+            panel_h = 360
+            panel_y = self.edit_content_top(panel_h)
+            x, y, w, h = panel_x + 16, panel_y + 14, panel_w - 32, 190
+            status_y = y + h + 5
+            if self.has_color:
+                self._rounded_theme(panel_x, panel_y, panel_w, panel_h, 14, "panel", True)
+                self._rounded_theme(panel_x, panel_y, panel_w, panel_h, 14, "line", False)
+            else:
+                self.display.rect(panel_x, panel_y, panel_w, panel_h, True, False)
+        elif self.is_full_tft:
+            x, y, w, h = 12, 46, self.display.width - 24, 150
+            status_y = y + h + 14
+        elif self.is_tall:
+            x, y, w, h = 5, 28, self.display.width - 10, max(28, self.display.height - 54)
+            status_y = y + h + 4
+        else:
+            x, y, w, h = 3, 12, self.display.width - 6, max(10, self.display.height - 20)
+            status_y = y + h
+
+        self._rect_theme(x, y, w, h, "line", False)
+        mid_y = y + h // 2
+        self._hline_theme(x + 1, mid_y, max(0, w - 2), "line")
+
+        drawable_width = max(0, w - 2)
+        drawable_height = max(0, h - 3)
+        amplitude = drawable_height / 2.0
+        ordered = rotate_overview_columns(columns if isinstance(columns, list) else [], display_phase)
+        visible = overview_columns_for_width(ordered, drawable_width)
+        for offset, pair in enumerate(visible):
+            if pair is None or pair == (0.0, 0.0):
+                continue
+            minimum, maximum = pair
+            top = mid_y - int(round(maximum * amplitude))
+            bottom = mid_y - int(round(minimum * amplitude))
+            top = max(y + 1, min(y + h - 2, top))
+            bottom = max(y + 1, min(y + h - 2, bottom))
+            if bottom < top:
+                top, bottom = bottom, top
+            self._vline_theme(x + 1 + offset, top, max(1, bottom - top + 1), "accent")
+
+        position = ui.surface_param_binding("position")
+        position_value = position.get("value") if position else None
+        if isinstance(position_value, (int, float)):
+            displayed_position = float(position_value)
+            if display_phase is not None:
+                displayed_position = (displayed_position - display_phase) % 1.0
+            marker_x = x + 1 + int(round(max(0.0, min(1.0, displayed_position)) * max(0, drawable_width - 1)))
+            self._vline_theme(marker_x, y + 1, max(1, h - 2), "text")
+
+        if recording:
+            self._vline_theme(x + w - 2, y + 1, max(1, h - 2), "danger")
+
+        if self.touch_layout_enabled:
+            self._record_touch_target(
+                "ring_waveform",
+                x,
+                y,
+                w,
+                h,
+                action_kind="set_surface_value",
+                index=1,
+                button_id="ring_waveform",
+                label="Position",
+            )
+
+        if error or sync_error:
+            status = error or sync_error
+        elif complete:
+            status = "10.0 SEC  ·  800 COLUMNS  ·  REFRESH"
+        else:
+            status = f"RECEIVING {received_count}/{OVERVIEW_CHUNK_COUNT}"
+        if self.touch_layout_enabled and self.has_color:
+            self._text_theme(status, panel_x + 16, status_y, "muted", 1, "medium")
+            self._record_touch_target(
+                "ring_refresh",
+                panel_x + 12,
+                status_y - 5,
+                panel_w - 24,
+                24,
+                action_kind="tap_button",
+                button_id="ring_refresh",
+                label="Refresh overview",
+            )
+
+            focus = max(0, min(len(RING_PARAM_KEYS) - 1, int(state.surface_focus)))
+            adjusting = bool(state.surface_state.get("adjusting"))
+            controls_y = panel_y + 238
+            controls_h = 102
+            controls_x = panel_x + 16
+            controls_w = panel_w - 32
+            gap = 7
+            tile_w = (controls_w - gap * 4) // 5
+            labels = ("RATE", "POSITION", "DURATION", "TRANSPOSE")
+            for index, (key, label) in enumerate(zip(RING_PARAM_KEYS[:4], labels)):
+                param = ui.surface_param_binding(key)
+                tile_x = controls_x + index * (tile_w + gap)
+                selected = index == focus
+                self._rounded_theme(tile_x, controls_y, tile_w, controls_h, 9, "panel_alt", True)
+                self._rounded_theme(
+                    tile_x,
+                    controls_y,
+                    tile_w,
+                    controls_h,
+                    9,
+                    "accent" if selected else "line",
+                    False,
+                )
+                self._text_theme(label, tile_x + 9, controls_y + 9, "accent" if selected else "muted", 1, "medium")
+                value_text = format_param_value(param, param.get("value") if param else None)
+                self._text_theme(
+                    self._truncate_to_width(value_text, tile_w - 18, 2, "medium"),
+                    tile_x + 9,
+                    controls_y + 31,
+                    "text",
+                    2,
+                    "medium",
+                )
+                pmin, pmax = (param.get("min"), param.get("max")) if param else (None, None)
+                value = param.get("value") if param else None
+                try:
+                    fraction = (float(value) - float(pmin)) / max(1e-9, float(pmax) - float(pmin))
+                except (TypeError, ValueError):
+                    fraction = 0.0
+                rail_x, rail_y, rail_w = tile_x + 9, controls_y + controls_h - 18, tile_w - 18
+                self._hline_theme(rail_x, rail_y, rail_w, "line")
+                marker_x = rail_x + int(round(max(0.0, min(1.0, fraction)) * max(0, rail_w - 1)))
+                self._fill_theme(max(rail_x, marker_x - 2), rail_y - 4, 4, 9, "accent")
+                self._record_touch_target(
+                    "ring_param",
+                    tile_x,
+                    controls_y,
+                    tile_w,
+                    controls_h,
+                    action_kind="set_surface_value",
+                    index=index,
+                    button_id="ring_horizontal",
+                    label=label,
+                )
+
+            record_x = controls_x + 4 * (tile_w + gap)
+            selected = focus == len(RING_PARAM_KEYS) - 1
+            record_color = "danger" if recording else "accent"
+            self._rounded_theme(record_x, controls_y, tile_w, controls_h, 9, record_color if recording else "panel_alt", recording)
+            self._rounded_theme(record_x, controls_y, tile_w, controls_h, 9, record_color if recording or selected else "line", False)
+            record_label = "STOP" if recording else "RECORD"
+            label_w, label_h = self._measure_text(record_label, 2, "semibold")
+            self._text_theme(
+                record_label,
+                record_x + max(0, (tile_w - label_w) // 2),
+                controls_y + max(0, (controls_h - label_h) // 2),
+                "bg" if recording else record_color,
+                2,
+                "semibold",
+            )
+            self._record_touch_target(
+                "ring_record",
+                record_x,
+                controls_y,
+                tile_w,
+                controls_h,
+                action_kind="tap_button",
+                button_id="ring_record",
+                label=record_label,
+            )
+        else:
+            self.text_center_scaled(shorten(status, 28 if self.is_full_tft else 20), status_y, 1)
 
     def draw_shadowscore_client_surface(self, ui, state) -> None:
         stage_item = ui.surface_state_binding("current_stage")

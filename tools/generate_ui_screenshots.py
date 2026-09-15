@@ -219,6 +219,37 @@ def _scope_ui() -> ShadowboxUI:
     return _surface_ui(instance)
 
 
+def _ring_buffer_ui() -> ShadowboxUI:
+    instance = {
+        "id": "7",
+        "name": "ShadowGrain",
+        "label": "Shadow Grain",
+        "params": [
+            _param("Rate", value=20.0, minimum=0.0, maximum=100.0, metadata={"unit": "hz"}),
+            _param("Position", value=0.5, minimum=0.0, maximum=1.0),
+            _param("GrainDuration", value=300.0, minimum=0.0, maximum=1000.0, metadata={"unit": "ms"}),
+            _param("Transpose", value=0.0, minimum=-60.0, maximum=60.0, metadata={"unit": "st"}),
+            _param("RecordToggle", value="Off", minimum=None, maximum=None),
+        ],
+        "inputs": [_input("getrecordsync"), _input("itriggeroverview")],
+        "state": [_state("overviewchunks", [32.0] + [0.0] * 50), _state("recordsync", [0.25])],
+    }
+    ui = _surface_ui(instance)
+    columns = []
+    for index in range(800):
+        phrase = 0.28 + 0.54 * abs(math.sin(index * 0.021))
+        detail = 0.12 * math.sin(index * 0.19)
+        columns.append((max(-1.0, -phrase + detail), min(1.0, phrase + detail)))
+    ui.state.surface_state.update(
+        {
+            "overview_columns": columns,
+            "overview_received": set(range(1, 33)),
+            "overview_complete": True,
+        }
+    )
+    return ui
+
+
 def _tuner_ui() -> ShadowboxUI:
     instance = {
         "id": "7",
@@ -391,6 +422,7 @@ SCREENSHOTS = (
     ScreenshotSpec("organ", "Organ", "instance surface", "Nine-drawbar organ surface.", _organ_ui),
     ScreenshotSpec("analog-sequencer", "Analog Sequencer", "instance surface", "Sixteen-stage pitch and gate surface.", _analog_sequencer_ui),
     ScreenshotSpec("time-domain-scope", "Time Domain Scope", "instance surface", "Live waveform and sampling-rate surface.", _scope_ui),
+    ScreenshotSpec("ring-buffer", "Ring Buffer", "instance surface", "Ten-second min/max buffer overview.", _ring_buffer_ui),
     ScreenshotSpec("tuner", "Tuner", "instance surface", "Pitch and cents display.", _tuner_ui),
     ScreenshotSpec("list-sequencer", "List Sequencer", "instance surface", "Seven list fields with direct-entry keypad.", _list_sequencer_ui),
     ScreenshotSpec("list-vel-sequencer", "List Velocity Sequencer", "instance surface", "Eight velocity rows with pitch context.", _list_vel_sequencer_ui),

@@ -7,6 +7,7 @@ from shadowbox.surfaces.base import InstanceSurfaceSpec, ResolvedSurface
 from shadowbox.surfaces.list_sequencer import resolve_list_sequencer_bindings
 from shadowbox.surfaces.list_vel_sequencer import resolve_list_vel_sequencer_bindings
 from shadowbox.surfaces.organ import resolve_organ_bindings
+from shadowbox.surfaces.ring_buffer import resolve_ring_buffer_bindings
 from shadowbox.surfaces.shadowscore_client import resolve_shadowscore_client_bindings
 from shadowbox.surfaces.time_domain_scope import resolve_time_domain_scope_bindings
 from shadowbox.surfaces.tuner import resolve_tuner_bindings
@@ -29,6 +30,13 @@ SURFACE_SPECS = (
         15.0,
     ),
     InstanceSurfaceSpec("tuner", "TUNER", frozenset({"Tuner"}), resolve_tuner_bindings, 20.0),
+    InstanceSurfaceSpec(
+        "ring_buffer",
+        "RING BUFFER",
+        frozenset({"ShadowGrain"}),
+        resolve_ring_buffer_bindings,
+        20.0,
+    ),
     InstanceSurfaceSpec(
         "list_sequencer",
         "LIST SEQUENCER",

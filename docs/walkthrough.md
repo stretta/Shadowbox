@@ -85,6 +85,7 @@ Current registered instance exports:
 - `Organ`
 - `AnalogSequencer`
 - `TimeDomainScope`
+- `ShadowGrain`
 - `Tuner`
 - `ListSequencer`
 - `ListVelSequencer`
@@ -193,7 +194,38 @@ Shadowbox behavior:
 - instance-surface navigation exits to the instance menu
 - the tagged sample-rate parameter remains an ordinary numeric editor under `PARAMETERS`
 
-5c. ListSequencer instance-surface contract
+5c. Ring Buffer instance-surface contract
+
+The Ring Buffer surface displays one fixed ten-second overview from an RNBO
+audio buffer. `ShadowGrain` is the first export using the contract, but the
+surface resolves from its explicit message ports rather than from parameter
+metadata.
+
+Expected published structure:
+- snapshot request: `/rnbo/inst/<id>/messages/in/itriggeroverview`
+- overview chunks: `/rnbo/inst/<id>/messages/out/overviewchunks`
+- record-phase request: `/rnbo/inst/<id>/messages/in/getrecordsync`
+- record-phase events: `/rnbo/inst/<id>/messages/out/recordsync`
+- parameters: `Rate`, `Position`, `GrainDuration`, `Transpose`, and `RecordToggle`
+
+Each overview snapshot contains `800` min/max column pairs stored as `1600`
+values. RNBO sends `32` lists. Every list contains a one-based chunk index
+followed by `50` values, or `25` min/max pairs. Shadowbox requests a new
+snapshot when the surface opens, places chunks by index rather than arrival
+order, rejects malformed pairs, and draws the completed envelope across the
+fixed display width. Back or a long press returns to the instance menu.
+
+The five-inch surface shows all five parameters beneath the waveform.
+`RecordToggle` is presented as a two-state `RECORD`/`STOP` button. Touching the
+waveform writes `Position`; because the overview is rotated around the current
+record phase, Shadowbox maps screen position back into physical buffer position
+before sending the parameter. On entry Shadowbox requests `recordsync` once.
+Thereafter RNBO transition events anchor the ten-second ring phase, and local
+display time advances the waveform only while `RecordToggle` is on. This keeps
+the visible motion independent of OSC packet arrival without continuously
+polling RNBO. The `REFRESH` status strip remains a manual overview request.
+
+5d. ListSequencer instance-surface contract
 
 `ListSequencer` stores sequence fields behind OSC message inports because RNBO
 parameters do not support lists. Shadowbox therefore discovers these controls
@@ -235,7 +267,7 @@ the Linux console behind the framebuffer interface. Outside the home-screen
 transport shortcuts, ListSequencer, ListVelSequencer, and the regular numeric
 parameter editor, these keypad events are ignored.
 
-5d. ListVelSequencer instance-surface contract
+5e. ListVelSequencer instance-surface contract
 
 `ListVelSequencer` publishes eight velocity lists as OSC message inports
 `1row` through `8row`, with matching `1rowAck` through `8rowAck` state
@@ -260,7 +292,7 @@ or numpad `+` deletes, numpad `-` toggles the sign when negative values are
 valid, and numpad `Enter` commits the range-clamped value. Encoder or touch
 adjustment cancels an unfinished keypad draft.
 
-5e. ShadowScoreClient instance-surface contract
+5f. ShadowScoreClient instance-surface contract
 
 `ShadowScoreClient` provides a read-only, local-first playback display. The
 surface resolves only when the canonical export publishes exactly one of each

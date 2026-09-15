@@ -44,6 +44,14 @@ from shadowbox.surfaces import resolve_instance_surface, surface_spec_for_key
 from shadowbox.surfaces.list_sequencer import FIELD_KEYS, SIGNED_FIELD_KEYS, format_list_value
 from shadowbox.surfaces.list_vel_sequencer import ROW_KEYS, toggled_mute_value
 from shadowbox.surfaces.organ import FOOTAGES
+from shadowbox.surfaces.ring_buffer import (
+    OVERVIEW_CHUNK_COUNT,
+    RING_PARAM_KEYS,
+    apply_overview_chunk,
+    empty_overview_columns,
+    normalize_record_sync,
+    projected_record_sync,
+)
 from shadowbox.surfaces.shadowscore_client import parse_playback_debug, parse_shadowscore_ack
 from shadowbox.transpose_control import (
     ROLE_CHROMATIC,
@@ -986,6 +994,18 @@ class ShadowboxUI:
                         )
                     ):
                         self.state.edit_scope_samples = append_scope_samples(self.state.edit_scope_samples, value)
+                    elif (
+                        self.state.ui_mode == "INSTANCE_SURFACE"
+                        and self.state.active_surface_key == "ring_buffer"
+                        and self.surface_state_binding("overview_chunks") is item
+                    ):
+                        self._record_ring_overview_chunk(value)
+                    elif (
+                        self.state.ui_mode == "INSTANCE_SURFACE"
+                        and self.state.active_surface_key == "ring_buffer"
+                        and self.surface_state_binding("record_sync") is item
+                    ):
+                        self._record_ring_sync(value)
                     elif self._list_surface_ready() and self.state.active_instance_id == instance_id:
                         active = self.active_instance_surface
                         dirty = self.state.surface_state.get("dirty", {})
@@ -2708,6 +2728,8 @@ class ShadowboxUI:
     @property
     def active_surface_frame_rate(self) -> float | None:
         spec = surface_spec_for_key(self.state.active_surface_key)
+        if spec and spec.key == "ring_buffer" and not self.ring_recording:
+            return None
         return spec.frame_rate if spec else None
 
     def surface_param_binding(self, key: str) -> dict | None:
@@ -2754,6 +2776,11 @@ class ShadowboxUI:
             samples = resolved.state.get("samples")
             self.state.edit_value = normalize_current_value_for_edit(anchor) if anchor else None
             self.state.edit_scope_samples = normalize_scope_samples(samples.get("value") if samples else None)
+        elif spec.key == "ring_buffer":
+            sync = resolved.state.get("record_sync")
+            self._record_ring_sync(sync.get("value") if sync else None)
+            self._request_ring_overview()
+            self._request_ring_record_sync()
         elif spec.key in {"list_sequencer", "list_vel_sequencer"}:
             drafts = {}
             keys = FIELD_KEYS if spec.key == "list_sequencer" else ROW_KEYS
@@ -2772,6 +2799,87 @@ class ShadowboxUI:
         else:
             self.state.edit_value = None
         self.state.ui_mode = "INSTANCE_SURFACE"
+        return True
+
+    def _request_ring_overview(self) -> bool:
+        trigger = self.surface_input_binding("request_overview")
+        if trigger is None or not trigger.get("path"):
+            return False
+        self.state.surface_state.update(
+            {
+                "overview_columns": empty_overview_columns(),
+                "overview_received": set(),
+                "overview_complete": False,
+                "overview_error": "",
+            }
+        )
+        self.queue_action(UIAction(kind="send_osc", path=trigger.get("path"), value=[1]))
+        self.request_render("ring_overview_request")
+        return True
+
+    def _request_ring_record_sync(self) -> bool:
+        trigger = self.surface_input_binding("request_record_sync")
+        if trigger is None or not trigger.get("path"):
+            return False
+        self.queue_action(UIAction(kind="send_osc", path=trigger.get("path"), value=[1]))
+        return True
+
+    def _record_ring_sync(self, value: Any) -> bool:
+        phase = normalize_record_sync(value)
+        if phase is None:
+            self.state.surface_state["record_sync_error"] = "INVALID SYNC"
+            return False
+        self.state.surface_state.update(
+            {
+                "record_sync_phase": phase,
+                "record_sync_at": time.monotonic(),
+                "record_sync_error": "",
+            }
+        )
+        return True
+
+    @property
+    def ring_recording(self) -> bool:
+        param = self.surface_param_binding("record_toggle")
+        value = param.get("value") if param else None
+        if isinstance(value, str):
+            return value.strip().casefold() in {"on", "record", "recording", "true", "1"}
+        return bool(value)
+
+    @property
+    def ring_display_phase(self) -> float | None:
+        phase = self.state.surface_state.get("record_sync_phase")
+        anchored_at = self.state.surface_state.get("record_sync_at")
+        if not isinstance(phase, (int, float)) or not isinstance(anchored_at, (int, float)):
+            return None
+        return projected_record_sync(
+            float(phase),
+            recording=self.ring_recording,
+            elapsed_seconds=max(0.0, time.monotonic() - float(anchored_at)),
+        )
+
+    def _toggle_ring_record(self) -> bool:
+        param = self.surface_param_binding("record_toggle")
+        if param is None or not param.get("path"):
+            return False
+        value = "Off" if self.ring_recording else "On"
+        param["value"] = value
+        self.state.surface_focus = len(RING_PARAM_KEYS) - 1
+        self.state.surface_state["adjusting"] = False
+        self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
+        self.request_render("ring_record_toggle")
+        return True
+
+    def _record_ring_overview_chunk(self, value: Any) -> bool:
+        columns = self.state.surface_state.get("overview_columns")
+        received = self.state.surface_state.get("overview_received")
+        if not isinstance(columns, list) or not isinstance(received, set):
+            return False
+        if not apply_overview_chunk(columns, received, value):
+            self.state.surface_state["overview_error"] = "INVALID CHUNK"
+            return False
+        self.state.surface_state["overview_complete"] = len(received) == OVERVIEW_CHUNK_COUNT
+        self.state.surface_state["overview_error"] = ""
         return True
 
     def _exit_instance_surface(self) -> None:
@@ -3661,7 +3769,12 @@ class ShadowboxUI:
         elif event.kind == "set_transport_tempo":
             self._handle_transport_tempo(event.value, pressed=bool(getattr(event, "pressed", False)))
         elif event.kind == "set_surface_value":
-            self._handle_surface_value(event.index, event.value, pressed=bool(getattr(event, "pressed", False)))
+            self._handle_surface_value(
+                event.index,
+                event.value,
+                button_id=event.button_id,
+                pressed=bool(getattr(event, "pressed", False)),
+            )
         elif event.kind == "set_surface_range":
             self._handle_analog_pitch_range(event.button_id, event.value)
         elif event.kind == "toggle_surface_value":
@@ -3765,8 +3878,32 @@ class ShadowboxUI:
         if not pressed:
             self.queue_action(UIAction(kind="save_state"))
 
-    def _handle_surface_value(self, index: int | None, normalized_value: float | None, *, pressed: bool = False) -> None:
+    def _handle_surface_value(
+        self,
+        index: int | None,
+        normalized_value: float | None,
+        *,
+        button_id: str = "",
+        pressed: bool = False,
+    ) -> None:
         if self.state.ui_mode != "INSTANCE_SURFACE" or normalized_value is None or index is None:
+            return
+        if self.state.active_surface_key == "ring_buffer":
+            focus = max(0, min(len(RING_PARAM_KEYS) - 2, int(index)))
+            param = self.surface_param_binding(RING_PARAM_KEYS[focus])
+            if param is None:
+                return
+            pmin, pmax = param.get("min"), param.get("max")
+            if not isinstance(pmin, (int, float)) or not isinstance(pmax, (int, float)) or pmax <= pmin:
+                return
+            fraction = max(0.0, min(1.0, float(normalized_value)))
+            if button_id == "ring_waveform" and focus == 1 and self.ring_display_phase is not None:
+                fraction = (self.ring_display_phase + fraction) % 1.0
+            value = quantize_edit_value(param, pmin + ((pmax - pmin) * fraction))
+            param["value"] = value
+            self.state.surface_focus = focus
+            self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
+            self.request_render("ring_param_touch")
             return
         if self.state.active_surface_key == "organ":
             focus = max(0, min(len(FOOTAGES) - 1, int(index)))
@@ -4255,6 +4392,14 @@ class ShadowboxUI:
             self.state.activity_ticks += 1
             self.queue_action(UIAction(kind="save_state"))
             return
+
+        if self.state.ui_mode == "INSTANCE_SURFACE" and self.state.active_surface_key == "ring_buffer":
+            if button == "ring_record":
+                self._toggle_ring_record()
+                return
+            if button == "ring_refresh":
+                self._request_ring_overview()
+                return
 
         if self.state.ui_mode == "TOP" and button == "home_tempo":
             self._begin_transport_tempo_edit()
@@ -4879,6 +5024,15 @@ class ShadowboxUI:
                         self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
                 else:
                     self.state.surface_focus = self._cycle(self.state.surface_focus, 16, step)
+            elif self.state.active_surface_key == "ring_buffer":
+                if self.state.surface_state.get("adjusting") and self.state.surface_focus < len(RING_PARAM_KEYS) - 1:
+                    param = self.surface_param_binding(RING_PARAM_KEYS[self.state.surface_focus])
+                    if param is not None:
+                        value = apply_edit_delta(param, param.get("value"), step)
+                        param["value"] = value
+                        self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
+                else:
+                    self.state.surface_focus = self._cycle(self.state.surface_focus, len(RING_PARAM_KEYS), step)
             elif self.state.active_surface_key in {"list_sequencer", "list_vel_sequencer"}:
                 self.state.surface_focus = self._cycle(self.state.surface_focus, len(self._list_surface_keys()), step)
         elif self.state.ui_mode == "REMOVE_INSTANCE_CONFIRM":
@@ -5699,6 +5853,11 @@ class ShadowboxUI:
                 self.state.surface_state["adjusting"] = not bool(self.state.surface_state.get("adjusting"))
             elif self.state.active_surface_key in {"list_sequencer", "list_vel_sequencer"}:
                 self._send_list_field()
+            elif self.state.active_surface_key == "ring_buffer":
+                if self.state.surface_focus == len(RING_PARAM_KEYS) - 1:
+                    self._toggle_ring_record()
+                else:
+                    self.state.surface_state["adjusting"] = not bool(self.state.surface_state.get("adjusting"))
             else:
                 self._exit_instance_surface()
 
