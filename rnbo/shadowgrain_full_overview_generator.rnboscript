@@ -1,0 +1,123 @@
+// ShadowGrain full ring-buffer overview generator
+//
+// Use in an ordinary RNBO codebox object, not codebox~.
+//
+// shadow:
+//   stereo buffer~, 480000 frames at 48000 Hz
+//
+// overview:
+//   mono data buffer, 1600 values
+//   [min0, max0, min1, max1, ...]
+//
+// in1:
+//   any nonzero number rebuilds the complete overview
+//
+// out1:
+//    1 = overview complete
+//    0 = idle
+//   -1 = buffer dimensions do not match
+
+const SOURCE_FRAMES = 480000;
+const SOURCE_CHANNELS = 2;
+const OVERVIEW_COLUMNS = 800;
+const OVERVIEW_VALUES = 1600;
+const FRAMES_PER_COLUMN = 600;
+
+@state shadowBuffer = new buffer("shadow");
+@state overviewBuffer = new data("overview");
+
+out1 = 0;
+
+if (in1 != 0)
+{
+    let sourceFrames = dim(shadowBuffer);
+    let sourceChannels = channels(shadowBuffer);
+    let overviewValues = dim(overviewBuffer);
+
+    if (
+        sourceFrames >= SOURCE_FRAMES &&
+        sourceChannels >= SOURCE_CHANNELS &&
+        overviewValues >= OVERVIEW_VALUES
+    )
+    {
+        for (
+            var column: Int = 0;
+            column < OVERVIEW_COLUMNS;
+            column += 1
+        )
+        {
+            let startFrame: Int = column * FRAMES_PER_COLUMN;
+            let endFrame: Int = startFrame + FRAMES_PER_COLUMN;
+
+            let left = peek(shadowBuffer, startFrame, 0)[0];
+            let right = peek(shadowBuffer, startFrame, 1)[0];
+
+            let minimum = left;
+            let maximum = left;
+
+            if (right < minimum)
+            {
+                minimum = right;
+            }
+
+            if (right > maximum)
+            {
+                maximum = right;
+            }
+
+            for (
+                var frame: Int = startFrame + 1;
+                frame < endFrame;
+                frame += 1
+            )
+            {
+                left = peek(shadowBuffer, frame, 0)[0];
+                right = peek(shadowBuffer, frame, 1)[0];
+
+                if (left < minimum)
+                {
+                    minimum = left;
+                }
+
+                if (left > maximum)
+                {
+                    maximum = left;
+                }
+
+                if (right < minimum)
+                {
+                    minimum = right;
+                }
+
+                if (right > maximum)
+                {
+                    maximum = right;
+                }
+            }
+
+            let overviewIndex: Int = column * 2;
+
+            poke(
+                overviewBuffer,
+                minimum,
+                overviewIndex,
+                0,
+                0
+            );
+
+            poke(
+                overviewBuffer,
+                maximum,
+                overviewIndex + 1,
+                0,
+                0
+            );
+        }
+
+        out1 = 1;
+    }
+    else
+    {
+        out1 = -1;
+    }
+}

@@ -93,9 +93,10 @@ def rotate_overview_columns(
 ) -> list[tuple[float, float] | None]:
     if not columns or phase is None:
         return list(columns)
-    write_index = min(len(columns), max(0, int(round(float(phase) * len(columns)))))
-    if write_index == len(columns):
-        write_index = 0
+    # record~ sync identifies the column currently being written.  Starting
+    # there puts the preceding, newly completed column at the right edge, so
+    # advancing sync makes the waveform move left underneath that edge.
+    write_index = int(max(0.0, min(1.0, float(phase))) * len(columns)) % len(columns)
     return list(columns[write_index:]) + list(columns[:write_index])
 
 

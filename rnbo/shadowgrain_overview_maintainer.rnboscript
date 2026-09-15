@@ -1,0 +1,184 @@
+// ShadowGrain incremental ring-buffer overview maintainer
+//
+// Use in an RNBO codebox~ object.
+//
+// in1: record~ sync signal, normalized phase 0..1
+// in2: numeric RecordToggle message, 0 = stopped, 1 = recording
+//
+// out1: one-sample pulse whenever a chunk becomes dirty
+// out2: one-based dirty chunk index, held until the next dirty chunk
+//
+// The existing full overview generator remains responsible for rebuilding all
+// 800 columns after shadow is loaded, replaced, or resized. This code maintains
+// completed columns while record~ is running. It retransmits the containing
+// 25-column chunk after every completed column so stale waveform data does not
+// rotate back onto the right edge of the Shadowbox display.
+
+const SOURCE_FRAMES = 480000;
+const SOURCE_CHANNELS = 2;
+const OVERVIEW_COLUMNS = 800;
+const OVERVIEW_VALUES = 1600;
+const FRAMES_PER_COLUMN = 600;
+const COLUMNS_PER_CHUNK = 25;
+
+@state shadowBuffer = new buffer("shadow");
+// RNBO's named data and buffer objects use the same codebox buffer reference.
+@state overviewBuffer = new buffer("overview");
+
+@state previousRecord = 0;
+@state previousColumn: Int = -1;
+@state dirtyChunk = 1;
+@state bufferStatus = 0;
+
+
+function validateBuffers(): number
+{
+    let sourceFrames = dim(shadowBuffer);
+    let sourceChannels = channels(shadowBuffer);
+    let overviewValues = dim(overviewBuffer);
+
+    if (
+        sourceFrames >= SOURCE_FRAMES &&
+        sourceChannels >= SOURCE_CHANNELS &&
+        overviewValues >= OVERVIEW_VALUES
+    )
+    {
+        return 1;
+    }
+
+    return -1;
+}
+
+
+function dspsetup()
+{
+    bufferStatus = validateBuffers();
+    previousRecord = 0;
+    previousColumn = -1;
+}
+
+
+function updateColumn(column)
+{
+    let startFrame: Int = column * FRAMES_PER_COLUMN;
+    let endFrame: Int = startFrame + FRAMES_PER_COLUMN;
+
+    // Initialize from actual samples so wholly positive or negative columns
+    // retain the correct envelope.
+    let left = peek(shadowBuffer, startFrame, 0)[0];
+    let right = peek(shadowBuffer, startFrame, 1)[0];
+
+    let minimum = left;
+    let maximum = left;
+
+    if (right < minimum)
+    {
+        minimum = right;
+    }
+
+    if (right > maximum)
+    {
+        maximum = right;
+    }
+
+    for (
+        var frame: Int = startFrame + 1;
+        frame < endFrame;
+        frame += 1
+    )
+    {
+        left = peek(shadowBuffer, frame, 0)[0];
+        right = peek(shadowBuffer, frame, 1)[0];
+
+        if (left < minimum)
+        {
+            minimum = left;
+        }
+
+        if (left > maximum)
+        {
+            maximum = left;
+        }
+
+        if (right < minimum)
+        {
+            minimum = right;
+        }
+
+        if (right > maximum)
+        {
+            maximum = right;
+        }
+    }
+
+    let overviewIndex: Int = column * 2;
+
+    poke(overviewBuffer, minimum, overviewIndex, 0, 0);
+    poke(overviewBuffer, maximum, overviewIndex + 1, 0, 0);
+}
+
+
+// out1 returns to zero on the sample after each dirty event. Feed it through
+// edge~ so the zero-to-one transition becomes a message-domain bang.
+out1 = 0;
+out2 = dirtyChunk;
+
+let recording = in2 != 0;
+
+// Prevent an exact phase of 1 from selecting nonexistent column 800.
+let phase = min(0.999999999, max(0, in1));
+let currentColumn: Int = floor(phase * OVERVIEW_COLUMNS);
+
+// Revalidate on the rising record edge because a sample dependency may finish
+// loading after dspsetup has already run.
+if (recording && !previousRecord)
+{
+    bufferStatus = validateBuffers();
+
+    if (bufferStatus == 1)
+    {
+        previousColumn = currentColumn;
+    }
+}
+
+
+if (bufferStatus == 1)
+{
+    // The sync signal entered a new column, so the preceding physical column
+    // is complete and safe to scan from shadow.
+    if (
+        recording &&
+        previousRecord &&
+        previousColumn >= 0 &&
+        currentColumn != previousColumn
+    )
+    {
+        let completedColumn: Int = previousColumn;
+
+        updateColumn(completedColumn);
+        previousColumn = currentColumn;
+
+        dirtyChunk =
+            floor(completedColumn / COLUMNS_PER_CHUNK) + 1;
+
+        out2 = dirtyChunk;
+        out1 = 1;
+    }
+
+    // On the falling record edge, update and send the partially written
+    // column's physical chunk before freezing the display.
+    if (!recording && previousRecord && previousColumn >= 0)
+    {
+        updateColumn(previousColumn);
+
+        dirtyChunk =
+            floor(previousColumn / COLUMNS_PER_CHUNK) + 1;
+
+        out2 = dirtyChunk;
+        out1 = 1;
+        previousColumn = -1;
+    }
+}
+
+
+previousRecord = recording;

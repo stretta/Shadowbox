@@ -2,6 +2,7 @@ import sys
 import types
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 pythonosc_module = types.ModuleType("pythonosc")
@@ -295,6 +296,7 @@ class InstanceSurfaceTests(unittest.TestCase):
         self.assertEqual(projected_record_sync(0.25, recording=False, elapsed_seconds=7.0), 0.25)
         self.assertAlmostEqual(projected_record_sync(0.75, recording=True, elapsed_seconds=5.0), 0.25)
         self.assertEqual(rotate_overview_columns([(0, 0), (1, 1), (2, 2), (3, 3)], 0.5), [(2, 2), (3, 3), (0, 0), (1, 1)])
+        self.assertEqual(rotate_overview_columns([(0, 0), (1, 1), (2, 2), (3, 3)], 0.375), [(1, 1), (2, 2), (3, 3), (0, 0)])
 
     def test_ring_overview_chunk_validation_and_downsampling(self):
         self.assertIsNone(normalize_overview_chunk([1.0] + [0.0] * 49))
@@ -408,6 +410,35 @@ class InstanceSurfaceTests(unittest.TestCase):
         ui.pop_actions()
         self.assertFalse(ui.ring_recording)
         self.assertIsNone(ui.active_surface_frame_rate)
+
+    def test_ring_record_toggle_reanchors_projected_sync_at_both_edges(self):
+        ui = ShadowboxUI()
+        instance = _ring_buffer_instance()
+        ui.apply_runner_snapshot(_snapshot([instance]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+
+        with patch("shadowbox.ui.time.monotonic", return_value=100.0):
+            ui.handle_event(UIEvent("short_press"))
+        ui.pop_actions()
+
+        ui.state.surface_state["record_sync_phase"] = 0.25
+        ui.state.surface_state["record_sync_at"] = 100.0
+
+        # Time spent stopped must not become record progress when recording
+        # starts.
+        with patch("shadowbox.ui.time.monotonic", return_value=107.0):
+            ui.handle_event(UIEvent("tap_button", button_id="ring_record"))
+        self.assertAlmostEqual(ui.state.surface_state["record_sync_phase"], 0.25)
+        self.assertEqual(ui.state.surface_state["record_sync_at"], 107.0)
+        ui.pop_actions()
+
+        # Until the exact stop event arrives, freeze the locally projected
+        # phase instead of snapping back to the phase captured at start.
+        with patch("shadowbox.ui.time.monotonic", return_value=109.0):
+            ui.handle_event(UIEvent("tap_button", button_id="ring_record"))
+        self.assertAlmostEqual(ui.state.surface_state["record_sync_phase"], 0.45)
+        self.assertEqual(ui.state.surface_state["record_sync_at"], 109.0)
 
     def test_resolution_uses_export_name_not_label(self):
         instance = _scope_instance()

@@ -2862,7 +2862,24 @@ class ShadowboxUI:
         param = self.surface_param_binding("record_toggle")
         if param is None or not param.get("path"):
             return False
-        value = "Off" if self.ring_recording else "On"
+        was_recording = self.ring_recording
+        now = time.monotonic()
+        phase = self.state.surface_state.get("record_sync_phase")
+        anchored_at = self.state.surface_state.get("record_sync_at")
+        if isinstance(phase, (int, float)) and isinstance(anchored_at, (int, float)):
+            anchored_phase = projected_record_sync(
+                float(phase),
+                recording=was_recording,
+                elapsed_seconds=max(0.0, now - float(anchored_at)),
+            )
+            if anchored_phase is not None:
+                # A recordsync event will replace this estimate, but anchoring
+                # locally at both edges prevents stopped time from being added
+                # when recording begins and prevents a jump back while the
+                # final recordsync event is in flight.
+                self.state.surface_state["record_sync_phase"] = anchored_phase
+                self.state.surface_state["record_sync_at"] = now
+        value = "Off" if was_recording else "On"
         param["value"] = value
         self.state.surface_focus = len(RING_PARAM_KEYS) - 1
         self.state.surface_state["adjusting"] = False
