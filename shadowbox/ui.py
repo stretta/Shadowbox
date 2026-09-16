@@ -3771,6 +3771,8 @@ class ShadowboxUI:
             self._handle_long_press()
         elif event.kind == "tap_row":
             self._handle_tap_row(event.index)
+        elif event.kind == "inspect_param_midi":
+            self._handle_param_midi_inspector(event.index)
         elif event.kind == "tap_back":
             self._handle_tap_back()
         elif event.kind == "tap_button":
@@ -4953,6 +4955,23 @@ class ShadowboxUI:
 
         if handled:
             self._handle_short_press()
+
+    def _handle_param_midi_inspector(self, index: int | None) -> None:
+        if self.state.ui_mode != "PARAM_LIST" or index is None:
+            return
+        row_index = max(0, int(index))
+        if not self._set_touch_cursor("param_cursor", row_index, len(self.active_params) + 1):
+            return
+        param = self.selected_param
+        if param is None or not is_inline_toggle_param(param):
+            return
+        self.state.activity_ticks += 1
+        self._edit_original_value = param.get("value")
+        self.state.edit_value = normalize_current_value_for_edit(param)
+        self.state.edit_numeric_draft = ""
+        self._reset_float_edit_acceleration()
+        self.state.ui_mode = "EDIT"
+        self.queue_action(UIAction(kind="save_state"))
 
     def _handle_step(self, delta: int) -> None:
         if delta == 0:

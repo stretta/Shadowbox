@@ -550,6 +550,33 @@ class TouchDirectUITests(unittest.TestCase):
         writes = [action for action in ui.pop_actions() if action.kind == "set_param"]
         self.assertEqual([(action.path, action.value) for action in writes], [("/params/clock", "On")])
 
+    def test_inline_toggle_midi_icon_opens_mapping_inspector_without_toggling(self) -> None:
+        ui = ShadowboxUI()
+        param = {
+            "name": "clock",
+            "value": "Off",
+            "path": "/params/clock",
+            "vals": ["Off", "On"],
+        }
+        ui.state.ui_mode = "PARAM_LIST"
+        ui.state.instances = [{"id": "1", "params": [param]}]
+        ui.state.active_instance_id = "1"
+        ui.state.param_cursor = 1
+
+        display = _ColorFiveInchDisplay()
+        renderer = create_renderer(display)
+        renderer.set_touch_mode(True)
+        renderer.draw(ui, touch_state=SimpleNamespace(pressed=False, normalized_x=0.0, normalized_y=0.0))
+
+        action = _touch_action_for_target(renderer, kind="midi_map", index=1)
+        self.assertEqual(action, TouchAction("inspect_param_midi", index=1))
+        ui.handle_event(UIEvent(kind=action.kind, index=action.index))
+
+        self.assertEqual(ui.state.ui_mode, "EDIT")
+        self.assertEqual(ui.state.edit_value, "Off")
+        self.assertEqual(param["value"], "Off")
+        self.assertFalse(any(item.kind == "set_param" for item in ui.pop_actions()))
+
     def test_tap_menu_rows_transition_into_nested_views(self) -> None:
         ui = ShadowboxUI()
         ui.state.ui_mode = "INSTANCE_MENU"

@@ -1462,6 +1462,8 @@ class ShadowboxRenderer:
         enabled: bool,
         *,
         text_weight: str = "regular",
+        midi_map_index: int | None = None,
+        midi_mapped: bool = False,
     ) -> None:
         scale = self._touch_menu_scale()
         switch_w = 76
@@ -1469,10 +1471,31 @@ class ShadowboxRenderer:
         switch_x = content_left + max(16, row_w - switch_w - 22)
         switch_y = row_center_y - (switch_h // 2)
         label_x = content_left + 16
-        label_w = max(1, switch_x - label_x - 24)
+        midi_target_w = 48
+        midi_gap = 14
+        midi_target_x = switch_x - midi_gap - midi_target_w
+        label_right = midi_target_x - 12 if midi_map_index is not None else switch_x - 24
+        label_w = max(1, label_right - label_x)
         fitted_label = self._truncate_to_width(label, label_w, scale, text_weight)
         text_y = row_center_y - (self._line_height(scale, text_weight) // 2)
         self._text_theme(fitted_label, label_x, text_y, "text", scale, text_weight)
+
+        if midi_map_index is not None:
+            self._record_touch_target(
+                "midi_map",
+                midi_target_x,
+                row_top,
+                midi_target_w,
+                row_h,
+                action_kind="inspect_param_midi",
+                index=midi_map_index,
+                label=f"MIDI mapping for {label}",
+            )
+            icon_size = 26
+            icon_x = midi_target_x + ((midi_target_w - icon_size) // 2)
+            icon_y = row_center_y - (icon_size // 2)
+            pressed = self._touch_pressed(kind="midi_map", index=midi_map_index)
+            self._draw_midi_map_icon(icon_x, icon_y, mapped=midi_mapped, pressed=pressed)
 
         track_color = "accent" if enabled else "panel_alt"
         border_color = "accent" if enabled else "line"
@@ -1483,6 +1506,14 @@ class ShadowboxRenderer:
         knob_x = switch_x + switch_w - knob_size - 4 if enabled else switch_x + 4
         knob_y = switch_y + 4
         self._rounded_theme(knob_x, knob_y, knob_size, knob_size, knob_size // 2, "text", fill=True)
+
+    def _draw_midi_map_icon(self, x: int, y: int, *, mapped: bool, pressed: bool = False) -> None:
+        """Draw a compact five-pin MIDI socket inspired by the supplied SVG."""
+        color = "accent" if pressed else "midi" if mapped else "muted"
+        size = 26
+        self._rounded_theme(x, y, size, size, size // 2, color, fill=False)
+        for dx, dy in ((11, 5), (6, 9), (16, 9), (5, 16), (17, 16)):
+            self._rounded_theme(x + dx, y + dy, 4, 4, 2, color, fill=True)
 
     def draw_selectable_value_rows(self, rows: list[ValueRow], selected_idx: int) -> None:
         if not rows:
@@ -2257,6 +2288,7 @@ class ShadowboxRenderer:
                 else:
                     if self.touch_layout_enabled and self.has_color:
                         if is_inline_toggle_param(param):
+                            midi_mapped = bool(midi_marker)
                             self._draw_touch_toggle_row(
                                 content_left,
                                 row_top,
@@ -2266,6 +2298,8 @@ class ShadowboxRenderer:
                                 full_left,
                                 inline_toggle_is_on(param),
                                 text_weight="regular",
+                                midi_map_index=tap_index,
+                                midi_mapped=midi_mapped,
                             )
                         else:
                             self._draw_touch_label_value_row(

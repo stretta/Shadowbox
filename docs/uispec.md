@@ -298,6 +298,7 @@ Editor behavior:
 - Long press in a live editor exits the editor and does not revert already committed changes
 - Boolean parameters toggle directly from the parameter list when explicitly marked as bool and render as inline switches on the touch UI
 - An enum whose complete advertised value list is exactly `Off` and `On` also renders and behaves as an inline switch; Shadowbox sends the original advertised string value
+- Touchscreen inline switches include a compact MIDI icon with a separate hit target; tapping it opens the parameter inspector for MIDI learn or clear without changing the parameter value
 - All other enum parameters use a list selector when RNBO publishes an explicit enum value list; arbitrary two-choice enums are not inferred to be booleans
 - TTID uses a specialized editor only when the parameter metadata explicitly includes `editor: "ttid"`
 - `step16` uses a specialized live editor when the parameter metadata explicitly includes `editor: "step16"`; its default runtime state key is the one-based `current_stage` outport and may be overridden with `playhead_state` for legacy or custom zero-based feeds
