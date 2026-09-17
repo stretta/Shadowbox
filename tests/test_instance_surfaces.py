@@ -76,15 +76,18 @@ def _ring_buffer_instance():
         "name": "ShadowGrain",
         "label": "GRAINS",
         "params": [
-            _param("Rate", value=20.0, minimum=0.0, maximum=100.0, metadata={"unit": "hz"}),
-            _param("Position", value=0.5, minimum=0.0, maximum=1.0),
+            _param("GrainTriggerRate", value=20.0, minimum=0.0, maximum=100.0, metadata={"unit": "hz"}),
             _param("GrainDuration", value=300.0, minimum=0.0, maximum=1000.0, metadata={"unit": "ms"}),
             _param("Transpose", value=0.0, minimum=-60.0, maximum=60.0, metadata={"unit": "st"}),
+            _param("WalkRate", value=0.0, minimum=-5.0, maximum=5.0, metadata={"unit": "ms"}),
+            _param("WalkAmt", value=0.0, minimum=-1.0, maximum=1.0),
+            _param("WalkBias", value=0.0, minimum=-1.0, maximum=1.0),
             _param("RecordToggle", value="Off", minimum=None, maximum=None),
         ],
         "inputs": [_list_input("getrecordsync"), _list_input("itriggeroverview")],
         "state": [
             _state("overviewchunks", [32.0] + [0.0] * 50),
+            _state("PlaybackPosition", [0.5]),
             _state("recordsync", [0.25]),
         ],
     }
@@ -275,7 +278,11 @@ class InstanceSurfaceTests(unittest.TestCase):
         self.assertEqual(resolved[1].inputs["request_record_sync"]["name"], "getrecordsync")
         self.assertEqual(resolved[1].state["overview_chunks"]["name"], "overviewchunks")
         self.assertEqual(resolved[1].state["record_sync"]["name"], "recordsync")
-        self.assertEqual(set(resolved[1].params), {"rate", "position", "grain_duration", "transpose", "record_toggle"})
+        self.assertEqual(resolved[1].state["playback_position"]["name"], "PlaybackPosition")
+        self.assertEqual(
+            set(resolved[1].params),
+            {"rate", "grain_duration", "transpose", "walk_rate", "walk_amount", "walk_bias", "record_toggle"},
+        )
 
     def test_shadowgrain_rejects_incomplete_ring_buffer_contract(self):
         missing_input = _ring_buffer_instance()
@@ -346,7 +353,7 @@ class InstanceSurfaceTests(unittest.TestCase):
         self.assertEqual(ui.state.surface_state["overview_columns"][0], (-0.5, 0.75))
         self.assertEqual(ui.state.surface_state["overview_columns"][-1], (-0.5, 0.75))
 
-    def test_ring_surface_renders_envelope_and_five_controls(self):
+    def test_ring_surface_renders_envelope_and_six_controls(self):
         ui = ShadowboxUI()
         instance = _ring_buffer_instance()
         ui.apply_runner_snapshot(_snapshot([instance]))
@@ -369,19 +376,20 @@ class InstanceSurfaceTests(unittest.TestCase):
 
         self.assertGreater(len([op for op in display.ops if op[0] == "vline"]), 600)
         text = [op[1] for op in display.ops if op[0] in {"text", "text_color"}]
-        self.assertIn("10.0 SEC  ·  800 COLUMNS  ·  REFRESH", text)
-        for label in ("RATE", "POSITION", "DURATION", "TRANSPOSE", "RECORD"):
+        self.assertNotIn("800 COLUMNS", " ".join(text))
+        for label in ("RATE", "DURATION", "TRANSPOSE", "WALK RATE", "WALK AMT", "RECORD", "REFRESH"):
             self.assertIn(label, text)
+        self.assertNotIn("WALK BIAS", text)
         self.assertEqual(
             [target.button_id for target in renderer.touch_layout.targets if target.kind == "ring_param"],
-            ["ring_horizontal"] * 4,
+            ["ring_horizontal"] * 5,
         )
         self.assertTrue(any(target.button_id == "ring_record" for target in renderer.touch_layout.targets))
 
         ui.handle_event(UIEvent("short_press"))
         self.assertTrue(ui.state.surface_state["adjusting"])
 
-    def test_ring_controls_position_and_record_without_polling(self):
+    def test_ring_controls_walk_bias_and_record_without_polling(self):
         ui = ShadowboxUI()
         instance = _ring_buffer_instance()
         ui.apply_runner_snapshot(_snapshot([instance]))
@@ -395,10 +403,19 @@ class InstanceSurfaceTests(unittest.TestCase):
         self.assertAlmostEqual(ui.state.surface_state["record_sync_phase"], 0.75)
         self.assertEqual(ui.pop_actions(), [])
 
-        ui.handle_event(UIEvent("set_surface_value", index=1, button_id="ring_waveform", value=0.5))
-        position_write = next(action for action in ui.pop_actions() if action.kind == "set_param")
-        self.assertEqual(position_write.path, "/rnbo/inst/7/params/Position")
-        self.assertAlmostEqual(position_write.value, 0.25, places=2)
+        ui.handle_event(UIEvent("set_surface_value", index=0, button_id="ring_waveform", value=0.75))
+        bias_write = next(action for action in ui.pop_actions() if action.kind == "set_param")
+        self.assertEqual(bias_write.path, "/rnbo/inst/7/params/WalkBias")
+        self.assertAlmostEqual(bias_write.value, -0.25, places=2)
+
+        with patch("shadowbox.ui.time.monotonic", side_effect=[10.0, 10.1, 10.2, 10.3]):
+            for _ in range(2):
+                ui.handle_event(UIEvent("set_surface_value", index=-1, button_id="ring_waveform", value=0.75, pressed=True))
+                ui.handle_event(UIEvent("set_surface_value", index=-1, button_id="ring_waveform", value=0.75, pressed=False))
+        zero_write = [action for action in ui.pop_actions() if action.kind == "set_param"][-1]
+        self.assertEqual(zero_write.path, "/rnbo/inst/7/params/WalkBias")
+        self.assertEqual(zero_write.value, 0.0)
+        self.assertEqual(ui.state.status_message, "WALK BIAS ZERO")
 
         ui.handle_event(UIEvent("tap_button", button_id="ring_record"))
         record_write = next(action for action in ui.pop_actions() if action.kind == "set_param")
@@ -410,6 +427,26 @@ class InstanceSurfaceTests(unittest.TestCase):
         ui.pop_actions()
         self.assertFalse(ui.ring_recording)
         self.assertIsNone(ui.active_surface_frame_rate)
+
+    def test_ring_encoder_long_press_zeros_adjusted_parameter(self):
+        ui = ShadowboxUI()
+        instance = _ring_buffer_instance()
+        ui.apply_runner_snapshot(_snapshot([instance]))
+        ui.state.ui_mode = "INSTANCE_MENU"
+        ui.state.instance_menu_cursor = 1
+        ui.handle_event(UIEvent("short_press"))
+        ui.pop_actions()
+
+        ui.state.surface_focus = 2
+        ui.state.surface_state["adjusting"] = True
+        transpose = next(param for param in instance["params"] if param["name"] == "Transpose")
+        transpose["value"] = 7.0
+        ui.handle_event(UIEvent("long_press"))
+
+        write = next(action for action in ui.pop_actions() if action.kind == "set_param")
+        self.assertEqual((write.path, write.value), ("/rnbo/inst/7/params/Transpose", 0.0))
+        self.assertEqual(ui.state.ui_mode, "INSTANCE_SURFACE")
+        self.assertEqual(ui.state.status_message, "TRANSPOSE ZERO")
 
     def test_ring_record_toggle_reanchors_projected_sync_at_both_edges(self):
         ui = ShadowboxUI()

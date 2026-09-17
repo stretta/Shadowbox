@@ -20,7 +20,10 @@ from shadowbox.surfaces.list_vel_sequencer import ROW_KEYS, ROW_LABELS, mute_is_
 from shadowbox.surfaces.organ import FOOTAGE_COLORS, FOOTAGES
 from shadowbox.surfaces.ring_buffer import (
     OVERVIEW_CHUNK_COUNT,
-    RING_PARAM_KEYS,
+    RING_CONTROL_KEYS,
+    RING_PARAM_LABELS,
+    RING_WAVEFORM_PARAM_KEY,
+    normalize_playback_position,
     overview_columns_for_width,
     rotate_overview_columns,
 )
@@ -4206,13 +4209,8 @@ class ShadowboxRenderer:
             panel_w = self.display.width - 40
             panel_h = 360
             panel_y = self.edit_content_top(panel_h)
-            x, y, w, h = panel_x + 16, panel_y + 14, panel_w - 32, 190
+            x, y, w, h = panel_x, panel_y + 14, panel_w, 190
             status_y = y + h + 5
-            if self.has_color:
-                self._rounded_theme(panel_x, panel_y, panel_w, panel_h, 14, "panel", True)
-                self._rounded_theme(panel_x, panel_y, panel_w, panel_h, 14, "line", False)
-            else:
-                self.display.rect(panel_x, panel_y, panel_w, panel_h, True, False)
         elif self.is_full_tft:
             x, y, w, h = 12, 46, self.display.width - 24, 150
             status_y = y + h + 14
@@ -4244,10 +4242,10 @@ class ShadowboxRenderer:
                 top, bottom = bottom, top
             self._vline_theme(x + 1 + offset, top, max(1, bottom - top + 1), "accent")
 
-        position = ui.surface_param_binding("position")
-        position_value = position.get("value") if position else None
-        if isinstance(position_value, (int, float)):
-            displayed_position = float(position_value)
+        playback_position = ui.surface_state_binding("playback_position")
+        position_value = normalize_playback_position(playback_position.get("value") if playback_position else None)
+        if position_value is not None:
+            displayed_position = position_value
             if display_phase is not None:
                 displayed_position = (displayed_position - display_phase) % 1.0
             marker_x = x + 1 + int(round(max(0.0, min(1.0, displayed_position)) * max(0, drawable_width - 1)))
@@ -4264,40 +4262,44 @@ class ShadowboxRenderer:
                 w,
                 h,
                 action_kind="set_surface_value",
-                index=1,
+                index=-1,
                 button_id="ring_waveform",
-                label="Position",
+                label="Walk bias",
             )
 
         if error or sync_error:
             status = error or sync_error
         elif complete:
-            status = "10.0 SEC  ·  800 COLUMNS  ·  REFRESH"
+            status = ""
         else:
-            status = f"RECEIVING {received_count}/{OVERVIEW_CHUNK_COUNT}"
+            status = f"LOADING WAVEFORM {received_count}/{OVERVIEW_CHUNK_COUNT}"
         if self.touch_layout_enabled and self.has_color:
-            self._text_theme(status, panel_x + 16, status_y, "muted", 1, "medium")
+            if status:
+                self._text_theme(status, panel_x, status_y, "muted", 1, "medium")
+            refresh_w = 96
+            refresh_x = panel_x + panel_w - refresh_w
+            self._text_theme("REFRESH", refresh_x + 22, status_y, "muted", 1, "medium")
             self._record_touch_target(
                 "ring_refresh",
-                panel_x + 12,
+                refresh_x,
                 status_y - 5,
-                panel_w - 24,
+                refresh_w,
                 24,
                 action_kind="tap_button",
                 button_id="ring_refresh",
                 label="Refresh overview",
             )
 
-            focus = max(0, min(len(RING_PARAM_KEYS) - 1, int(state.surface_focus)))
+            focus = max(0, min(len(RING_CONTROL_KEYS) - 1, int(state.surface_focus)))
             adjusting = bool(state.surface_state.get("adjusting"))
             controls_y = panel_y + 238
             controls_h = 102
-            controls_x = panel_x + 16
-            controls_w = panel_w - 32
-            gap = 7
-            tile_w = (controls_w - gap * 4) // 5
-            labels = ("RATE", "POSITION", "DURATION", "TRANSPOSE")
-            for index, (key, label) in enumerate(zip(RING_PARAM_KEYS[:4], labels)):
+            controls_x = panel_x
+            controls_w = panel_w
+            gap = 6
+            control_count = len(RING_CONTROL_KEYS)
+            tile_w = (controls_w - gap * (control_count - 1)) // control_count
+            for index, (key, label) in enumerate(zip(RING_CONTROL_KEYS[:-1], RING_PARAM_LABELS)):
                 param = ui.surface_param_binding(key)
                 tile_x = controls_x + index * (tile_w + gap)
                 selected = index == focus
@@ -4343,8 +4345,8 @@ class ShadowboxRenderer:
                     label=label,
                 )
 
-            record_x = controls_x + 4 * (tile_w + gap)
-            selected = focus == len(RING_PARAM_KEYS) - 1
+            record_x = controls_x + (control_count - 1) * (tile_w + gap)
+            selected = focus == len(RING_CONTROL_KEYS) - 1
             record_color = "danger" if recording else "accent"
             self._rounded_theme(record_x, controls_y, tile_w, controls_h, 9, record_color if recording else "panel_alt", recording)
             self._rounded_theme(record_x, controls_y, tile_w, controls_h, 9, record_color if recording or selected else "line", False)

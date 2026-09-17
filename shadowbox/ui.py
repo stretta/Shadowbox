@@ -46,7 +46,9 @@ from shadowbox.surfaces.list_vel_sequencer import ROW_KEYS, toggled_mute_value
 from shadowbox.surfaces.organ import FOOTAGES
 from shadowbox.surfaces.ring_buffer import (
     OVERVIEW_CHUNK_COUNT,
-    RING_PARAM_KEYS,
+    RING_CONTROL_KEYS,
+    RING_PARAM_LABELS,
+    RING_WAVEFORM_PARAM_KEY,
     apply_overview_chunk,
     empty_overview_columns,
     normalize_record_sync,
@@ -618,6 +620,13 @@ class ShadowboxUI:
         self.float_edit_accel_turbo_seconds = max(0.0, _env_float("SHADOWBOX_ENCODER_ACCEL_TURBO_SECONDS", 0.018))
         self.float_edit_accel_turbo_multiplier = max(1, _env_int("SHADOWBOX_ENCODER_ACCEL_TURBO_MULTIPLIER", 3))
         self._last_float_edit_detent_at: float | None = None
+        self._ring_touch_started_at: float | None = None
+        self._ring_touch_start_fraction: float | None = None
+        self._ring_touch_target: tuple[str, int] | None = None
+        self._ring_last_tap_at: float | None = None
+        self._ring_last_tap_target: tuple[str, int] | None = None
+        self.ring_double_tap_seconds = 0.4
+        self.ring_tap_move_tolerance = 0.04
 
     def _reset_float_edit_acceleration(self) -> None:
         self._last_float_edit_detent_at = None
@@ -2881,7 +2890,7 @@ class ShadowboxUI:
                 self.state.surface_state["record_sync_at"] = now
         value = "Off" if was_recording else "On"
         param["value"] = value
-        self.state.surface_focus = len(RING_PARAM_KEYS) - 1
+        self.state.surface_focus = len(RING_CONTROL_KEYS) - 1
         self.state.surface_state["adjusting"] = False
         self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
         self.request_render("ring_record_toggle")
@@ -2898,6 +2907,74 @@ class ShadowboxUI:
         self.state.surface_state["overview_complete"] = len(received) == OVERVIEW_CHUNK_COUNT
         self.state.surface_state["overview_error"] = ""
         return True
+
+    def _zero_ring_parameter(self, key: str) -> bool:
+        param = self.surface_param_binding(key)
+        if param is None or not param.get("path"):
+            return False
+        pmin, pmax = param.get("min"), param.get("max")
+        if (
+            not isinstance(pmin, (int, float))
+            or not isinstance(pmax, (int, float))
+            or float(pmin) > 0.0
+            or float(pmax) < 0.0
+        ):
+            return False
+        value = quantize_edit_value(param, 0.0)
+        param["value"] = value
+        self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
+        try:
+            label = RING_PARAM_LABELS[RING_CONTROL_KEYS.index(key)]
+        except (ValueError, IndexError):
+            label = "WALK BIAS" if key == RING_WAVEFORM_PARAM_KEY else str(param.get("name", key)).upper()
+        self.set_status_message(f"{label} ZERO", frames=10)
+        self.request_render("ring_param_zero")
+        return True
+
+    def _ring_touch_is_double_tap(
+        self,
+        *,
+        target: tuple[str, int],
+        fraction: float,
+        pressed: bool,
+    ) -> bool:
+        now = time.monotonic()
+        if pressed:
+            if self._ring_touch_target != target or self._ring_touch_started_at is None:
+                self._ring_touch_target = target
+                self._ring_touch_started_at = now
+                self._ring_touch_start_fraction = fraction
+            return False
+
+        started_at = self._ring_touch_started_at
+        start_fraction = self._ring_touch_start_fraction
+        active_target = self._ring_touch_target
+        self._ring_touch_started_at = None
+        self._ring_touch_start_fraction = None
+        self._ring_touch_target = None
+        if (
+            active_target != target
+            or started_at is None
+            or start_fraction is None
+            or now - started_at > self.ring_double_tap_seconds
+            or abs(fraction - start_fraction) > self.ring_tap_move_tolerance
+        ):
+            self._ring_last_tap_at = None
+            self._ring_last_tap_target = None
+            return False
+
+        if (
+            self._ring_last_tap_target == target
+            and self._ring_last_tap_at is not None
+            and now - self._ring_last_tap_at <= self.ring_double_tap_seconds
+        ):
+            self._ring_last_tap_at = None
+            self._ring_last_tap_target = None
+            return True
+
+        self._ring_last_tap_at = now
+        self._ring_last_tap_target = target
+        return False
 
     def _exit_instance_surface(self) -> None:
         self.state.ui_mode = "INSTANCE_MENU"
@@ -3908,20 +3985,35 @@ class ShadowboxUI:
         if self.state.ui_mode != "INSTANCE_SURFACE" or normalized_value is None or index is None:
             return
         if self.state.active_surface_key == "ring_buffer":
-            focus = max(0, min(len(RING_PARAM_KEYS) - 2, int(index)))
-            param = self.surface_param_binding(RING_PARAM_KEYS[focus])
+            if button_id == "ring_waveform":
+                key = RING_WAVEFORM_PARAM_KEY
+                focus = self.state.surface_focus
+            else:
+                focus = max(0, min(len(RING_CONTROL_KEYS) - 2, int(index)))
+                key = RING_CONTROL_KEYS[focus]
+            param = self.surface_param_binding(key)
             if param is None:
                 return
             pmin, pmax = param.get("min"), param.get("max")
             if not isinstance(pmin, (int, float)) or not isinstance(pmax, (int, float)) or pmax <= pmin:
                 return
             fraction = max(0.0, min(1.0, float(normalized_value)))
-            if button_id == "ring_waveform" and focus == 1 and self.ring_display_phase is not None:
-                fraction = (self.ring_display_phase + fraction) % 1.0
-            value = quantize_edit_value(param, pmin + ((pmax - pmin) * fraction))
+            if button_id == "ring_waveform":
+                # The waveform is phase-relative.  Choose the shortest signed
+                # circular offset so one screen position has one useful
+                # WalkBias value despite the parameter's full -1..1 range.
+                wrapped = min(fraction, math.nextafter(1.0, 0.0))
+                bias = wrapped if wrapped <= 0.5 else wrapped - 1.0
+                value = quantize_edit_value(param, bias)
+            else:
+                value = quantize_edit_value(param, pmin + ((pmax - pmin) * fraction))
             param["value"] = value
-            self.state.surface_focus = focus
+            if button_id != "ring_waveform":
+                self.state.surface_focus = focus
             self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
+            target = (button_id, -1 if button_id == "ring_waveform" else focus)
+            if self._ring_touch_is_double_tap(target=target, fraction=fraction, pressed=pressed):
+                self._zero_ring_parameter(key)
             self.request_render("ring_param_touch")
             return
         if self.state.active_surface_key == "organ":
@@ -5061,14 +5153,14 @@ class ShadowboxUI:
                 else:
                     self.state.surface_focus = self._cycle(self.state.surface_focus, 16, step)
             elif self.state.active_surface_key == "ring_buffer":
-                if self.state.surface_state.get("adjusting") and self.state.surface_focus < len(RING_PARAM_KEYS) - 1:
-                    param = self.surface_param_binding(RING_PARAM_KEYS[self.state.surface_focus])
+                if self.state.surface_state.get("adjusting") and self.state.surface_focus < len(RING_CONTROL_KEYS) - 1:
+                    param = self.surface_param_binding(RING_CONTROL_KEYS[self.state.surface_focus])
                     if param is not None:
                         value = apply_edit_delta(param, param.get("value"), step)
                         param["value"] = value
                         self.queue_action(UIAction(kind="set_param", path=param.get("path"), value=value))
                 else:
-                    self.state.surface_focus = self._cycle(self.state.surface_focus, len(RING_PARAM_KEYS), step)
+                    self.state.surface_focus = self._cycle(self.state.surface_focus, len(RING_CONTROL_KEYS), step)
             elif self.state.active_surface_key in {"list_sequencer", "list_vel_sequencer"}:
                 self.state.surface_focus = self._cycle(self.state.surface_focus, len(self._list_surface_keys()), step)
         elif self.state.ui_mode == "REMOVE_INSTANCE_CONFIRM":
@@ -5890,7 +5982,7 @@ class ShadowboxUI:
             elif self.state.active_surface_key in {"list_sequencer", "list_vel_sequencer"}:
                 self._send_list_field()
             elif self.state.active_surface_key == "ring_buffer":
-                if self.state.surface_focus == len(RING_PARAM_KEYS) - 1:
+                if self.state.surface_focus == len(RING_CONTROL_KEYS) - 1:
                     self._toggle_ring_record()
                 else:
                     self.state.surface_state["adjusting"] = not bool(self.state.surface_state.get("adjusting"))
@@ -5937,7 +6029,15 @@ class ShadowboxUI:
             self._about_press_count = 0
             self.state.ui_mode = "ABOUT"
         elif self.state.ui_mode == "INSTANCE_SURFACE":
-            self._exit_instance_surface()
+            if (
+                self.state.active_surface_key == "ring_buffer"
+                and self.state.surface_state.get("adjusting")
+                and 0 <= self.state.surface_focus < len(RING_CONTROL_KEYS) - 1
+                and self._zero_ring_parameter(RING_CONTROL_KEYS[self.state.surface_focus])
+            ):
+                pass
+            else:
+                self._exit_instance_surface()
         elif self.state.ui_mode == "EDIT":
             param = self.selected_param
             self.state.edit_numeric_draft = ""

@@ -14,7 +14,18 @@ OVERVIEW_COLUMNS_PER_CHUNK = OVERVIEW_VALUES_PER_CHUNK // 2
 OVERVIEW_CHUNK_COUNT = OVERVIEW_COLUMNS // OVERVIEW_COLUMNS_PER_CHUNK
 OVERVIEW_MESSAGE_LENGTH = OVERVIEW_VALUES_PER_CHUNK + 1
 BUFFER_DURATION_SECONDS = 10.0
-RING_PARAM_KEYS = ("rate", "position", "grain_duration", "transpose", "record_toggle")
+RING_PARAM_KEYS = (
+    "rate",
+    "grain_duration",
+    "transpose",
+    "walk_rate",
+    "walk_amount",
+    "walk_bias",
+    "record_toggle",
+)
+RING_CONTROL_KEYS = ("rate", "grain_duration", "transpose", "walk_rate", "walk_amount", "record_toggle")
+RING_PARAM_LABELS = ("RATE", "DURATION", "TRANSPOSE", "WALK RATE", "WALK AMT")
+RING_WAVEFORM_PARAM_KEY = "walk_bias"
 
 
 def _normalized_name(value: object) -> str:
@@ -38,21 +49,33 @@ def resolve_ring_buffer_bindings(instance: dict) -> ResolvedSurface | None:
     sync_request = _unique_named_item(instance.get("inputs"), "getrecordsync")
     chunks = _unique_named_item(instance.get("state"), "overviewchunks")
     record_sync = _unique_named_item(instance.get("state"), "recordsync")
+    playback_position = _unique_named_item(instance.get("state"), "PlaybackPosition")
     params = {
-        "rate": _unique_named_item(instance.get("params"), "Rate"),
-        "position": _unique_named_item(instance.get("params"), "Position"),
+        "rate": _unique_named_item(instance.get("params"), "GrainTriggerRate"),
         "grain_duration": _unique_named_item(instance.get("params"), "GrainDuration"),
         "transpose": _unique_named_item(instance.get("params"), "Transpose"),
+        "walk_rate": _unique_named_item(instance.get("params"), "WalkRate"),
+        "walk_amount": _unique_named_item(instance.get("params"), "WalkAmt"),
+        "walk_bias": _unique_named_item(instance.get("params"), "WalkBias"),
         "record_toggle": _unique_named_item(instance.get("params"), "RecordToggle"),
     }
-    if trigger is None or sync_request is None or chunks is None or record_sync is None or any(
-        param is None for param in params.values()
+    if (
+        trigger is None
+        or sync_request is None
+        or chunks is None
+        or record_sync is None
+        or playback_position is None
+        or any(param is None for param in params.values())
     ):
         return None
     return ResolvedSurface(
         instance_id=str(instance.get("id", "")),
         params={key: param for key, param in params.items() if param is not None},
-        state={"overview_chunks": chunks, "record_sync": record_sync},
+        state={
+            "overview_chunks": chunks,
+            "record_sync": record_sync,
+            "playback_position": playback_position,
+        },
         inputs={"request_overview": trigger, "request_record_sync": sync_request},
     )
 
@@ -71,6 +94,10 @@ def normalize_record_sync(value: Any) -> float | None:
     if not math.isfinite(phase) or phase < 0.0 or phase > 1.0:
         return None
     return phase
+
+
+def normalize_playback_position(value: Any) -> float | None:
+    return normalize_record_sync(value)
 
 
 def projected_record_sync(

@@ -225,14 +225,20 @@ def _ring_buffer_ui() -> ShadowboxUI:
         "name": "ShadowGrain",
         "label": "Shadow Grain",
         "params": [
-            _param("Rate", value=20.0, minimum=0.0, maximum=100.0, metadata={"unit": "hz"}),
-            _param("Position", value=0.5, minimum=0.0, maximum=1.0),
+            _param("GrainTriggerRate", value=20.0, minimum=0.0, maximum=100.0, metadata={"unit": "hz"}),
             _param("GrainDuration", value=300.0, minimum=0.0, maximum=1000.0, metadata={"unit": "ms"}),
             _param("Transpose", value=0.0, minimum=-60.0, maximum=60.0, metadata={"unit": "st"}),
+            _param("WalkRate", value=0.0, minimum=-5.0, maximum=5.0, metadata={"unit": "ms"}),
+            _param("WalkAmt", value=0.0, minimum=-1.0, maximum=1.0),
+            _param("WalkBias", value=0.0, minimum=-1.0, maximum=1.0),
             _param("RecordToggle", value="Off", minimum=None, maximum=None),
         ],
         "inputs": [_input("getrecordsync"), _input("itriggeroverview")],
-        "state": [_state("overviewchunks", [32.0] + [0.0] * 50), _state("recordsync", [0.25])],
+        "state": [
+            _state("overviewchunks", [32.0] + [0.0] * 50),
+            _state("PlaybackPosition", [0.5]),
+            _state("recordsync", [0.25]),
+        ],
     }
     ui = _surface_ui(instance)
     columns = []
