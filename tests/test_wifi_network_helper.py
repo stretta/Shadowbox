@@ -9,6 +9,40 @@ HELPER = Path(__file__).resolve().parents[1] / "tools" / "wifi_network.sh"
 
 
 class WifiNetworkHelperTests(unittest.TestCase):
+    def test_password_update_targets_exact_connection_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            log_path = temp_path / "nmcli.log"
+            nmcli_path = temp_path / "nmcli"
+            nmcli_path.write_text(
+                """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${NMCLI_LOG}"
+""",
+                encoding="utf-8",
+            )
+            nmcli_path.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = f"{temp_path}:{env['PATH']}"
+            env["NMCLI_LOG"] = str(log_path)
+
+            result = subprocess.run(
+                [str(HELPER), "update-password", "stage-profile", "correct horse"],
+                capture_output=True,
+                check=False,
+                env=env,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                log_path.read_text(encoding="utf-8").splitlines(),
+                [
+                    "connection modify id stage-profile 802-11-wireless-security.psk correct horse",
+                    "connection up id stage-profile",
+                ],
+            )
+
     def test_retry_replaces_password_on_existing_profile(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)

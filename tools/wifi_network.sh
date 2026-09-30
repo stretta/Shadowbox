@@ -4,7 +4,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: wifi_network.sh <list|rescan|status|connect|connect-new> [connection-id|ssid] [password]
+Usage: wifi_network.sh <list|rescan|status|connect|connect-new|update-password> [connection-id|ssid] [password]
 EOF
 }
 
@@ -63,6 +63,22 @@ connect_new_network() {
   fi
 }
 
+update_saved_network_password() {
+  local connection_id="$1"
+  local password="$2"
+  if [[ -z "${connection_id}" ]]; then
+    echo "connection id required" >&2
+    exit 1
+  fi
+  if [[ -z "${password}" ]]; then
+    echo "password required" >&2
+    exit 1
+  fi
+
+  nmcli connection modify id "${connection_id}" 802-11-wireless-security.psk "${password}"
+  nmcli connection up id "${connection_id}"
+}
+
 cmd="${1:-}"
 case "${cmd}" in
   list)
@@ -86,6 +102,10 @@ case "${cmd}" in
   connect-new)
     require_nmcli
     connect_new_network "${2:-}" "${3:-}"
+    ;;
+  update-password)
+    require_nmcli
+    update_saved_network_password "${2:-}" "${3:-}"
     ;;
   *)
     usage >&2

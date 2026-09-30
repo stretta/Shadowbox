@@ -164,6 +164,9 @@ class UIState:
     system_cursor: int = 0
     network_cursor: int = 0
     wifi_network_cursor: int = 0
+    wifi_network_action_cursor: int = 1
+    wifi_network_action_connection_id: str = ""
+    wifi_network_action_ssid: str = ""
     system_audio_cursor: int = 0
     transport_cursor: int = 0
     hdmi_mirror_cursor: int = 0
@@ -730,6 +733,9 @@ class ShadowboxUI:
         self.state.system_cursor = 1
         self.state.network_cursor = 1 if self.network_value_rows else 0
         self.state.wifi_network_cursor = self.wifi_network_initial_cursor()
+        self.state.wifi_network_action_cursor = 1
+        self.state.wifi_network_action_connection_id = ""
+        self.state.wifi_network_action_ssid = ""
         self.state.system_audio_cursor = 1
         self.state.transport_cursor = 1
         self.state.transport_locate_preview = None
@@ -2321,7 +2327,8 @@ class ShadowboxUI:
                 ssid = str(item.get("ssid", "") or "").strip()
                 if not ssid:
                     continue
-                rows.append(MenuRow(ssid, current=bool(item.get("connected")) or (self.network_wifi_connected and ssid == current_ssid)))
+                connected = bool(item.get("connected")) or (self.network_wifi_connected and ssid == current_ssid)
+                rows.append(MenuRow(ssid, current=connected and not bool(self.state.network_error_message)))
             if len(rows) == 1:
                 rows.append(MenuRow("no networks"))
         rows.append(MenuRow("RESCAN", action=True))
@@ -2433,6 +2440,12 @@ class ShadowboxUI:
         if self.state.name_editor_context == "software_update_password":
             return "SUDO PASSWORD"
         return "NAME"
+
+    @property
+    def name_editor_placeholder(self) -> str:
+        if self.state.name_editor_context in {"wifi_password", "software_update_password"}:
+            return "Password"
+        return "Name"
 
     @property
     def name_editor_confirm_label(self) -> str:
@@ -2653,7 +2666,17 @@ class ShadowboxUI:
             self.state.name_editor_draft = value
             self.queue_action(UIAction(kind="save_set", path=self.state.name_editor_path, value=value))
         elif self.state.name_editor_context == "wifi_password" and self.state.pending_wifi_ssid:
-            self.queue_action(UIAction(kind="connect_wifi_new", ssid=self.state.pending_wifi_ssid, value=value))
+            if self.state.name_editor_path:
+                self.queue_action(
+                    UIAction(
+                        kind="connect_wifi_password",
+                        ssid=self.state.name_editor_path,
+                        path=self.state.pending_wifi_ssid,
+                        value=value,
+                    )
+                )
+            else:
+                self.queue_action(UIAction(kind="connect_wifi_new", ssid=self.state.pending_wifi_ssid, value=value))
             self.state.ui_mode = "WIFI_NETWORKS"
             self.state.name_editor_draft = ""
             self.state.pending_wifi_ssid = ""
@@ -3407,14 +3430,35 @@ class ShadowboxUI:
         text = str(security or "").strip()
         return bool(text and text != "--")
 
-    def _begin_wifi_password_editor(self, ssid: str) -> None:
+    def _begin_wifi_password_editor(
+        self,
+        ssid: str,
+        *,
+        connection_id: str = "",
+        return_mode: str = "WIFI_NETWORKS",
+    ) -> None:
         self.state.pending_wifi_ssid = str(ssid or "").strip()
         self._begin_name_editor(
             context="wifi_password",
-            path="",
+            path=str(connection_id or "").strip(),
             initial_draft="",
-            return_mode="WIFI_NETWORKS",
+            return_mode=return_mode,
         )
+
+    @property
+    def wifi_network_action_items(self) -> list[str]:
+        return ["..", "CONNECT", "CHANGE PASSWORD"]
+
+    def _begin_wifi_network_actions(self, network: dict) -> bool:
+        connection_id = str(network.get("id", "") or "").strip()
+        ssid = str(network.get("ssid", "") or "").strip()
+        if not connection_id or not ssid:
+            return False
+        self.state.wifi_network_action_connection_id = connection_id
+        self.state.wifi_network_action_ssid = ssid
+        self.state.wifi_network_action_cursor = 1
+        self.state.ui_mode = "WIFI_NETWORK_ACTIONS"
+        return True
 
     def begin_wifi_password_retry(self, connection_id_or_ssid: str) -> bool:
         """Reopen password entry after NetworkManager rejects saved credentials."""
@@ -3425,7 +3469,7 @@ class ShadowboxUI:
             connection_id = str(network.get("id", "") or "").strip()
             ssid = str(network.get("ssid", "") or "").strip()
             if target in {connection_id, ssid} and ssid:
-                self._begin_wifi_password_editor(ssid)
+                self._begin_wifi_password_editor(ssid, connection_id=connection_id if target == connection_id else "")
                 return True
         return False
 
@@ -3798,6 +3842,7 @@ class ShadowboxUI:
             "GRAPH_STARTUP",
             "GRAPH_STARTUP_SET_LIST",
             "WIFI_NETWORKS",
+            "WIFI_NETWORK_ACTIONS",
             "NAME_EDITOR",
             "NAME_INLINE_EDITOR",
             "NAME_OVERWRITE_CONFIRM",
@@ -4842,6 +4887,9 @@ class ShadowboxUI:
         if mode == "WIFI_NETWORKS":
             scroll_cursor("wifi_network_cursor", len(self.wifi_network_rows), first_index=0)
             return
+        if mode == "WIFI_NETWORK_ACTIONS":
+            scroll_cursor("wifi_network_action_cursor", len(self.wifi_network_action_items), first_index=0)
+            return
         if mode == "MAINT":
             scroll_cursor("maint_cursor", len(self.maint_menu_items))
             return
@@ -5034,6 +5082,8 @@ class ShadowboxUI:
             handled = self._set_touch_cursor("software_update_cursor", row_index, len(self.software_update_rows))
         elif mode == "WIFI_NETWORKS":
             handled = self._set_touch_cursor("wifi_network_cursor", row_index, len(self.wifi_network_rows))
+        elif mode == "WIFI_NETWORK_ACTIONS":
+            handled = self._set_touch_cursor("wifi_network_action_cursor", row_index, len(self.wifi_network_action_items))
         elif mode == "SYSTEM_AUDIO":
             handled = self._set_touch_cursor("system_audio_cursor", row_index, len(SYSTEM_AUDIO_ITEMS) + 1)
         elif mode == "MAINT":
@@ -5228,6 +5278,12 @@ class ShadowboxUI:
             self.state.software_update_cursor = self._cycle(self.state.software_update_cursor, len(self.software_update_rows), step)
         elif self.state.ui_mode == "WIFI_NETWORKS":
             self.state.wifi_network_cursor = self._cycle(self.state.wifi_network_cursor, len(self.wifi_network_rows), step)
+        elif self.state.ui_mode == "WIFI_NETWORK_ACTIONS":
+            self.state.wifi_network_action_cursor = self._cycle(
+                self.state.wifi_network_action_cursor,
+                len(self.wifi_network_action_items),
+                step,
+            )
         elif self.state.ui_mode == "SYSTEM_AUDIO":
             self.state.system_audio_cursor = self._cycle(self.state.system_audio_cursor, len(SYSTEM_AUDIO_ITEMS) + 1, step)
         elif self.state.ui_mode == "MAINT":
@@ -5915,13 +5971,28 @@ class ShadowboxUI:
                 network = self.selected_wifi_network
                 ssid = str(network.get("ssid", "") or "").strip()
                 if network.get("saved"):
-                    connection_id = str(network.get("id", "") or ssid).strip()
-                    if connection_id:
-                        self.queue_action(UIAction(kind="connect_wifi", ssid=connection_id, value=ssid))
+                    self._begin_wifi_network_actions(network)
                 elif ssid and self._wifi_security_requires_password(network.get("security", "")):
                     self._begin_wifi_password_editor(ssid)
                 elif ssid:
                     self.queue_action(UIAction(kind="connect_wifi_new", ssid=ssid, value=""))
+
+        elif self.state.ui_mode == "WIFI_NETWORK_ACTIONS":
+            choice = self.state.wifi_network_action_cursor
+            if choice == 0:
+                self.state.ui_mode = "WIFI_NETWORKS"
+            elif choice == 1:
+                connection_id = self.state.wifi_network_action_connection_id
+                ssid = self.state.wifi_network_action_ssid
+                if connection_id and ssid:
+                    self.queue_action(UIAction(kind="connect_wifi", ssid=connection_id, value=ssid))
+                    self.state.ui_mode = "WIFI_NETWORKS"
+            elif choice == 2 and self.state.wifi_network_action_ssid:
+                self._begin_wifi_password_editor(
+                    self.state.wifi_network_action_ssid,
+                    connection_id=self.state.wifi_network_action_connection_id,
+                    return_mode="WIFI_NETWORK_ACTIONS",
+                )
 
         elif self.state.ui_mode == "SYSTEM_AUDIO":
             if self.state.system_audio_cursor == 0:
@@ -6094,6 +6165,8 @@ class ShadowboxUI:
             self._cancel_name_editor()
         elif self.state.ui_mode == "WIFI_NETWORKS":
             self.state.ui_mode = "NETWORK"
+        elif self.state.ui_mode == "WIFI_NETWORK_ACTIONS":
+            self.state.ui_mode = "WIFI_NETWORKS"
         elif self.state.ui_mode == "GRAPH_STATUS":
             self.state.ui_mode = "GRAPH_SET_LIST"
         elif self.state.ui_mode == "GRAPH_STARTUP":

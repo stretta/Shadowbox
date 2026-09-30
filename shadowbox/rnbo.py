@@ -272,12 +272,16 @@ def _nmcli_connection_ssid(connection_id: str) -> str:
 
 def _discover_wifi_networks(*, active_scan: bool = True) -> list[dict[str, Any]]:
     saved_by_ssid: dict[str, str] = {}
+    saved_active_by_ssid: dict[str, bool] = {}
     for line in _nmcli_lines(["--fields", "NAME,TYPE,ACTIVE", "connection", "show"], timeout=2.0):
         fields = _split_nmcli_terse(line)
         if len(fields) >= 2 and fields[1] == "802-11-wireless" and fields[0].strip():
             connection_id = fields[0].strip()
             ssid = _nmcli_connection_ssid(connection_id) or connection_id
-            saved_by_ssid[ssid] = connection_id
+            is_active = len(fields) >= 3 and fields[2].strip().lower() == "yes"
+            if ssid not in saved_by_ssid or is_active or not saved_active_by_ssid.get(ssid, False):
+                saved_by_ssid[ssid] = connection_id
+                saved_active_by_ssid[ssid] = is_active
 
     networks_by_ssid: dict[str, dict[str, Any]] = {}
     lines = _wifi_scan_lines(active_scan=active_scan)

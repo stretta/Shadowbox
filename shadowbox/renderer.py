@@ -5434,7 +5434,7 @@ class ShadowboxRenderer:
         key_y = draft_y + draft_h + 18
 
         draft = ui.state.name_editor_draft or ""
-        draft_text = draft if draft else "Name"
+        draft_text = draft if draft else ui.name_editor_placeholder
         text_scale = 3
         text_weight = "semibold"
         line_h = self.display.line_height(text_scale, text_weight) if callable(getattr(self.display, "line_height", None)) else self._line_height(text_scale, text_weight)
@@ -5953,6 +5953,7 @@ class ShadowboxRenderer:
             "STATUS": "STATUS",
             "NETWORK": "NETWORK",
             "WIFI_NETWORKS": "WIFI NETWORKS",
+            "WIFI_NETWORK_ACTIONS": shorten(ui.state.wifi_network_action_ssid, 18) or "WIFI NETWORK",
             "SOFTWARE_UPDATE": "UPDATE",
             "ABOUT": "ABOUT",
             "BRICK_PANEL": "BRICK PANEL",
@@ -6125,6 +6126,8 @@ class ShadowboxRenderer:
             self.draw_software_update(ui)
         elif state.ui_mode == "WIFI_NETWORKS":
             self.draw_menu_rows(ui.wifi_network_rows, state.wifi_network_cursor, current_badge="CONNECTED")
+        elif state.ui_mode == "WIFI_NETWORK_ACTIONS":
+            self.draw_string_list(ui.wifi_network_action_items, state.wifi_network_action_cursor, action_indices={1, 2})
         elif state.ui_mode == "ABOUT":
             self.draw_about()
         elif state.ui_mode == "BRICK_PANEL":

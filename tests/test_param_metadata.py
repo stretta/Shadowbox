@@ -206,6 +206,25 @@ class ParamMetadataTests(unittest.TestCase):
             ],
         )
 
+    def test_wifi_list_prefers_active_duplicate_profile(self) -> None:
+        def duplicate_profile_nmcli(args, timeout=3.0):
+            if args[:2] == ["--fields", "NAME,TYPE,ACTIVE"]:
+                return [
+                    "active-profile:802-11-wireless:yes",
+                    "stale-profile:802-11-wireless:no",
+                ]
+            return []
+
+        with (
+            mock.patch("shadowbox.rnbo._nmcli_lines", side_effect=duplicate_profile_nmcli),
+            mock.patch("shadowbox.rnbo._nmcli_connection_ssid", return_value="studio"),
+            mock.patch("shadowbox.rnbo._wifi_scan_lines", return_value=["*:studio:80:WPA2"]),
+        ):
+            duplicate_networks = _discover_wifi_networks(active_scan=False)
+
+        self.assertEqual(duplicate_networks[0]["id"], "active-profile")
+        self.assertTrue(duplicate_networks[0]["connected"])
+
     def test_active_wifi_scan_includes_all_visible_networks(self) -> None:
         def fake_nmcli(args, timeout=3.0):
             if args[:2] == ["--fields", "NAME,TYPE,ACTIVE"]:

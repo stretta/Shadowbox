@@ -655,10 +655,41 @@ class InstanceActionTests(unittest.TestCase):
 
         ui.handle_event(types.SimpleNamespace(kind="short_press"))
 
-        action = ui.pop_actions()[0]
+        self.assertEqual(ui.state.ui_mode, "WIFI_NETWORK_ACTIONS")
+        self.assertEqual(ui.state.wifi_network_action_connection_id, "stage-profile")
+        self.assertEqual(ui.state.wifi_network_action_ssid, "stage")
+
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        action = next(action for action in ui.pop_actions() if action.kind == "connect_wifi")
         self.assertEqual(action.kind, "connect_wifi")
         self.assertEqual(action.ssid, "stage-profile")
         self.assertEqual(action.value, "stage")
+
+    def test_saved_wifi_network_has_explicit_change_password_action(self) -> None:
+        ui = ShadowboxUI()
+        ui.apply_runner_snapshot(self._snapshot_with_direct_network())
+        ui.state.ui_mode = "WIFI_NETWORKS"
+        ui.state.wifi_network_cursor = 2
+
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+        ui.state.wifi_network_action_cursor = 2
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        self.assertEqual(ui.state.ui_mode, "NAME_EDITOR")
+        self.assertEqual(ui.state.name_editor_context, "wifi_password")
+        self.assertEqual(ui.state.pending_wifi_ssid, "stage")
+        self.assertEqual(ui.state.name_editor_draft, "")
+        self.assertEqual(ui.name_editor_placeholder, "Password")
+        self.assertEqual(ui.state.name_editor_return_mode, "WIFI_NETWORK_ACTIONS")
+
+        ui.state.name_editor_draft = "replacement"
+        ui.handle_event(types.SimpleNamespace(kind="short_press"))
+
+        action = next(action for action in ui.pop_actions() if action.kind == "connect_wifi_password")
+        self.assertEqual(action.ssid, "stage-profile")
+        self.assertEqual(action.path, "stage")
+        self.assertEqual(action.value, "replacement")
 
     def test_wifi_network_picker_opens_password_editor_for_unsaved_secured_network(self) -> None:
         ui = ShadowboxUI()
@@ -748,6 +779,9 @@ class InstanceActionTests(unittest.TestCase):
         self.assertFalse(rows[1].current)
         self.assertTrue(rows[2].current)
         self.assertTrue(rows[-1].action)
+
+        ui.set_network_error("bad password")
+        self.assertFalse(any(row.current for row in ui.wifi_network_rows))
 
     def test_renderer_draw_network_uses_network_value_rows_on_oled(self) -> None:
         ui = ShadowboxUI()

@@ -222,10 +222,16 @@ class NetworkOperationCoordinator:
                     ok, error = self.wifi_helper("connect", args[0])
                 elif kind == "connect_wifi_new":
                     ok, error = self.wifi_helper("connect-new", *args)
+                elif kind == "connect_wifi_password":
+                    ok, error = self.wifi_helper("update-password", args[0], args[2])
                 else:
                     raise ValueError(f"Unknown network operation: {kind}")
                 if ok and kind.startswith("connect_wifi"):
-                    expected_ssid = str(args[1] if kind == "connect_wifi" and len(args) > 1 else args[0])
+                    expected_ssid = str(
+                        args[1]
+                        if kind in {"connect_wifi", "connect_wifi_password"} and len(args) > 1
+                        else args[0]
+                    )
                     network = self._settle_wifi_network(expected_ssid)
                 else:
                     network = self.rnbo.discover_network_status()

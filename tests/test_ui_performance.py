@@ -122,6 +122,26 @@ class NetworkOperationCoordinatorTests(unittest.TestCase):
         finally:
             coordinator.stop()
 
+    def test_password_update_targets_exact_saved_profile(self):
+        helper_calls = []
+        coordinator = NetworkOperationCoordinator(
+            _RNBO(),
+            lambda *_: (True, ""),
+            lambda *args: (helper_calls.append(args) or (False, "bad password")),
+        )
+        coordinator.start()
+        try:
+            coordinator.request("connect_wifi_password", "stage-profile", "stage", "replacement")
+            deadline = time.monotonic() + 1.0
+            results = []
+            while not results and time.monotonic() < deadline:
+                results.extend(coordinator.drain())
+                time.sleep(0.005)
+            self.assertEqual(helper_calls, [("update-password", "stage-profile", "replacement")])
+            self.assertEqual(results[0].target, "stage-profile")
+        finally:
+            coordinator.stop()
+
     def test_successful_wifi_connection_waits_for_matching_nonempty_list(self):
         class _SettlingRNBO(_RNBO):
             def __init__(self):

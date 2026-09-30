@@ -1426,6 +1426,15 @@ def main():
                     ui.set_busy(True, "network")
                     network_operations.request("connect_wifi_new", action.ssid or "", str(action.value or ""))
 
+                elif action.kind == "connect_wifi_password":
+                    ui.set_busy(True, "network")
+                    network_operations.request(
+                        "connect_wifi_password",
+                        action.ssid or "",
+                        action.path or "",
+                        str(action.value or ""),
+                    )
+
                 elif action.kind == "rescan_wifi":
                     ui.set_busy(True, "network")
                     discovery.request("wifi_rescan", "explicit rescan")
